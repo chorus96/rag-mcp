@@ -256,6 +256,34 @@ sudo ./deploy/install.sh                 # 업그레이드 (설정·데이터 �
 sudo ./deploy/uninstall.sh [--purge]     # 제거 (--purge: 설정·데이터까지 삭제)
 ```
 
+### 사용자 모드 (`--user`)
+
+`./deploy/install.sh --user`는 root 없이 현재 사용자 홈에 설치합니다. 구성은 시스템 모드와 같고
+경로와 서비스 관리자만 다릅니다.
+
+| 구성 요소 | 위치 |
+|------|------|
+| 애플리케이션 / Python 가상환경 / Qdrant | `~/.local/share/rag-mcp/{app,venv,qdrant}` |
+| 설정 파일 | `~/.config/rag-mcp/rag-mcp.env` (권한 `600`, `RAG_KNOWLEDGE_DIR`가 홈 경로로 설정됨) |
+| 데이터 | `~/.local/share/rag-mcp/data/{knowledge,qdrant,fastembed_cache}` |
+| systemd 서비스 | `~/.config/systemd/user/{qdrant,rag-mcp}.service` ([`deploy/systemd/user/`](../deploy/systemd/user), 경로는 `%h`) |
+| 수집 명령 | `~/.local/bin/rag-ingest` |
+
+- 프로세스는 현재 사용자 권한으로 실행되며, 별도 시스템 사용자를 만들지 않습니다.
+- 사용자 서비스는 linger가 켜져 있어야(`loginctl enable-linger $USER`) 로그아웃 후에도 계속
+  실행되고 부팅 시 자동으로 시작됩니다. 설치 스크립트가 linger 상태를 확인해 안내합니다.
+- 사용자 유닛에는 `ProtectSystem` 같은 샌드박스 옵션을 넣지 않았습니다. 사용자 systemd에서는
+  배포판에 따라 이 옵션들이 동작하지 않거나 서비스 시작을 막을 수 있기 때문입니다.
+- `XDG_CONFIG_HOME`을 기본값(`~/.config`)이 아닌 곳으로 바꾼 환경은 지원하지 않습니다.
+
+```bash
+systemctl --user status qdrant rag-mcp      # 상태
+journalctl --user -u rag-mcp -f             # 로그
+systemctl --user restart rag-mcp            # 설정 변경 적용
+./deploy/install.sh --user                  # 업그레이드 (설정·데이터 유지)
+./deploy/uninstall.sh --user [--purge]      # 제거
+```
+
 > **설정 파일 형식 주의:** systemd의 `EnvironmentFile`은 `KEY=value  # 주석`처럼 같은 줄 끝의
 > 주석을 값의 일부로 읽습니다. 주석은 항상 별도 줄에 쓰세요.
 

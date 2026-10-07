@@ -1,0 +1,19 @@
+# rag-mcp MCP 서버 — 사용자 모드 (systemctl --user).
+# deploy/install.sh --user 가 ~/.config/systemd/user/ 에 설치합니다. %h = 홈 디렉터리.
+[Unit]
+Description=rag-mcp RAG memory MCP server (user mode)
+After=qdrant.service
+Wants=qdrant.service
+
+[Service]
+Type=simple
+WorkingDirectory=%h/.local/share/rag-mcp/app
+EnvironmentFile=%h/.config/rag-mcp/rag-mcp.env
+Environment=PYTHONUNBUFFERED=1
+Environment=FASTEMBED_CACHE_PATH=%h/.local/share/rag-mcp/data/fastembed_cache
+ExecStart=%h/.local/share/rag-mcp/venv/bin/python %h/.local/share/rag-mcp/app/server.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

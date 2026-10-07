@@ -120,6 +120,43 @@ journalctl -u rag-mcp -f                     # 서버 로그
 > 필요하면 설정 파일에 `HTTPS_PROXY`를 넣으세요. 내려받지 못하면 키워드(BM25) 검색 없이 의미
 > 검색만으로 동작합니다.
 
+### 사용자 모드 설치 (root 없이)
+
+관리자 권한이 없거나 개인 계정에만 설치하려면 `--user`로 설치하세요. 현재 사용자 홈 아래에
+설치되고, 서비스는 사용자 systemd(`systemctl --user`)로 실행됩니다.
+
+```bash
+./deploy/install.sh --user
+rag-ingest                                  # ~/.local/bin 이 PATH에 있어야 합니다
+```
+
+| 항목 | 시스템 모드 (`sudo`) | 사용자 모드 (`--user`) |
+|------|------|------|
+| 앱 / venv / Qdrant | `/opt/rag-mcp` | `~/.local/share/rag-mcp` |
+| 설정 파일 | `/etc/rag-mcp/rag-mcp.env` | `~/.config/rag-mcp/rag-mcp.env` |
+| 데이터 (문서, Qdrant, 캐시) | `/var/lib/rag-mcp` | `~/.local/share/rag-mcp/data` |
+| 서비스 | `systemctl ...` | `systemctl --user ...` |
+| 로그 | `journalctl -u rag-mcp` | `journalctl --user -u rag-mcp` |
+| 수집 | `sudo rag-ingest` | `rag-ingest` |
+| 제거 | `sudo ./deploy/uninstall.sh [--purge]` | `./deploy/uninstall.sh --user [--purge]` |
+
+이 문서의 다른 명령도 사용자 모드에서는 `sudo`를 빼고, `systemctl`을 `systemctl --user`로,
+설정 파일 경로를 `~/.config/rag-mcp/rag-mcp.env`로 바꿔 쓰면 됩니다.
+
+주의할 점:
+
+- **로그아웃하면 서비스가 멈춥니다.** 사용자 서비스는 기본적으로 로그인해 있는 동안만 실행됩니다.
+  계속 실행하고 부팅 시 자동으로 시작하려면 `loginctl enable-linger $USER`를 한 번 실행하세요
+  (배포판에 따라 관리자 권한이 필요할 수 있습니다).
+- **ssh 등으로 직접 로그인한 세션에서 설치하세요.** `su`나 `sudo -u`로 전환한 셸에서는 사용자
+  systemd에 연결되지 않아 설치 스크립트가 멈춥니다. 서비스 등록 없이 파일만 설치하려면
+  `SKIP_START=1 ./deploy/install.sh --user`를 쓰세요.
+- **Python venv 모듈**(Debian/Ubuntu의 `python3-venv`)이 없다면 그 설치만은 관리자에게
+  요청해야 합니다. Ollama도 이미 설치되어 있지 않다면, 공식 설치 스크립트 대신
+  [바이너리](https://github.com/ollama/ollama/releases)를 홈에 풀어 `ollama serve`로 실행할 수 있습니다.
+- 같은 서버에서 여러 사용자가 설치하면 포트(8084, 6333, 6334)가 겹치므로 한 명만 실행할 수
+  있습니다.
+
 ## MCP 클라이언트에 연결하기
 
 서버는 `http://localhost:8084/mcp`에서 **streamable-http**로 통신합니다.

@@ -1,0 +1,23 @@
+# Qdrant 벡터 DB — rag-mcp 사용자 모드 (systemctl --user).
+# deploy/install.sh --user 가 ~/.config/systemd/user/ 에 설치합니다. %h = 홈 디렉터리.
+[Unit]
+Description=Qdrant vector database (rag-mcp, user mode)
+
+[Service]
+Type=simple
+WorkingDirectory=%h/.local/share/rag-mcp/data/qdrant
+EnvironmentFile=%h/.config/rag-mcp/rag-mcp.env
+# 로컬에서만 접속하도록 127.0.0.1에 바인드합니다.
+Environment=QDRANT__SERVICE__HOST=127.0.0.1
+Environment=QDRANT__SERVICE__HTTP_PORT=6333
+Environment=QDRANT__SERVICE__GRPC_PORT=6334
+Environment=QDRANT__STORAGE__STORAGE_PATH=%h/.local/share/rag-mcp/data/qdrant/storage
+Environment=QDRANT__STORAGE__SNAPSHOTS_PATH=%h/.local/share/rag-mcp/data/qdrant/snapshots
+Environment=QDRANT__TELEMETRY_DISABLED=true
+# Qdrant는 빈 API 키도 키로 취급해 모든 요청을 거부하므로, 값이 있을 때만 넘깁니다.
+ExecStart=/bin/sh -c 'if [ -n "$QDRANT_API_KEY" ]; then export QDRANT__SERVICE__API_KEY="$QDRANT_API_KEY"; fi; exec %h/.local/share/rag-mcp/qdrant/qdrant'
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
