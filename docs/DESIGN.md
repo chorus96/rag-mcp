@@ -252,6 +252,12 @@ docker compose up -d --build
 | `EMBED_BATCH_SIZE` | `32` | 임베딩 요청당 청크 수. `ollama` 제공자에는 효과 없음 (단일 프롬프트 API) |
 | `QDRANT_UPSERT_BATCH` | `64` | 수집 중 Qdrant 업서트 요청당 포인트 수 |
 | `RAG_DEFAULT_LIMIT` / `RAG_MAX_LIMIT` | `5` / `20` | 검색 결과 개수 상한 |
+| `RERANK_PROVIDER` | `none` | 리랭커 제공자: `none`(비활성) 또는 `cohere`(Cohere/Jina 호환 `/rerank`) |
+| `RERANK_MODEL` | `rerank-multilingual-v3.0` | 리랭커 모델 (Cohere 다국어). Jina는 `jina-reranker-v2-base-multilingual` |
+| `RERANK_BASE_URL` | `https://api.cohere.com` | 리랭커 API 기본 URL (Jina는 `https://api.jina.ai/v1`) |
+| `RERANK_API_KEY` | _(미설정)_ | 리랭커 제공자 API 키 |
+| `RERANK_CANDIDATES` | `30` | 리랭킹 전에 가져오는 후보 수 |
+| `RERANK_TIMEOUT` | `30` | 리랭커 HTTP 타임아웃 (초) |
 | `MCP_PORT` | `8084` | 서버 포트 |
 
 ### 호스팅 / OpenAI 호환 임베딩 제공자 사용하기
