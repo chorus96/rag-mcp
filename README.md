@@ -1,7 +1,6 @@
 # rag-mcp
 
-**AI 어시스턴트용 RAG 메모리 서버**입니다. 런북, RCA(근본 원인 분석), 위키 내보내기 같은
-마크다운·PDF 문서를 색인해 두고, [Model Context Protocol](https://modelcontextprotocol.io)(MCP)로
+**AI 어시스턴트용 RAG 메모리 서버**입니다. 마크다운·PDF 문서를 색인해 두고, [Model Context Protocol](https://modelcontextprotocol.io)(MCP)로
 검색 도구를 제공합니다. Claude Code, Claude Desktop 등 MCP를 지원하는 클라이언트라면
 어디서든 "이 작업의 처리 절차는?", "그때 원인이 뭐였지?" 같은 질문에 여러분의 문서를 근거로
 답하게 할 수 있습니다. AI 에이전트는 운영 중인 시스템을 디버깅하면서 필요할 때마다 과거 맥락을 직접
