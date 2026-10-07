@@ -342,9 +342,9 @@ if documents.WRITE_ENABLED:
         """지식 베이스에 마크다운 문서를 추가하고 바로 검색할 수 있게 색인합니다.
 
         사용자가 문서 추가(저장)를 명시적으로 요청했을 때만 사용하세요. 대화 내용을 임의로 저장하지
-        마세요. 문서는 서버의 문서 디렉터리 중 `draft/<doc_type>s/<제목>.md` 에 초안으로 저장되고 바로
+        마세요. 문서는 서버의 문서 디렉터리 중 `draft/<제목>.md` 에 초안으로 저장되고 바로
         검색됩니다. 응답의 `source`가 그 경로입니다. 같은 경로에 문서가 있으면 overwrite=true 일 때만
-        바꿉니다. 사람이 관리하는 정식 문서(draft/ 밖)는 이 도구로 만들거나 바꿀 수 없습니다.
+        바꿉니다. 사람이 관리하는 정식 문서(official/)는 이 도구로 만들거나 바꿀 수 없습니다.
 
         Args:
             title: 문서 제목. 파일 이름도 여기서 만들어집니다.
@@ -367,7 +367,7 @@ if documents.WRITE_ENABLED:
         파일이 이미 없고 청크만 남아 있어도 청크를 정리합니다.
 
         Args:
-            source: 문서 디렉터리 기준 문서 경로 (예: 'draft/runbooks/longhorn-볼륨-복구-절차.md').
+            source: 문서 디렉터리 기준 문서 경로 (예: 'draft/longhorn-볼륨-복구-절차.md').
         """
         return documents.delete_document(source)
 

@@ -144,6 +144,8 @@ if [ -z "$(ls -A "$DATA_DIR/knowledge")" ]; then
     log "샘플 문서 복사 → $DATA_DIR/knowledge"
     cp -r "$SRC_DIR/knowledge/." "$DATA_DIR/knowledge/"
 fi
+# 정식 문서(official/)와 모델이 만든 초안(draft/) 폴더
+install -d -m 755 "$DATA_DIR/knowledge/official" "$DATA_DIR/knowledge/draft"
 
 # --- 6. systemd 서비스 + 수집 명령 ---------------------------------------------------
 log "systemd 사용자 서비스 등록 → $UNIT_DIR"

@@ -270,16 +270,23 @@ RAG_MCP_URL=http://10.0.0.5:8084/mcp claude
 
 ## 문서 추가하기
 
-문서 디렉터리(기본값 `~/.local/share/rag-mcp/data/knowledge`, 설정 파일의 `RAG_KNOWLEDGE_DIR`)에 마크다운이나
-PDF를 넣고 수집 명령을 실행합니다. 서버 재시작은 필요 없습니다.
+문서 디렉터리(기본값 `~/.local/share/rag-mcp/data/knowledge`, 설정 파일의 `RAG_KNOWLEDGE_DIR`)는 두 폴더로
+나뉩니다.
+
+| 폴더 | 내용 |
+|------|------|
+| `official/` | 사람이 관리하는 정식 문서 |
+| `draft/` | 모델이 MCP 쓰기 도구로 만든 초안 (사람이 검토한 뒤 `rag-promote`로 `official/`에 올림) |
+
+정식 문서는 `official/`에 마크다운이나 PDF를 넣고 수집 명령을 실행합니다. 서버 재시작은 필요 없습니다.
 
 ```bash
-cp my-runbook.md ~/.local/share/rag-mcp/data/knowledge/runbooks/
+cp my-runbook.md ~/.local/share/rag-mcp/data/knowledge/official/
 rag-ingest
 ```
 
-하위 폴더 이름이 기본 문서 유형이 됩니다(`knowledge/runbooks/*` → `runbook`,
-`knowledge/rcas/*` → `rca`). 마크다운은 선택적으로 YAML front matter를 쓸 수 있습니다.
+문서 유형(`runbook`, `rca` 등)은 front matter의 `type`으로 정합니다. `type`이 없으면 `official/` 아래 하위 폴더
+이름이 유형이 되고(`official/runbooks/*` → `runbook`), 하위 폴더도 없으면 `note`입니다.
 
 ```markdown
 ---
@@ -317,24 +324,23 @@ systemctl --user restart rag-mcp
 그다음 "방금 정리한 대응 절차를 런북으로 지식 베이스에 추가해 줘"처럼 요청하면, 모델이
 `rag_add_document` 도구로 문서를 저장합니다.
 
-- **모델은 문서 디렉터리의 `draft/` 아래에만 추가·삭제할 수 있습니다.** 사람이 관리하는 정식 문서(`runbooks/`,
-  `rcas/` 등)는 모델이 만들거나 지울 수 없습니다.
-- 문서는 `draft/<문서 유형>s/<제목>.md` 파일로 저장되고 바로 검색됩니다(예: `draft/runbooks/longhorn-볼륨-복구.md`).
+- **모델은 문서 디렉터리의 `draft/` 아래에만 추가·삭제할 수 있습니다.** 사람이 관리하는 정식 문서(`official/`)는 모델이 만들거나 지울 수 없습니다.
+- 문서는 `draft/<제목>.md` 파일로 저장되고 바로 검색됩니다(예: `draft/longhorn-볼륨-복구.md`). 문서 유형은 front matter에 들어갑니다.
   파일로 남으므로 `rag-ingest --recreate`로 재구축해도 사라지지 않습니다.
 - 초안을 검토한 뒤 정식 문서로 올리려면 서버에서 `rag-promote`를 쓰세요. 승격은 사람만 할 수 있습니다
   (MCP 도구가 아님).
 
   ```bash
   rag-promote                                        # 초안 목록과 옮겨질 위치
-  rag-promote draft/runbooks/longhorn-볼륨-복구.md    # → runbooks/longhorn-볼륨-복구.md 로 옮기고 색인
-  rag-promote --overwrite draft/runbooks/...          # 정식 위치에 같은 이름의 문서가 있으면 바꾸기
+  rag-promote draft/longhorn-볼륨-복구.md             # → official/longhorn-볼륨-복구.md 로 옮기고 색인
+  rag-promote --overwrite draft/...                   # 정식 위치에 같은 이름의 문서가 있으면 바꾸기
   ```
 
-  승격하면 `draft/<경로>`가 `<경로>`로 옮겨져 바로 색인되고, 초안 파일과 초안 청크는 지워집니다. 색인에
+  승격하면 `draft/<경로>`가 `official/<경로>`로 옮겨져 바로 색인되고, 초안 파일과 초안 청크는 지워집니다. 색인에
   실패하면 아무것도 바뀌지 않습니다.
 - 같은 제목의 문서가 있으면 덮어쓰기를 명시해야만 바꿉니다.
 - "그 런북 지워 줘"처럼 요청하면 `rag_delete_document` 도구가 문서 파일과 검색용 청크를 함께 지웁니다.
-  삭제할 문서는 검색 결과의 `source`(예: `draft/runbooks/longhorn-볼륨-복구.md`)로 지정되며, 되돌릴 수 없습니다.
+  삭제할 문서는 검색 결과의 `source`(예: `draft/longhorn-볼륨-복구.md`)로 지정되며, 되돌릴 수 없습니다.
 
 > ⚠️ **기본으로 꺼져 있습니다.** 켜면 모델이 대화 중에 지식 베이스에 기록하거나 문서를 지울 수 있어, 잘못된
 > 내용이 쌓이거나 필요한 문서가 사라질 수 있습니다. 신뢰하는 사용자와 클라이언트만 접속하는 서버에서만 켜세요. 꺼져 있으면 도구가 등록되지
@@ -417,7 +423,7 @@ EMBEDDINGS_MODEL=text-embedding-3-small
 | `tools/embeddings.py`, `tools/vectorstore.py`, `tools/reranker.py` | 임베딩, Qdrant, 리랭킹 |
 | `requirements.txt` | Python 의존성 |
 | `deploy/` | 설치·제거 스크립트, systemd 유닛, `rag-ingest`·`rag-promote` 명령 |
-| `knowledge/` | 샘플 문서 |
+| `knowledge/official/` | 샘플 문서 |
 | `.claude-plugin/marketplace.json` | Claude Code 플러그인 마켓플레이스 정의 |
 | `plugins/rag-mcp/` | Claude Code 플러그인 (MCP 서버 설정, `rag-knowledge` 스킬) |
 | `docs/DESIGN.md` | 설계 문서 (검색 파이프라인, 전체 환경 변수 표) |

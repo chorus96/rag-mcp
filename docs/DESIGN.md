@@ -151,7 +151,7 @@ ID가 문서 경로와 청크 번호에서 결정되므로, 같은 문서를 다
 ```markdown
 ---
 title: Longhorn 볼륨이 attaching 상태에서 멈춤
-type: rca             # runbook | rca | note | ...  (기본값: 폴더 이름)
+type: rca             # runbook | rca | note | ...  (기본값: 하위 폴더 이름, 없으면 note)
 tags: [longhorn, storage]
 component: longhorn   # 선택: 필터용
 cluster: prod-eu      # 선택: 필터용
@@ -159,8 +159,10 @@ cluster: prod-eu      # 선택: 필터용
 # 본문...
 ```
 
-`type`을 생략하면 상위 폴더 이름에서 끝의 `s`를 뗀 값이 됩니다(`runbooks/` → `runbook`,
-`rcas/` → `rca`). 최상위에 바로 둔 파일은 `note`입니다. `component`, `cluster`, `severity`는
+문서 디렉터리는 사람이 관리하는 정식 문서 `official/`과 모델이 만든 초안 `draft/`로 나뉩니다. 이 두 폴더는 문서의
+단계일 뿐 유형이 아니므로, `type`을 생략하면 그 아래 하위 폴더 이름에서 끝의 `s`를 뗀 값이 됩니다
+(`official/runbooks/` → `runbook`, `official/rcas/` → `rca`). 하위 폴더 없이 바로 둔 파일은 `note`입니다.
+그래서 `official/`이나 `draft/` 바로 아래 둔 문서는 front matter에 `type`을 쓰는 것을 권장합니다. `component`, `cluster`, `severity`는
 형식이 정해지지 않은 레이블이라 도메인에 맞게 자유롭게 써도 됩니다.
 
 ### 청킹
@@ -223,8 +225,8 @@ rag-ingest --recreate           # 컬렉션을 지우고 전체 재구축
 | 항목 | 동작 |
 |------|------|
 | 등록 | `RAG_MCP_WRITE=true`일 때만 서버 시작 시 도구를 등록. 꺼져 있으면 도구 목록에도 없음 |
-| 쓰기 범위 | 문서 디렉터리의 **`draft/` 아래만** 추가·삭제. 사람이 관리하는 정식 문서(`runbooks/`, `rcas/` 등)는 만들거나 지울 수 없음 |
-| 저장 위치 | `<문서 디렉터리>/draft/<doc_type>s/<제목>.md` (예: `draft/rcas/longhorn-볼륨-멈춤.md`) |
+| 쓰기 범위 | 문서 디렉터리의 **`draft/` 아래만** 추가·삭제. 사람이 관리하는 정식 문서(`official/`)는 만들거나 지울 수 없음 |
+| 저장 위치 | `<문서 디렉터리>/draft/<제목>.md` (예: `draft/longhorn-볼륨-멈춤.md`). 문서 유형은 폴더가 아니라 front matter의 `type`에 기록 |
 | 파일 내용 | 인자로 받은 `title`, `type`, `tags`, `component`, `cluster`를 front matter로 쓰고 그 아래 본문 |
 | 색인 | 저장 직후 `ingest.ingest_file`로 색인 — `rag-ingest`와 같은 코드라 청크 ID·페이로드가 같음 |
 | 덮어쓰기 | 같은 경로에 파일이 있으면 `overwrite=true`일 때만 바꿈 (청크 수가 줄면 남은 청크도 정리) |
@@ -236,9 +238,10 @@ rag-ingest --recreate           # 컬렉션을 지우고 전체 재구축
 - **파일로 먼저 저장합니다.** 지식 베이스의 원본은 문서 디렉터리입니다. 파일로 남겨야 `rag-ingest --recreate`로
   재구축해도 추가한 문서가 사라지지 않고, 사람이 직접 확인·수정·삭제할 수 있습니다.
 - **경로는 서버가 정합니다.** 호출자는 제목과 문서 유형만 넘기고, 파일 이름은 제목에서 만든 안전한 이름(글자·숫자·`-`)
-  입니다. `doc_type`도 소문자·숫자·`-`·`_`만 허용하므로 `draft/` 밖에 쓸 수 없습니다.
+  입니다. 경로에는 `draft/`와 이 파일 이름만 쓰이므로 `draft/` 밖에 쓸 수 없습니다. `doc_type`은 front matter와 검색
+  필터 값이 되므로 소문자·숫자·`-`·`_`만 허용합니다.
 - **모델은 `draft/`에만 씁니다.** 모델이 만든 문서는 초안으로 `draft/`에 모이고 저장 즉시 검색됩니다. 사람이
-  검토한 뒤 `rag-promote`로 정식 폴더에 올리고(아래 "초안 승격"), 사람이 관리하는 정식 문서는 모델이 바꾸거나
+  검토한 뒤 `rag-promote`로 정식 폴더(`official/`)에 올리고(아래 "초안 승격"), 사람이 관리하는 정식 문서는 모델이 바꾸거나
   지울 수 없습니다. 검색 결과의 `source`가
   `draft/`로 시작하면 초안입니다.
 - **색인에 실패해도 파일은 남깁니다.** 응답에 `saved: true`와 오류를 함께 돌려주므로, 원인을 고친 뒤
@@ -257,14 +260,14 @@ rag-ingest --recreate           # 컬렉션을 지우고 전체 재구축
 
 ```bash
 rag-promote                                    # 초안 목록과 옮겨질 위치
-rag-promote draft/runbooks/foo.md [...]        # draft/runbooks/foo.md → runbooks/foo.md
-rag-promote --overwrite draft/runbooks/foo.md  # 정식 위치에 같은 이름의 문서가 있으면 바꾸기
+rag-promote draft/foo.md [...]                 # draft/foo.md → official/foo.md
+rag-promote --overwrite draft/foo.md           # 정식 위치에 같은 이름의 문서가 있으면 바꾸기
 ```
 
 | 단계 | 동작 |
 |------|------|
 | 1. 확인 | `source`가 `draft/` 안의 `.md`/`.pdf` 파일인지 확인. 정식 위치에 문서가 있으면 `--overwrite` 없이는 중단 |
-| 2. 복사 | 초안을 정식 위치(`draft/` 를 뺀 같은 경로)에 복사. 덮어쓸 때는 기존 내용을 메모리에 백업 |
+| 2. 복사 | 초안을 정식 위치(`draft/`를 `official/`로 바꾼 같은 경로)에 복사. 덮어쓸 때는 기존 내용을 메모리에 백업 |
 | 3. 색인 | 정식 위치를 `ingest_file`로 색인 (`rag-ingest`와 같은 청크 ID) |
 | 4. 정리 | 초안의 청크와 파일을 삭제 |
 

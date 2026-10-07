@@ -5,13 +5,13 @@
   - add_document (rag_add_document):    문서를 문서 디렉터리의 draft/ 아래 마크다운 파일로 저장한 뒤 rag-ingest와
                                          같은 방식(ingest.ingest_file)으로 바로 색인
   - delete_document (rag_delete_document): draft/ 아래 문서 파일과 그 문서의 청크(포인트)를 함께 삭제
-  - list_drafts / promote_document:         초안 목록과, 검토한 초안을 정식 폴더로 옮기는 승격.
+  - list_drafts / promote_document:         초안 목록과, 검토한 초안을 정식 폴더(official/)로 옮기는 승격.
                                              사람이 쓰는 rag-promote 명령(promote.py)만 호출하며 MCP 도구가
                                              아닙니다 (모델은 정식 폴더에 쓸 수 없음)
 
-  MCP로는 문서 디렉터리의 draft/ 하위만 추가·삭제할 수 있습니다. 사람이 관리하는 문서(runbooks/,
-  rcas/ 등)는 모델이 바꾸거나 지울 수 없고, 모델이 만든 문서는 draft/에 모여 사람이 검토한 뒤
-  정식 폴더로 옮길 수 있습니다. draft/ 문서도 저장 즉시 검색됩니다.
+  문서 디렉터리는 정식 문서(official/)와 초안(draft/)으로 나뉩니다. MCP로는 draft/ 하위만 추가·삭제할 수
+  있습니다. 사람이 관리하는 정식 문서(official/)는 모델이 바꾸거나 지울 수 없고, 모델이 만든 문서는 draft/에
+  모여 사람이 검토한 뒤 official/로 옮길 수 있습니다. draft/ 문서도 저장 즉시 검색됩니다.
 
 왜 파일로도 저장하나
   지식 베이스의 원본은 문서 디렉터리입니다. 파일로 남겨 두면 rag-ingest --recreate 로 재구축해도
@@ -20,7 +20,7 @@
 
 안전장치
   - 기본으로 꺼져 있습니다. 설정 파일에서 RAG_MCP_WRITE=true 일 때만 server.py가 도구를 등록합니다.
-  - 파일 경로는 서버가 정합니다(draft/ + 문서 유형 폴더 + 제목에서 만든 파일 이름). 호출자가 경로를 지정할 수
+  - 파일 경로는 서버가 정합니다(draft/ + 제목에서 만든 파일 이름). 호출자가 경로를 지정할 수
     없으므로 문서 디렉터리 밖에 쓸 수 없습니다.
   - 같은 이름의 파일이 있으면 overwrite=True 일 때만 덮어씁니다.
   - 삭제는 draft/ 안의 .md / .pdf 문서만 대상으로 합니다. 경로를 정규화해 draft/ 밖을
@@ -54,10 +54,11 @@ KNOWLEDGE_DIR = Path(os.path.expanduser(
 ))
 MAX_DOC_CHARS = int(os.environ.get("RAG_MAX_DOC_CHARS", "200000"))
 
-# MCP 쓰기 도구가 다룰 수 있는 하위 디렉터리 (문서 디렉터리 기준).
+# 문서 디렉터리의 두 하위 디렉터리: MCP 쓰기 도구가 다룰 수 있는 초안, 사람이 관리하는 정식 문서.
 DRAFT_SUBDIR = "draft"
+OFFICIAL_SUBDIR = "official"
 
-# 문서 유형은 폴더 이름이 되므로 안전한 문자만 허용합니다.
+# 문서 유형은 front matter와 검색 필터 값이 되므로 안전한 문자만 허용합니다.
 _DOC_TYPE_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,31}$")
 
 
@@ -72,11 +73,6 @@ def _slug(title: str) -> str:
 def _draft_dir() -> Path:
     """MCP 쓰기 도구가 다룰 수 있는 디렉터리 (문서 디렉터리/draft)."""
     return KNOWLEDGE_DIR / DRAFT_SUBDIR
-
-
-def _folder_for(doc_type: str) -> str:
-    """문서 유형의 폴더 이름. 기존 관례(runbooks/, rcas/)에 맞춰 복수형으로 둡니다."""
-    return doc_type if doc_type.endswith("s") else f"{doc_type}s"
 
 
 def _render(title: str, content: str, doc_type: str, tags: list[str],
@@ -115,7 +111,7 @@ def add_document(title: str, content: str, doc_type: str = "note", tags: list[st
                 "error": "doc_type must be lowercase letters, digits, '-' or '_' (e.g. runbook, rca)"}
 
     # 저장은 draft/ 아래로만 합니다. source와 색인 기준은 rag-ingest와 같게 문서 디렉터리로 둡니다.
-    path = _draft_dir() / _folder_for(doc_type) / f"{_slug(title)}.md"
+    path = _draft_dir() / f"{_slug(title)}.md"
     source = str(path.relative_to(KNOWLEDGE_DIR)).replace(os.sep, "/")
     existed = path.exists()
     if existed and not overwrite:
@@ -185,7 +181,7 @@ def delete_document(source: str, client: QdrantClient | None = None) -> dict[str
     source = (source or "").strip()
     if not source:
         return {"status": "error",
-                "error": f"source must be a non-empty path (e.g. {DRAFT_SUBDIR}/runbooks/foo.md)"}
+                "error": f"source must be a non-empty path (e.g. {DRAFT_SUBDIR}/foo.md)"}
     resolved = _resolve_source(source)
     if resolved is None:
         return {"status": "error",
@@ -228,13 +224,13 @@ def list_drafts() -> list[dict[str, str]]:
             meta, _ = ingest._parse_front_matter(path.read_text(encoding="utf-8"))
             title = str(meta.get("title") or title)
         drafts.append({"source": source, "title": title,
-                       "promote_to": source[len(DRAFT_SUBDIR) + 1:]})
+                       "promote_to": f"{OFFICIAL_SUBDIR}/{source[len(DRAFT_SUBDIR) + 1:]}"})
     return drafts
 
 
 def promote_document(source: str, overwrite: bool = False,
                      client: QdrantClient | None = None) -> dict[str, Any]:
-    """검토한 초안을 정식 폴더로 옮깁니다: draft/<경로> → <경로>.
+    """검토한 초안을 정식 폴더로 옮깁니다: draft/<경로> → official/<경로>.
 
     순서: 정식 위치에 복사 → 색인 → 성공하면 초안의 청크와 파일을 삭제. 색인에 실패하면 정식 위치를
     원래대로 되돌리고 초안은 그대로 둡니다. 정식 위치에 이미 문서가 있으면 overwrite=True 일 때만 바꿉니다.
@@ -243,16 +239,14 @@ def promote_document(source: str, overwrite: bool = False,
     resolved = _resolve_source(source) if source else None
     if resolved is None:
         return {"status": "error", "source": source,
-                "error": f"source must be a document under {DRAFT_SUBDIR}/ (e.g. {DRAFT_SUBDIR}/runbooks/foo.md)"}
+                "error": f"source must be a document under {DRAFT_SUBDIR}/ (e.g. {DRAFT_SUBDIR}/foo.md)"}
     path, source = resolved
     if path.suffix.lower() not in (".md", ".pdf") or not path.is_file():
         return {"status": "error", "source": source, "error": f"no draft document found at {source}"}
 
-    target_rel = path.relative_to(_draft_dir().resolve())
+    target_rel = Path(OFFICIAL_SUBDIR) / path.relative_to(_draft_dir().resolve())
     dest = KNOWLEDGE_DIR / target_rel
     target = str(target_rel).replace(os.sep, "/")
-    if target.split("/", 1)[0] == DRAFT_SUBDIR:
-        return {"status": "error", "source": source, "error": "cannot promote into the draft directory"}
     existed = dest.exists()
     if existed and not overwrite:
         return {"status": "error", "source": source, "target": target,

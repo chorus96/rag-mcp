@@ -1,7 +1,7 @@
 """tools/documents.py, tools/server.py 테스트 — MCP 쓰기 도구 (문서 추가·삭제)와 초안 승격.
 
 확인하는 것
-  - 파일 저장: draft/<문서 유형 폴더> 아래 제목으로 만든 파일 이름에 front matter + 본문으로 저장
+  - 파일 저장: draft/ 아래 제목으로 만든 파일 이름에 front matter + 본문으로 저장
   - 저장한 파일을 ingest_file 로 색인하고, source 가 rag-ingest 와 같은 형식(상대 경로)임
   - 입력 검증: 빈 제목·본문, 너무 긴 본문, 잘못된 doc_type 은 저장하지 않음
   - 덮어쓰기: 같은 경로에 문서가 있으면 overwrite=True 일 때만 바꿈
@@ -9,7 +9,7 @@
   - 색인 실패: 파일은 남기고 오류를 돌려줌
   - 삭제: 파일과 청크를 함께 지우고, 파일 없이 남은 청크도 정리. draft/ 밖·문서가 아닌 파일은 거부
   - draft/ 제한: MCP로는 draft/ 밖(사람이 관리하는 정식 문서)을 만들거나 지울 수 없음
-  - 초안 승격(rag-promote): draft/<경로> → <경로> 로 옮겨 색인하고 초안을 정리, 기존 문서는 --overwrite 로만
+  - 초안 승격(rag-promote): draft/<경로> → official/<경로> 로 옮겨 색인하고 초안을 정리, 기존 문서는 --overwrite 로만
     바꿈, 색인 실패 시 되돌림, MCP 도구로는 노출되지 않음
   - 도구 등록: RAG_MCP_WRITE 가 꺼져 있으면 쓰기 도구(추가·삭제)가 MCP 도구 목록에 없음
 
@@ -67,7 +67,7 @@ def test_add_document_writes_file_and_ingests(monkeypatch, tmp_path):
         tags=["longhorn"], component="longhorn", cluster="prod-01", client=object(),
     )
     assert out["status"] == "ok"
-    assert out["source"] == "draft/rcas/longhorn-볼륨-attaching-멈춤.md"
+    assert out["source"] == "draft/longhorn-볼륨-attaching-멈춤.md"
     assert out["chunks"] == 3 and out["replaced"] is False
 
     path = tmp_path / out["source"]
@@ -82,13 +82,15 @@ def test_add_document_writes_file_and_ingests(monkeypatch, tmp_path):
 def test_default_doc_type_is_note(monkeypatch, tmp_path):
     _setup(monkeypatch, tmp_path)
     out = documents.add_document("메모", "내용", client=object())
-    assert out["source"] == "draft/notes/메모.md"
+    assert out["source"] == "draft/메모.md"
 
 
-def test_doc_type_ending_in_s_keeps_folder_name(monkeypatch, tmp_path):
+def test_doc_type_does_not_change_folder(monkeypatch, tmp_path):
+    # 문서 유형은 front matter에만 쓰고, 파일은 유형과 관계없이 draft/ 바로 아래에 둡니다.
     _setup(monkeypatch, tmp_path)
-    out = documents.add_document("a", "b", "runbooks", client=object())
-    assert out["source"] == "draft/runbooks/a.md"
+    out = documents.add_document("a", "b", "runbook", client=object())
+    assert out["source"] == "draft/a.md"
+    assert _front_matter(tmp_path / out["source"])[0]["type"] == "runbook"
 
 
 # --- 입력 검증 ------------------------------------------------------------------
@@ -194,7 +196,7 @@ class _FakeQdrant:
         self.deleted.append(points_selector)
 
 
-def _make_doc(tmp_path, rel="draft/runbooks/a.md"):
+def _make_doc(tmp_path, rel="draft/a.md"):
     path = tmp_path / rel
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("---\ntitle: a\n---\nbody\n", encoding="utf-8")
@@ -205,19 +207,19 @@ def test_delete_removes_file_and_chunks(monkeypatch, tmp_path):
     monkeypatch.setattr(documents, "KNOWLEDGE_DIR", tmp_path)
     path = _make_doc(tmp_path)
     q = _FakeQdrant(points=4)
-    out = documents.delete_document("draft/runbooks/a.md", client=q)
-    assert out == {"status": "ok", "source": "draft/runbooks/a.md", "file_deleted": True,
+    out = documents.delete_document("draft/a.md", client=q)
+    assert out == {"status": "ok", "source": "draft/a.md", "file_deleted": True,
                    "chunks_deleted": 4}
     assert not path.exists()
     cond = q.deleted[0].filter.must[0]
-    assert cond.key == "source" and cond.match.value == "draft/runbooks/a.md"
+    assert cond.key == "source" and cond.match.value == "draft/a.md"
 
 
 def test_delete_cleans_orphan_chunks_without_file(monkeypatch, tmp_path):
     # 파일을 지우거나 이름을 바꾼 뒤 남은 청크도 정리할 수 있어야 합니다.
     monkeypatch.setattr(documents, "KNOWLEDGE_DIR", tmp_path)
     q = _FakeQdrant(points=2)
-    out = documents.delete_document("draft/runbooks/gone.md", client=q)
+    out = documents.delete_document("draft/gone.md", client=q)
     assert out["status"] == "ok" and out["file_deleted"] is False and out["chunks_deleted"] == 2
     assert len(q.deleted) == 1
 
@@ -225,7 +227,7 @@ def test_delete_cleans_orphan_chunks_without_file(monkeypatch, tmp_path):
 def test_delete_not_found(monkeypatch, tmp_path):
     monkeypatch.setattr(documents, "KNOWLEDGE_DIR", tmp_path)
     q = _FakeQdrant(points=0)
-    out = documents.delete_document("draft/runbooks/none.md", client=q)
+    out = documents.delete_document("draft/none.md", client=q)
     assert out["status"] == "error" and "no document" in out["error"]
     assert q.deleted == []
 
@@ -255,7 +257,7 @@ def test_delete_refuses_non_document_files(monkeypatch, tmp_path):
 def test_delete_keeps_file_when_chunk_delete_fails(monkeypatch, tmp_path):
     monkeypatch.setattr(documents, "KNOWLEDGE_DIR", tmp_path)
     path = _make_doc(tmp_path)
-    out = documents.delete_document("draft/runbooks/a.md",
+    out = documents.delete_document("draft/a.md",
                                     client=_FakeQdrant(points=3, delete_raises=RuntimeError("down")))
     assert out["status"] == "error" and path.exists()
 
@@ -279,9 +281,9 @@ def test_add_never_writes_outside_draft(monkeypatch, tmp_path):
 def test_delete_refuses_documents_outside_draft(monkeypatch, tmp_path):
     # 사람이 관리하는 정식 문서는 파일이 있어도, 청크가 있어도 MCP로 지울 수 없어야 합니다.
     monkeypatch.setattr(documents, "KNOWLEDGE_DIR", tmp_path)
-    official = _make_doc(tmp_path, "runbooks/official.md")
+    official = _make_doc(tmp_path, "official/official.md")
     q = _FakeQdrant(points=5)
-    for bad in ("runbooks/official.md", "draft/../runbooks/official.md", "draft", "draft/"):
+    for bad in ("official/official.md", "draft/../official/official.md", "draft", "draft/"):
         out = documents.delete_document(bad, client=q)
         assert out["status"] == "error", bad
     assert official.exists() and q.deleted == []
@@ -293,7 +295,7 @@ class _PromoteQdrant(_FakeQdrant):
     """승격 테스트용: count는 정해진 수, delete는 기록."""
 
 
-def _draft(tmp_path, rel="draft/runbooks/a.md", title="초안 A"):
+def _draft(tmp_path, rel="draft/a.md", title="초안 A"):
     path = tmp_path / rel
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(f"---\ntitle: {title}\ntype: runbook\n---\nbody\n", encoding="utf-8")
@@ -303,9 +305,9 @@ def _draft(tmp_path, rel="draft/runbooks/a.md", title="초안 A"):
 def test_list_drafts(monkeypatch, tmp_path):
     monkeypatch.setattr(documents, "KNOWLEDGE_DIR", tmp_path)
     _draft(tmp_path)
-    _draft(tmp_path, "runbooks/official.md", "정식")  # draft/ 밖은 목록에 없어야 함
+    _draft(tmp_path, "official/official.md", "정식")  # draft/ 밖은 목록에 없어야 함
     assert documents.list_drafts() == [
-        {"source": "draft/runbooks/a.md", "title": "초안 A", "promote_to": "runbooks/a.md"}
+        {"source": "draft/a.md", "title": "초안 A", "promote_to": "official/a.md"}
     ]
 
 
@@ -313,25 +315,25 @@ def test_promote_moves_ingests_and_cleans_draft(monkeypatch, tmp_path):
     rec = _setup(monkeypatch, tmp_path, chunks=4)
     draft = _draft(tmp_path)
     q = _PromoteQdrant(points=2)
-    out = documents.promote_document("draft/runbooks/a.md", client=q)
-    assert out == {"status": "ok", "source": "draft/runbooks/a.md", "target": "runbooks/a.md",
+    out = documents.promote_document("draft/a.md", client=q)
+    assert out == {"status": "ok", "source": "draft/a.md", "target": "official/a.md",
                    "chunks": 4, "draft_chunks_deleted": 2, "replaced": False}
-    official = tmp_path / "runbooks/a.md"
+    official = tmp_path / "official/a.md"
     assert official.exists() and not draft.exists()
     # 정식 위치를 rag-ingest 와 같은 기준(문서 디렉터리)으로 색인하고, 초안 청크를 지웁니다.
     assert rec.calls == [(official, tmp_path)]
-    assert q.deleted[0].filter.must[0].match.value == "draft/runbooks/a.md"
+    assert q.deleted[0].filter.must[0].match.value == "draft/a.md"
 
 
 def test_promote_refuses_existing_official_without_overwrite(monkeypatch, tmp_path):
     rec = _setup(monkeypatch, tmp_path)
     draft = _draft(tmp_path)
-    official = _draft(tmp_path, "runbooks/a.md", "기존 정식")
-    out = documents.promote_document("draft/runbooks/a.md", client=_PromoteQdrant())
+    official = _draft(tmp_path, "official/a.md", "기존 정식")
+    out = documents.promote_document("draft/a.md", client=_PromoteQdrant())
     assert out["status"] == "error" and "--overwrite" in out["error"]
     assert draft.exists() and "기존 정식" in official.read_text(encoding="utf-8") and rec.calls == []
 
-    out = documents.promote_document("draft/runbooks/a.md", overwrite=True, client=_PromoteQdrant())
+    out = documents.promote_document("draft/a.md", overwrite=True, client=_PromoteQdrant())
     assert out["status"] == "ok" and out["replaced"] is True
     assert "초안 A" in official.read_text(encoding="utf-8") and not draft.exists()
 
@@ -339,8 +341,8 @@ def test_promote_refuses_existing_official_without_overwrite(monkeypatch, tmp_pa
 def test_promote_rolls_back_when_indexing_fails(monkeypatch, tmp_path):
     _setup(monkeypatch, tmp_path, raises=RuntimeError("embeddings down"))
     draft = _draft(tmp_path)
-    official = _draft(tmp_path, "runbooks/a.md", "기존 정식")
-    out = documents.promote_document("draft/runbooks/a.md", overwrite=True, client=_PromoteQdrant())
+    official = _draft(tmp_path, "official/a.md", "기존 정식")
+    out = documents.promote_document("draft/a.md", overwrite=True, client=_PromoteQdrant())
     assert out["status"] == "error" and "nothing was changed" in out["error"]
     # 초안은 그대로, 정식 문서는 원래 내용으로 되돌아가야 합니다.
     assert draft.exists() and "기존 정식" in official.read_text(encoding="utf-8")
@@ -348,8 +350,8 @@ def test_promote_rolls_back_when_indexing_fails(monkeypatch, tmp_path):
 
 def test_promote_rejects_non_draft_sources(monkeypatch, tmp_path):
     rec = _setup(monkeypatch, tmp_path)
-    _draft(tmp_path, "runbooks/official.md")
-    for bad in ("runbooks/official.md", "draft/../runbooks/official.md", "draft/runbooks/missing.md", ""):
+    _draft(tmp_path, "official/official.md")
+    for bad in ("official/official.md", "draft/../official/official.md", "draft/missing.md", ""):
         out = documents.promote_document(bad, client=_PromoteQdrant())
         assert out["status"] == "error", bad
     assert rec.calls == []

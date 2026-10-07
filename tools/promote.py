@@ -2,14 +2,14 @@
 
 역할
   MCP 쓰기 도구로 추가된 초안(문서 디렉터리의 draft/ 아래)을 사람이 검토한 뒤 정식 폴더로 옮깁니다.
-  draft/<경로> → <경로> 로 옮기고 바로 색인하며, 초안의 파일과 청크는 지웁니다.
+  draft/<경로> → official/<경로> 로 옮기고 바로 색인하며, 초안의 파일과 청크는 지웁니다.
   이 명령은 MCP 도구가 아닙니다. 모델은 정식 폴더에 쓸 수 없고, 승격은 사람만 할 수 있습니다.
 
 실행
   설치한 서버에서는 rag-promote 명령(deploy/rag-promote)으로 실행합니다.
       rag-promote                                   초안 목록 보기
-      rag-promote draft/runbooks/foo.md [...]       초안을 정식 폴더로 옮기기
-      rag-promote --overwrite draft/runbooks/foo.md 정식 위치에 같은 이름의 문서가 있으면 바꾸기
+      rag-promote draft/foo.md [...]                초안을 정식 폴더(official/)로 옮기기
+      rag-promote --overwrite draft/foo.md          정식 위치에 같은 이름의 문서가 있으면 바꾸기
 """
 
 from __future__ import annotations
@@ -23,10 +23,10 @@ import documents
 def main() -> int:
     parser = argparse.ArgumentParser(
         prog="rag-promote",
-        description="Promote reviewed draft documents (draft/...) into the official knowledge folders.",
+        description="Promote reviewed draft documents (draft/...) into the official folder (official/...).",
     )
     parser.add_argument("sources", nargs="*",
-                        help="draft documents to promote, e.g. draft/runbooks/foo.md (none: list drafts)")
+                        help="draft documents to promote, e.g. draft/foo.md (none: list drafts)")
     parser.add_argument("--overwrite", action="store_true",
                         help="replace an existing official document with the same path")
     args = parser.parse_args()
@@ -36,7 +36,7 @@ def main() -> int:
         if not drafts:
             print("초안이 없습니다.")
             return 0
-        print(f"초안 {len(drafts)}개 (rag-promote <source> 로 정식 폴더에 옮깁니다):")
+        print(f"초안 {len(drafts)}개 (rag-promote <source> 로 official/ 에 옮깁니다):")
         for d in drafts:
             print(f"  {d['source']}  →  {d['promote_to']}   ({d['title']})")
         return 0

@@ -24,16 +24,34 @@ import ingest  # noqa: E402
 # --- 파일 탐색 ----------------------------------------------------------------
 
 def test_discover_files_picks_md_and_pdf_only(tmp_path):
-    (tmp_path / "runbooks").mkdir()
-    (tmp_path / "runbooks" / "a.md").write_text("x", encoding="utf-8")
-    (tmp_path / "runbooks" / "b.pdf").write_bytes(b"%PDF-1.4")
-    (tmp_path / "runbooks" / "c.PDF").write_bytes(b"%PDF-1.4")
-    (tmp_path / "runbooks" / "d.txt").write_text("x", encoding="utf-8")
-    (tmp_path / "runbooks" / "e.yaml").write_text("x", encoding="utf-8")
+    (tmp_path / "official").mkdir()
+    (tmp_path / "official" / "a.md").write_text("x", encoding="utf-8")
+    (tmp_path / "official" / "b.pdf").write_bytes(b"%PDF-1.4")
+    (tmp_path / "official" / "c.PDF").write_bytes(b"%PDF-1.4")
+    (tmp_path / "official" / "d.txt").write_text("x", encoding="utf-8")
+    (tmp_path / "official" / "e.yaml").write_text("x", encoding="utf-8")
 
     found = [p.name for p in ingest._discover_files(tmp_path)]
     assert found == ["a.md", "b.pdf", "c.PDF"]
     assert "d.txt" not in found and "e.yaml" not in found
+
+
+# --- 문서 유형 추론 -------------------------------------------------------------
+
+def test_infer_doc_type_skips_official_and_draft_folders(tmp_path):
+    def infer(rel, meta=None):
+        return ingest._infer_doc_type(meta or {}, tmp_path / rel, tmp_path)
+
+    # front matter의 type이 항상 우선합니다.
+    assert infer("official/a.md", {"type": "runbook"}) == "runbook"
+    # official/ · draft/ 는 문서 유형이 아니라 단계이므로 건너뜁니다.
+    assert infer("official/a.md") == "note"
+    assert infer("draft/a.md") == "note"
+    assert infer("official/runbooks/a.md") == "runbook"
+    assert infer("draft/rcas/a.md") == "rca"
+    # 그 밖의 폴더는 예전처럼 폴더 이름에서 유형을 정합니다.
+    assert infer("runbooks/a.md") == "runbook"
+    assert infer("a.md") == "note"
 
 
 # --- PDF 텍스트 추출 ----------------------------------------------------------

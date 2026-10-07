@@ -1,6 +1,6 @@
 #!/bin/sh
 # =============================================================================
-# rag-promote — 검토한 초안(draft/) 문서를 정식 폴더로 옮기는 명령
+# rag-promote — 검토한 초안(draft/) 문서를 정식 폴더(official/)로 옮기는 명령
 # =============================================================================
 #
 # 이 파일은 템플릿입니다. deploy/install.sh가 설치하면서 아래 @...@ 자리에 경로를 채워
@@ -8,8 +8,8 @@
 #
 # 사용법
 #   rag-promote                                     초안 목록 보기
-#   rag-promote draft/runbooks/foo.md [...]         초안을 정식 폴더(runbooks/foo.md)로 옮기고 색인
-#   rag-promote --overwrite draft/runbooks/foo.md   정식 위치에 같은 이름의 문서가 있으면 바꾸기
+#   rag-promote draft/foo.md [...]                  초안을 정식 폴더(official/foo.md)로 옮기고 색인
+#   rag-promote --overwrite draft/foo.md            정식 위치에 같은 이름의 문서가 있으면 바꾸기
 #
 # 왜 별도 명령인가
 #   MCP 쓰기 도구는 모델이 쓰므로 draft/ 아래만 다룹니다. 정식 문서로 올리는 일은 사람이 검토한 뒤

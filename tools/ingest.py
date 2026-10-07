@@ -19,12 +19,14 @@
 문서 형식 (front matter는 선택)
     ---
     title: Longhorn 볼륨이 attaching 상태에서 멈춤
-    type: runbook           # runbook | rca | note | ...  (기본값: 폴더 이름, 없으면 "note")
+    type: runbook           # runbook | rca | note | ...  (기본값: 하위 폴더 이름, 없으면 "note")
     tags: [longhorn, storage, node-reboot]
     ---
     # 본문 마크다운...
 
-  `type`을 생략하면 상위 폴더 이름에서 끝의 s를 뗀 값입니다 (runbooks/ → runbook).
+  정식 문서는 official/, 모델이 만든 초안은 draft/ 아래에 둡니다.
+  `type`을 생략하면 official/·draft/ 다음 하위 폴더 이름에서 끝의 s를 뗀 값이고
+  (official/runbooks/ → runbook), 하위 폴더가 없으면 "note"입니다. front matter에 type을 쓰는 것을 권장합니다.
   PDF에는 front matter가 없으므로 type은 폴더 이름, 제목은 파일 이름에서 가져옵니다.
 
 멱등성
@@ -168,13 +170,18 @@ def _chunk_document(body: str) -> list[str]:
     return [c for c in chunks if c] or _chunk(body, CHUNK_SIZE, CHUNK_OVERLAP)
 
 
+# 문서의 단계(정식 / 초안)를 나타내는 최상위 폴더. 문서 유형이 아니므로 유형을 정할 때 건너뜁니다.
+_STAGE_DIRS = ("official", "draft")
+
+
 def _infer_doc_type(meta: dict[str, Any], file: Path, root: Path) -> str:
     if meta.get("type"):
         return str(meta["type"])
-    rel = file.relative_to(root)
-    if len(rel.parts) > 1:
-        folder = rel.parts[0].rstrip("s")  # runbooks -> runbook, rcas -> rca
-        return folder
+    folders = list(file.relative_to(root).parts[:-1])
+    if folders and folders[0] in _STAGE_DIRS:
+        folders = folders[1:]
+    if folders:
+        return folders[0].rstrip("s")  # official/runbooks -> runbook, rcas -> rca
     return "note"
 
 
