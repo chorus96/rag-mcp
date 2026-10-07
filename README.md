@@ -595,7 +595,37 @@ component: longhorn
   됩니다.
 - 색인만 실패하면 `"saved": true`와 오류가 함께 오고 파일은 남습니다. 원인을 고친 뒤 `rag-ingest`로 다시 색인하세요.
 - 검토가 끝나면 서버에서 `rag-promote draft/longhorn-볼륨-복구-절차.md`로 `official/`에 올립니다
-  ([초안 승격](#초안-승격-rag-promote)). 필요 없으면 `rag_delete_document("draft/longhorn-볼륨-복구-절차.md")`로 지웁니다.
+  ([초안 승격](#초안-승격-rag-promote)). 필요 없으면 `rag_delete_document`로 지웁니다(아래).
+
+#### `rag_delete_document` 사용 예
+
+대화 흐름 (플러그인의 `rag-delete-document` 스킬 기준):
+
+1. 사용자: "아까 저장한 Longhorn 볼륨 복구 초안 지워 줘"
+2. 모델: `rag_list_documents(folder="draft")`나 `search_draft`로 대상의 `source`를 찾습니다.
+3. 모델: `draft/longhorn-볼륨-복구-절차.md` ("Longhorn 볼륨 복구 절차")를 보여 주고 "이 문서가 맞습니까?"라고
+   확인을 받습니다. 삭제는 되돌릴 수 없습니다.
+4. 모델: `rag_delete_document`를 호출하고 결과를 알려 줍니다.
+
+도구 호출과 응답:
+
+```json
+{"source": "draft/longhorn-볼륨-복구-절차.md"}
+```
+
+```json
+{"status": "ok", "source": "draft/longhorn-볼륨-복구-절차.md", "file_deleted": true, "chunks_deleted": 2}
+```
+
+| 경우 | 응답 |
+|------|------|
+| 파일과 청크를 모두 지움 | `"file_deleted": true`, `"chunks_deleted": 2` |
+| 파일은 이미 없고 청크만 남아 있었음 | `"file_deleted": false`, `"chunks_deleted": 2` — 남은 청크를 정리 |
+| 정식 문서를 지정함 (`official/...`) | `{"status": "error", "error": "only documents under draft/ can be deleted via MCP: official/..."}` |
+| 파일도 청크도 없음 | `{"status": "error", "source": "draft/...", "error": "no document found at draft/..."}` |
+| 청크 삭제 실패 | `{"status": "error", ..., "error": "deleting chunks failed: ... (the file was not deleted)"}` — 파일은 그대로 |
+
+정식 문서(`official/`)는 MCP로 지울 수 없습니다. 서버에서 파일을 직접 지운 뒤 `rag-ingest --recreate`로 재구축하세요.
 
 | 항목 | 동작 |
 |------|------|
