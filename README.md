@@ -1,21 +1,35 @@
 # rag-mcp
 
-[Model Context Protocol](https://modelcontextprotocol.io)(MCP)로 노출되는 셀프 호스팅
-**AI 어시스턴트용 RAG 메모리 서버**입니다. MCP를 지원하는 모든 LLM 클라이언트(Claude Desktop /
-Claude Code, LibreChat Agents, 프록시를 통한 Open WebUI, 직접 만든 도구 등)에 여러분의 문서 —
-런북, 장애 보고서, RCA(근본 원인 분석), 위키 내보내기 등 마크다운이나 PDF로 된 모든 것 — 를 대상으로 검색 가능한
-장기 메모리를 제공합니다.
+**AI 어시스턴트용 RAG 메모리 서버**입니다. 런북, 장애 보고서, RCA(근본 원인 분석), 위키 내보내기 같은
+마크다운·PDF 문서를 색인해 두고, [Model Context Protocol](https://modelcontextprotocol.io)(MCP)로
+검색 도구를 제공합니다. Claude Code, Claude Desktop, LibreChat 등 MCP를 지원하는 클라이언트라면
+어디서든 "전에 이런 장애가 있었나?", "이 작업의 처리 절차는?" 같은 질문에 여러분의 문서를 근거로
+답하게 할 수 있습니다.
 
-- **읽기 전용 LLM 인터페이스** — 모델은 *검색*만 할 수 있습니다. 쓰기는 배치 수집(ingestion) 작업이나
-  토큰으로 보호되는 내부 API를 통해 별도 경로로 이루어집니다.
-- **하이브리드 검색** — 밀집(dense) 시맨틱 벡터 **+ BM25 키워드 희소(sparse) 벡터**를
-  Reciprocal Rank Fusion으로 결합합니다. 임베딩이 놓치더라도 정확한 토큰(`CrashLoopBackOff`,
-  에러 코드, 리소스 이름)을 찾아냅니다.
-- **선택적 크로스 인코더 리랭킹**(Cohere/Jina 호환)으로 정밀도를 높일 수 있습니다.
+## 특징
+
+- **읽기 전용 LLM 인터페이스** — 모델은 *검색*만 할 수 있습니다. 문서 기록은 수집 명령(`rag-ingest`)이나
+  토큰으로 보호되는 내부 API로만 이루어집니다.
+- **하이브리드 검색** — 의미 기반 밀집(dense) 벡터와 BM25 키워드 희소(sparse) 벡터를 Reciprocal Rank
+  Fusion(RRF)으로 결합합니다. `CrashLoopBackOff` 같은 에러 문자열이나 리소스 이름도 정확히 찾습니다.
+- **선택적 리랭킹** — Cohere/Jina 호환 크로스 인코더로 결과 순서를 다시 매겨 정밀도를 높입니다.
 - **OpenAI 호환 임베딩** — `/v1/embeddings`를 제공하는 엔드포인트라면 무엇이든 씁니다. 직접 띄운
-  서버(TEI, vLLM 등, 오프라인)나 호스팅 API(OpenAI 등)를 설정 몇 줄로 지정합니다.
-- **마크다운 + PDF 수집** — YAML front matter, 헤딩 인식 청킹, 멱등(idempotent) 재실행을 지원합니다.
-- **벤더 중립 MCP** — streamable-http MCP를 지원하는 모든 클라이언트와 함께 동작합니다.
+  서버(TEI, vLLM 등)로 오프라인 운영하거나 호스팅 API(OpenAI 등)를 쓸 수 있습니다.
+- **한국어 지원** — 기본 임베딩 모델은 다국어 모델 `bge-m3`, 기본 리랭커는 다국어 모델입니다.
+- **마크다운 + PDF 수집** — YAML front matter, 헤딩 기준 청킹, 멱등(idempotent) 재실행을 지원합니다.
+- **간단한 설치** — Linux + systemd 서버에 스크립트 하나로 설치합니다. root 없이 사용자 모드로도
+  설치할 수 있습니다.
+- **Claude Code 플러그인** — 이 저장소 자체가 플러그인 마켓플레이스입니다.
+
+## 구성 요소
+
+| 구성 요소 | 역할 |
+|------|------|
+| **rag-mcp 서버** (`server.py`) | MCP 검색 도구를 `http://<서버>:8084/mcp`(streamable-http)로 제공 |
+| **Qdrant** | 문서 청크의 벡터를 저장하는 벡터 DB (`127.0.0.1:6333`) |
+| **rag-ingest** (`ingest.py`) | 문서를 청크로 나누고 임베딩해 Qdrant에 기록하는 수집 명령 |
+| **임베딩 엔드포인트** | 텍스트를 벡터로 바꾸는 OpenAI 호환 서버 — **별도로 준비** |
+| **Claude Code 플러그인** (`plugins/rag-mcp`) | Claude Code에서 rag-mcp 서버에 연결 |
 
 ## 아키텍처
 
@@ -72,98 +86,138 @@ Claude Code, LibreChat Agents, 프록시를 통한 Open WebUI, 직접 만든 도
   └──────────────────────┘
 ```
 
-## 빠른 시작 (Linux 서버 설치)
+- **쓰기 경로:** `rag-ingest`가 `knowledge/` 아래 문서를 읽어 청크로 나누고, 임베딩 엔드포인트로
+  벡터를 만들어 Qdrant에 저장합니다. BM25 희소 벡터는 rag-mcp가 직접(FastEmbed) 계산합니다.
+- **읽기 경로:** MCP 클라이언트가 검색 도구를 호출하면, rag-mcp가 **같은 임베딩 엔드포인트**로 질의를
+  벡터로 바꾸고 Qdrant에서 하이브리드 검색한 뒤 (선택적으로 리랭킹해) 결과를 돌려줍니다.
+- **내부 쓰기 API:** 신뢰할 수 있는 자동화(에이전트, CI)가 장애 기록과 피드백을 남기는 HTTP 경로입니다.
+  LLM에는 보이지 않습니다.
 
-사전 요구 사항: systemd를 쓰는 Linux 서버(Ubuntu, Debian, RHEL 계열 등), Python 3.10 이상과
-venv 모듈(Debian/Ubuntu: `apt install python3-venv`), `curl`, 그리고 **OpenAI 호환 임베딩
-엔드포인트**(아래 [임베딩 엔드포인트 설정](#임베딩-엔드포인트-설정) 참고)가 필요합니다.
+## 빠른 시작
+
+### 사전 요구 사항
+
+- systemd를 쓰는 Linux 서버 (Ubuntu, Debian, RHEL 계열 등)
+- Python 3.10 이상과 venv 모듈 (Debian/Ubuntu: `apt install python3-venv`)
+- `curl`, `tar`
+- **OpenAI 호환 임베딩 엔드포인트** — 예: 같은 서버에서
+  [Hugging Face TEI](https://github.com/huggingface/text-embeddings-inference)로 `BAAI/bge-m3` 서빙,
+  또는 OpenAI API ([임베딩 엔드포인트 설정](#임베딩-엔드포인트-설정) 참고)
+
+### 1. 설치
 
 ```bash
-git clone https://github.com/mmelmesary/rag-mcp.git && cd rag-mcp
+git clone https://github.com/chorus96/rag-mcp.git && cd rag-mcp
 sudo ./deploy/install.sh        # Qdrant + rag-mcp 설치, systemd 서비스로 시작
+```
 
-# 임베딩 엔드포인트 지정 (EMBEDDINGS_BASE_URL / EMBEDDINGS_API_KEY / EMBEDDINGS_MODEL)
+root 권한 없이 설치하려면 [사용자 모드](#사용자-모드-root-없이)를 쓰세요.
+
+### 2. 임베딩 엔드포인트 지정
+
+설정 파일에서 임베딩 엔드포인트를 지정하고 서버를 재시작합니다.
+
+```bash
 sudo vi /etc/rag-mcp/rag-mcp.env
+#   EMBEDDINGS_BASE_URL=http://localhost:8080   (예: 같은 서버의 TEI)
+#   EMBEDDINGS_API_KEY=
+#   EMBEDDINGS_MODEL=bge-m3
 sudo systemctl restart rag-mcp
+```
 
+### 3. 문서 색인
+
+```bash
 sudo rag-ingest                 # 샘플 문서 색인
 ```
 
-`install.sh`가 설치하는 것:
+요약 줄 `done: N file(s), M chunk(s)`가 나오면 성공입니다.
+
+### 4. 확인
+
+```bash
+systemctl status qdrant rag-mcp
+curl -s http://localhost:8084/mcp            # 핸드셰이크 없이 400 응답 = 정상 동작
+curl -s http://localhost:6333/collections    # rag_kb 컬렉션 확인
+journalctl -u rag-mcp -f                     # 서버 로그
+```
+
+> 최초 시작 시 FastEmbed가 BM25 모델을 `huggingface.co`에서 한 번 내려받아 캐시에 저장합니다.
+> 프록시가 필요하면 설정 파일에 `HTTPS_PROXY`를 넣으세요. 내려받지 못하면 키워드(BM25) 검색 없이
+> 의미 검색만으로 동작합니다(로그의 `hybrid=False`로 확인할 수 있습니다).
+
+### 5. 클라이언트 연결
+
+Claude Code라면 [플러그인](#claude-code-플러그인-권장)으로 연결하는 것이 가장 간단합니다.
+
+## 설치 방식
+
+설치 스크립트를 다시 실행하면 업그레이드로 동작합니다 — 코드와 의존성을 갱신하고 서비스를
+재시작하며, 설정 파일과 데이터는 건드리지 않습니다.
+
+### 시스템 모드 (기본)
+
+`sudo ./deploy/install.sh`로 설치합니다. 모든 프로세스는 전용 시스템 사용자 `rag-mcp`로 실행되고,
+부팅 시 자동으로 시작됩니다.
 
 | 경로 | 내용 |
 |------|------|
 | `/opt/rag-mcp/app`, `/opt/rag-mcp/venv` | 애플리케이션 코드와 Python 가상환경 |
-| `/opt/rag-mcp/qdrant/qdrant` | Qdrant 바이너리 (기본 `v1.12.4`, `127.0.0.1:6333`에만 바인드) |
+| `/opt/rag-mcp/qdrant/qdrant` | Qdrant 바이너리 (기본 `v1.12.4`, `127.0.0.1`에만 바인드) |
 | `/etc/rag-mcp/rag-mcp.env` | 설정 파일 ([.env.example](.env.example) 복사본) |
 | `/var/lib/rag-mcp/knowledge` | 색인할 문서 (샘플 문서가 복사됨) |
 | `/var/lib/rag-mcp/qdrant` | Qdrant 데이터 |
-| `qdrant.service`, `rag-mcp.service` | systemd 서비스 (부팅 시 자동 시작) |
+| `qdrant.service`, `rag-mcp.service` | systemd 서비스 |
 | `/usr/local/bin/rag-ingest` | 문서 수집 명령 |
 
-모든 서비스는 시스템 사용자 `rag-mcp` 권한으로 실행됩니다. 스크립트를 다시 실행하면 업그레이드로
-동작합니다 — 코드와 의존성을 갱신하고 서비스를 재시작하며, 설정 파일과 데이터는 건드리지 않습니다.
+### 사용자 모드 (root 없이)
 
-확인:
-
-```bash
-systemctl status qdrant rag-mcp
-curl -s http://localhost:8084/mcp            # MCP 엔드포인트 (핸드셰이크 없이 400 응답 = 정상 동작)
-curl -s http://localhost:6333/collections    # rag_kb 컬렉션이 포인트와 함께 존재
-journalctl -u rag-mcp -f                     # 서버 로그
-```
-
-설정을 바꾼 뒤에는 `sudo systemctl restart rag-mcp`로 적용합니다. 제거는
-`sudo ./deploy/uninstall.sh`(데이터 유지) 또는 `sudo ./deploy/uninstall.sh --purge`(모두 삭제)입니다.
-
-> 최초 시작 시 FastEmbed가 BM25 모델을 `huggingface.co`에서 한 번 내려받아
-> `/var/lib/rag-mcp/fastembed_cache`에 저장합니다. 서버가 인터넷에 접속할 수 없거나 프록시가
-> 필요하면 설정 파일에 `HTTPS_PROXY`를 넣으세요. 내려받지 못하면 키워드(BM25) 검색 없이 의미
-> 검색만으로 동작합니다.
-
-### 사용자 모드 설치 (root 없이)
-
-관리자 권한이 없거나 개인 계정에만 설치하려면 `--user`로 설치하세요. 현재 사용자 홈 아래에
-설치되고, 서비스는 사용자 systemd(`systemctl --user`)로 실행됩니다.
+관리자 권한이 없거나 개인 계정에만 설치하려면 `--user`를 붙입니다. 현재 사용자 홈 아래에 설치되고,
+서비스는 사용자 systemd(`systemctl --user`)로 실행됩니다.
 
 ```bash
 ./deploy/install.sh --user
-rag-ingest                                  # ~/.local/bin 이 PATH에 있어야 합니다
+rag-ingest                       # ~/.local/bin 이 PATH에 있어야 합니다
 ```
 
-| 항목 | 시스템 모드 (`sudo`) | 사용자 모드 (`--user`) |
+| 항목 | 시스템 모드 | 사용자 모드 |
 |------|------|------|
 | 앱 / venv / Qdrant | `/opt/rag-mcp` | `~/.local/share/rag-mcp` |
 | 설정 파일 | `/etc/rag-mcp/rag-mcp.env` | `~/.config/rag-mcp/rag-mcp.env` |
 | 데이터 (문서, Qdrant, 캐시) | `/var/lib/rag-mcp` | `~/.local/share/rag-mcp/data` |
-| 서비스 | `systemctl ...` | `systemctl --user ...` |
-| 로그 | `journalctl -u rag-mcp` | `journalctl --user -u rag-mcp` |
-| 수집 | `sudo rag-ingest` | `rag-ingest` |
-| 제거 | `sudo ./deploy/uninstall.sh [--purge]` | `./deploy/uninstall.sh --user [--purge]` |
 
-이 문서의 다른 명령도 사용자 모드에서는 `sudo`를 빼고, `systemctl`을 `systemctl --user`로,
-설정 파일 경로를 `~/.config/rag-mcp/rag-mcp.env`로 바꿔 쓰면 됩니다.
+사용자 모드 주의 사항:
 
-주의할 점:
-
-- **로그아웃하면 서비스가 멈춥니다.** 사용자 서비스는 기본적으로 로그인해 있는 동안만 실행됩니다.
-  계속 실행하고 부팅 시 자동으로 시작하려면 `loginctl enable-linger $USER`를 한 번 실행하세요
-  (배포판에 따라 관리자 권한이 필요할 수 있습니다).
+- **로그아웃하면 서비스가 멈춥니다.** 계속 실행하고 부팅 시 자동으로 시작하려면
+  `loginctl enable-linger $USER`를 한 번 실행하세요(배포판에 따라 관리자 권한이 필요할 수 있습니다).
 - **ssh 등으로 직접 로그인한 세션에서 설치하세요.** `su`나 `sudo -u`로 전환한 셸에서는 사용자
-  systemd에 연결되지 않아 설치 스크립트가 멈춥니다. 서비스 등록 없이 파일만 설치하려면
-  `SKIP_START=1 ./deploy/install.sh --user`를 쓰세요.
-- **Python venv 모듈**(Debian/Ubuntu의 `python3-venv`)이 없다면 그 설치만은 관리자에게
-  요청해야 합니다.
-- 같은 서버에서 여러 사용자가 설치하면 포트(8084, 6333, 6334)가 겹치므로 한 명만 실행할 수
-  있습니다.
+  systemd에 연결되지 않습니다. 서비스 등록 없이 파일만 설치하려면 `SKIP_START=1`을 붙이세요.
+- Python venv 모듈이 없다면 그 패키지 설치만은 관리자에게 요청해야 합니다.
+- 같은 서버에서는 한 명만 실행할 수 있습니다(포트 8084, 6333, 6334가 겹칩니다).
 
-## MCP 클라이언트에 연결하기
+### 운영 명령
 
-서버는 `http://localhost:8084/mcp`에서 **streamable-http**로 통신합니다.
+| 작업 | 시스템 모드 | 사용자 모드 |
+|------|------|------|
+| 상태 | `systemctl status qdrant rag-mcp` | `systemctl --user status qdrant rag-mcp` |
+| 로그 | `journalctl -u rag-mcp -f` | `journalctl --user -u rag-mcp -f` |
+| 설정 적용 | `sudo systemctl restart rag-mcp` | `systemctl --user restart rag-mcp` |
+| 문서 수집 | `sudo rag-ingest [--recreate]` | `rag-ingest [--recreate]` |
+| 업그레이드 | `sudo ./deploy/install.sh` | `./deploy/install.sh --user` |
+| 제거 (데이터 유지) | `sudo ./deploy/uninstall.sh` | `./deploy/uninstall.sh --user` |
+| 제거 (모두 삭제) | `sudo ./deploy/uninstall.sh --purge` | `./deploy/uninstall.sh --user --purge` |
 
-**Claude Code — 플러그인 (권장)**: 이 저장소는 Claude Code 플러그인 마켓플레이스이기도 합니다.
-`rag-mcp` 플러그인을 설치하면 MCP 서버 연결과 함께, 언제 어떤 검색 도구를 쓸지 알려 주는 스킬
-(`rag-knowledge`)이 추가됩니다.
+이 문서의 다른 명령도 사용자 모드에서는 위 표처럼 바꿔 쓰면 됩니다.
+
+## MCP 클라이언트 연결
+
+서버는 `http://<서버 주소>:8084/mcp`에서 **streamable-http**로 통신합니다. 다른 서버에서 접속한다면
+방화벽에서 8084 포트를 열고, 설정 파일에 `RAG_INTERNAL_TOKEN`을 설정해 내부 쓰기 API를 보호하세요.
+
+### Claude Code 플러그인 (권장)
+
+이 저장소는 Claude Code 플러그인 마켓플레이스입니다. `rag-mcp` 플러그인을 설치하면 MCP 서버 연결과
+함께, 언제 어떤 검색 도구를 쓸지 알려 주는 스킬(`rag-knowledge`)이 추가됩니다.
 
 ```text
 /plugin marketplace add chorus96/rag-mcp
@@ -171,21 +225,19 @@ rag-ingest                                  # ~/.local/bin 이 PATH에 있어야
 /plugin configure rag-mcp@rag-mcp      # server_url: 예) http://localhost:8084/mcp
 ```
 
+터미널에서는 한 번에 설치하고 설정할 수도 있습니다.
+
+```bash
+claude plugin marketplace add chorus96/rag-mcp
+claude plugin install rag-mcp@rag-mcp --config server_url=http://<서버>:8084/mcp
+```
+
 설정한 뒤 Claude Code를 재시작하고 `/mcp`에서 `plugin:rag-mcp:rag`가 연결됐는지 확인하세요.
-터미널에서는 `claude plugin install rag-mcp@rag-mcp --config server_url=http://<서버>:8084/mcp`처럼
-한 번에 설정할 수도 있습니다.
+플러그인은 서버에 연결만 하므로, rag-mcp 서버는 [빠른 시작](#빠른-시작)대로 따로 설치해 두어야 합니다.
 
-| 경로 | 내용 |
-|------|------|
-| `.claude-plugin/marketplace.json` | 마켓플레이스 정의 (이름 `rag-mcp`) |
-| `plugins/rag-mcp/.claude-plugin/plugin.json` | 플러그인 정의, `server_url` 설정 항목 |
-| `plugins/rag-mcp/.mcp.json` | MCP 서버 `rag` (HTTP, `${user_config.server_url}`) |
-| `plugins/rag-mcp/skills/rag-knowledge/` | 검색 도구 사용 안내 스킬 |
+### Claude Code 직접 설정
 
-플러그인은 서버에 연결만 합니다. rag-mcp 서버 자체는 위의 [빠른 시작](#빠른-시작-linux-서버-설치)대로
-따로 설치해 두어야 합니다.
-
-**Claude Code — 직접 설정** (프로젝트의 `.mcp.json`):
+플러그인 없이 프로젝트의 `.mcp.json`에 직접 등록할 수도 있습니다.
 
 ```json
 {
@@ -198,42 +250,48 @@ rag-ingest                                  # ~/.local/bin 이 PATH에 있어야
 }
 ```
 
-**LibreChat** (`librechat.yaml`):
+### LibreChat
 
 ```yaml
+# librechat.yaml
 mcpServers:
   rag:
     type: streamable-http
     url: http://<rag-mcp 서버 주소>:8084/mcp
 ```
 
-그 밖의 MCP 클라이언트: 위 URL로 HTTP/streamable-http 서버를 등록하면 됩니다.
+그 밖의 MCP 클라이언트도 같은 URL을 HTTP(streamable-http) 서버로 등록하면 됩니다.
 
-다른 서버에서 접속한다면 방화벽에서 8084 포트를 열고, 내부 쓰기 API를 보호하도록 설정 파일에
-`RAG_INTERNAL_TOKEN`을 설정하세요.
-
-### 모델에 노출되는 도구
+## 검색 도구
 
 | 도구 | 용도 |
 |------|---------|
-| `rag_search(query, doc_type?, cluster?, component?, limit?)` | KB 전체에 대한 시맨틱 검색 |
-| `search_incidents(query, cluster?, component?, limit?)` | "전에 이런 일이 있었나?" — `doc_type=incident` |
-| `search_runbooks(query, cluster?, component?, limit?)` | "처리 절차가 뭐지?" — `doc_type=runbook` |
-| `rag_collections()` | 컬렉션 목록과 포인트 수 |
-| `rag_health()` | Qdrant 및 임베딩 제공자 접근 가능 여부 |
+| `rag_search(query, doc_type?, cluster?, component?, limit?)` | 지식 베이스 전체에 대한 시맨틱 검색 |
+| `search_incidents(query, cluster?, component?, limit?)` | "전에 이런 일이 있었나?" — 장애(`incident`)만 검색 |
+| `search_runbooks(query, cluster?, component?, limit?)` | "처리 절차가 뭐지?" — 런북(`runbook`)만 검색 |
+| `rag_collections()` | 컬렉션 목록과 포인트 수 (지식 베이스가 채워졌는지 확인) |
+| `rag_health()` | Qdrant와 임베딩 엔드포인트 접근 가능 여부 |
 
-필터: `cluster`는 *소프트* 필터입니다(같은 클러스터 결과가 비어 있으면 전체 범위로 다시 검색).
-`component`/`doc_type`은 하드 필터입니다.
+- `cluster`는 **소프트 필터**입니다. 같은 클러스터 결과가 없으면 전체 범위로 다시 검색하고
+  `cluster_narrowed: false`로 알려 줍니다.
+- `doc_type`과 `component`는 **하드 필터**입니다. 결과가 없으면 그대로 비어 있습니다.
 
-## 내 문서 추가하기
+## 문서 추가하기
 
-`/var/lib/rag-mcp/knowledge/` 아래에 마크다운이나 PDF를 넣으세요(하위 폴더 이름이 기본 `doc_type`이
-됩니다. 예: `knowledge/incidents/*` → `incident`). 디렉터리는 설정 파일의 `RAG_KNOWLEDGE_DIR`로
-바꿀 수 있습니다. 마크다운은 선택적으로 YAML front matter를 지원합니다.
+문서 디렉터리(기본값 `/var/lib/rag-mcp/knowledge`, 설정 파일의 `RAG_KNOWLEDGE_DIR`)에 마크다운이나
+PDF를 넣고 수집 명령을 실행합니다. 서버 재시작은 필요 없습니다.
+
+```bash
+sudo cp my-runbook.md /var/lib/rag-mcp/knowledge/runbooks/
+sudo rag-ingest
+```
+
+하위 폴더 이름이 기본 문서 유형이 됩니다(`knowledge/incidents/*` → `incident`,
+`knowledge/runbooks/*` → `runbook`). 마크다운은 선택적으로 YAML front matter를 쓸 수 있습니다.
 
 ```markdown
 ---
-title: Longhorn volume stuck attaching
+title: Longhorn 볼륨이 attaching 상태에서 멈춤
 type: incident
 tags: [longhorn, storage]
 component: longhorn
@@ -242,31 +300,23 @@ cluster: prod-eu
 # 본문...
 ```
 
-front matter는 전적으로 자유롭게 정할 수 있습니다. `type`, `component`, `cluster`는 검색 필터
-필드가 되지만 형식이 정해지지 않은 레이블일 뿐이므로, 도메인에 맞는 어떤 분류(환경, 고객, 제품,
-팀 등)에든 사용하거나 아예 생략하고 순수 시맨틱 검색만 사용해도 됩니다.
+`type`, `component`, `cluster`는 검색 필터가 되지만 형식이 정해지지 않은 레이블입니다. 환경, 고객,
+제품, 팀 등 도메인에 맞게 쓰거나 생략해도 됩니다. PDF는 페이지 단위로 텍스트를 추출하며, 제목은
+파일 이름에서 가져옵니다.
 
-그런 다음 다시 색인하세요. 서버 재시작은 필요 없습니다.
+수집은 멱등적이라 다시 실행해도 중복이 생기지 않고, 내용이 줄어든 문서의 남은 청크는 자동으로
+지워집니다. 정기적으로 실행하려면 cron이나 CI에 등록하세요.
 
-```bash
-sudo cp my-runbook.md /var/lib/rag-mcp/knowledge/runbooks/
-sudo rag-ingest
-```
-
-수집은 멱등적입니다(청크 ID는 `(source, chunk index)`에서 파생됩니다). 내용이 줄어든 문서는
-더 이상 쓰이지 않는 뒷부분 청크가 삭제됩니다. 문서가 바뀔 때마다 CI/cron에서 실행하세요.
-알려진 제한 사항: 파일을 삭제하거나 이름을 바꿔도 기존 청크는 제거되지 않습니다 — 삭제/이름 변경
-후에는 `sudo rag-ingest --recreate`를 사용하세요.
+> **알려진 제한:** 파일을 삭제하거나 이름을 바꿔도 기존 청크는 남습니다. 그런 경우에는
+> `sudo rag-ingest --recreate`로 전체를 다시 만드세요.
 
 ## 임베딩 엔드포인트 설정
 
-임베딩은 OpenAI 호환 `/v1/embeddings` 엔드포인트로만 처리합니다. `EMBEDDINGS_BASE_URL`에는
-기본값이 없으므로 반드시 지정해야 합니다(문서가 의도치 않게 외부로 전송되지 않도록). `/v1`은
-자동으로 붙습니다.
+임베딩은 OpenAI 호환 `/v1/embeddings` 엔드포인트로 처리합니다. 문서가 의도치 않게 외부로 전송되지
+않도록 `EMBEDDINGS_BASE_URL`에는 기본값이 없으며 반드시 지정해야 합니다. `/v1`은 자동으로 붙습니다.
 
-**직접 띄운 서버 (오프라인, 권장)** — 예: 같은 서버에서
-[Hugging Face TEI](https://github.com/huggingface/text-embeddings-inference)로 `BAAI/bge-m3` 서빙.
-vLLM, LocalAI 등도 같은 방식입니다.
+**직접 띄운 서버 (오프라인, 권장)** — 예: 같은 서버의 TEI로 `BAAI/bge-m3` 서빙. vLLM, LocalAI 등도
+같은 방식입니다.
 
 ```bash
 # /etc/rag-mcp/rag-mcp.env
@@ -276,7 +326,7 @@ EMBEDDINGS_API_KEY=
 EMBEDDINGS_MODEL=bge-m3
 ```
 
-**호스팅 API** — 예: OpenAI. 문서 내용이 외부로 전송됩니다.
+**호스팅 API** — 예: OpenAI. 문서 내용이 외부로 전송된다는 점에 주의하세요.
 
 ```bash
 # /etc/rag-mcp/rag-mcp.env
@@ -285,59 +335,78 @@ EMBEDDINGS_API_KEY=sk-...
 EMBEDDINGS_MODEL=text-embedding-3-small
 ```
 
-엔드포인트나 모델을 바꾼 뒤에는 서버를 재시작하고 컬렉션을 다시 만드세요(수집과 질의는 항상
-같은 엔드포인트+모델을 사용해야 합니다).
+> ⚠️ **수집과 질의는 항상 같은 엔드포인트와 모델을 써야 합니다.** 엔드포인트나 모델을 바꾼 뒤에는
+> 서버를 재시작하고 컬렉션을 다시 만드세요.
+>
+> ```bash
+> sudo systemctl restart rag-mcp
+> sudo rag-ingest --recreate
+> ```
 
-```bash
-sudo systemctl restart rag-mcp
-sudo rag-ingest --recreate
-```
+### 한국어 문서
 
-## 한국어 문서와 임베딩 모델
+- **임베딩:** 기본 모델 `bge-m3`는 한국어를 포함한 다국어 모델이라, 엔드포인트에서 bge-m3를 서빙하면
+  한국어 문서와 질의를 바로 쓸 수 있습니다. OpenAI `text-embedding-3-small`/`-large`도 다국어를
+  지원합니다. 영어 문서만 쓴다면 `nomic-embed-text` 같은 더 가벼운 모델로 바꿀 수 있습니다(nomic
+  계열은 작업 접두사가 자동으로 붙습니다).
+- **리랭커:** 리랭킹을 켜면(`RERANK_PROVIDER=cohere`) 기본 모델은 다국어 모델
+  `rerank-multilingual-v3.0`입니다.
+- **BM25 키워드 검색:** 영어 기준으로 단어를 나누므로 조사가 붙은 한국어("볼륨이", "볼륨을")에는
+  약합니다. 의미 검색이 상당 부분 보완하며, 영어 토큰(에러 문자열, 리소스 이름)은 잘 찾습니다.
 
-기본 임베딩 모델 이름은 한국어를 포함한 다국어 모델 **`bge-m3`**입니다. 엔드포인트에서 bge-m3를
-서빙하면 한국어 문서와 질의를 별도 설정 없이 바로 쓸 수 있습니다. 호스팅 API를 쓴다면 OpenAI
-`text-embedding-3-small`/`-large`도 다국어를 지원합니다.
-
-영어 문서만 쓰고 더 가벼운 모델을 원하면 엔드포인트에서 `nomic-embed-text` 같은 모델을 서빙하고
-이름을 바꾸면 됩니다(nomic 계열은 작업 접두사가 자동으로 붙습니다).
-
-```bash
-# /etc/rag-mcp/rag-mcp.env
-EMBEDDINGS_MODEL=nomic-embed-text
-```
-
-모델을 바꾼 뒤에는 서버를 재시작하고 컬렉션을 재구축하세요. 이전 기본값(`nomic-embed-text`)으로
-만든 기존 컬렉션을 bge-m3로 옮길 때도 마찬가지입니다.
-
-```bash
-sudo systemctl restart rag-mcp
-sudo rag-ingest --recreate
-```
-
-TEI로 bge-m3를 띄우는 예, 다국어 리랭커, BM25의 한국어 한계 등 자세한 내용은
-[docs/DESIGN.md의 "한국어 / 다국어 문서"](docs/DESIGN.md#한국어--다국어-문서)를 참고하세요.
+자세한 내용은 [docs/DESIGN.md의 "한국어 / 다국어 문서"](docs/DESIGN.md#한국어--다국어-문서)를
+참고하세요.
 
 ## 설정
 
-모든 설정은 환경 변수로 이루어집니다 — 주석이 달린 전체 목록은 [.env.example](.env.example)을,
-설계 근거, 검색 파이프라인 상세 설명, 내부 쓰기 API, 전체 환경 변수 표는
-[docs/DESIGN.md](docs/DESIGN.md)를 참고하세요.
+모든 설정은 설정 파일(시스템 모드: `/etc/rag-mcp/rag-mcp.env`)의 환경 변수로 합니다. 주석이 달린 전체
+목록은 [.env.example](.env.example)에, 전체 환경 변수 표와 설계 설명은 [docs/DESIGN.md](docs/DESIGN.md)에
+있습니다. 자주 쓰는 항목은 다음과 같습니다.
+
+| 변수 | 기본값 | 설명 |
+|------|------|------|
+| `EMBEDDINGS_BASE_URL` | _(없음, 필수)_ | OpenAI 호환 임베딩 엔드포인트 |
+| `EMBEDDINGS_API_KEY` | _(비어 있음)_ | 임베딩 엔드포인트 API 키 |
+| `EMBEDDINGS_MODEL` | `bge-m3` | 임베딩 모델 이름 |
+| `RERANK_PROVIDER` | `none` | 리랭킹 사용 여부 (`none` 또는 `cohere`) |
+| `RAG_HYBRID` | `true` | 하이브리드 검색 (바꾸면 `--recreate` 필요) |
+| `RAG_KNOWLEDGE_DIR` | `/var/lib/rag-mcp/knowledge` | 수집할 문서 디렉터리 |
+| `MCP_PORT` | `8084` | MCP 서버 포트 |
+| `RAG_INTERNAL_TOKEN` | _(비어 있음)_ | 내부 쓰기 API 보호 토큰 |
+
+> 설정 파일에서는 `KEY=value  # 주석`처럼 같은 줄 끝에 주석을 달지 마세요. systemd가 주석까지 값으로
+> 읽습니다.
 
 ## 내부 쓰기 API (선택 사항)
 
-읽기 전용 MCP 도구 외에도, 서버는 *신뢰할 수 있는* 자동화 프로세스가 장애 기록을 쓸 수 있도록
-일반 HTTP 라우트(`/internal/knowledge/capture|similar|feedback|stats`)를 제공합니다
-("지식 플라이휠"). 이 라우트는 LLM에 **노출되지 않습니다**. `RAG_INTERNAL_TOKEN`으로 보호하세요.
+읽기 전용 MCP 도구와 별개로, 신뢰할 수 있는 자동화 프로세스가 장애 기록을 남길 수 있는 HTTP
+경로(`/internal/knowledge/capture|similar|feedback|stats`)를 제공합니다("지식 플라이휠"). 이 경로는
+LLM에 **노출되지 않으며**, `RAG_INTERNAL_TOKEN`으로 보호합니다. 자세한 내용은
 [docs/DESIGN.md](docs/DESIGN.md)를 참고하세요.
+
+## 저장소 구조
+
+| 경로 | 내용 |
+|------|------|
+| `server.py` | MCP 서버 (검색 도구 + 내부 쓰기 API) |
+| `ingest.py` | 문서 수집 |
+| `embeddings.py`, `vectorstore.py`, `reranker.py`, `capture.py` | 임베딩, Qdrant, 리랭킹, 장애 기록 |
+| `deploy/` | 설치·제거 스크립트, systemd 유닛, `rag-ingest` 명령 |
+| `knowledge/` | 샘플 문서 |
+| `.claude-plugin/marketplace.json` | Claude Code 플러그인 마켓플레이스 정의 |
+| `plugins/rag-mcp/` | Claude Code 플러그인 (MCP 서버 설정, `rag-knowledge` 스킬) |
+| `docs/DESIGN.md` | 설계 문서 (검색 파이프라인, 전체 환경 변수 표) |
+| `tests/` | 테스트 |
 
 ## 개발
 
 ```bash
 python3 -m pip install -r requirements.txt pytest
 python3 -m pytest tests/
-cp .env.example .env && set -a && . ./.env && set +a   # 설정 불러오기 (선택)
-python3 server.py                       # 로컬 :6333 의 Qdrant에 연결해 실행
+
+# 설치 없이 직접 실행 (로컬 :6333 의 Qdrant 필요)
+cp .env.example .env && set -a && . ./.env && set +a
+python3 server.py
 python3 ingest.py --path knowledge
 ```
 
