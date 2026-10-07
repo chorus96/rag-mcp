@@ -139,13 +139,46 @@ ID가 문서 경로와 청크 번호에서 결정되므로, 같은 문서를 다
 | `true` | 지정한 클러스터 안에서 결과를 찾음 |
 | `false` | 같은 클러스터에는 없어서 전체 범위 결과를 돌려줌 (응답에 `note` 포함) |
 
-## 6. 문서 수집
+## 6. 문서 디렉터리와 수집
+
+### 문서 디렉터리
+
+지식 베이스의 **원본은 문서 디렉터리**(`RAG_KNOWLEDGE_DIR`, 기본 `~/.local/share/rag-mcp/data/knowledge`)입니다.
+Qdrant의 포인트는 이 디렉터리의 파일에서 만든 사본이므로, `rag-ingest --recreate`로 언제든 다시 만들 수 있습니다.
+MCP 쓰기 도구로 추가한 문서도 먼저 파일로 저장한 뒤 색인합니다.
+
+```text
+knowledge/
+├── official/                  정식 문서 — 사람이 관리
+│   ├── longhorn-volume-attach.md      → source: official/longhorn-volume-attach.md
+│   └── runbooks/...                   (선택) 하위 폴더
+└── draft/                     초안 — 모델이 MCP 쓰기 도구로 만듦
+    └── longhorn-볼륨-복구.md          → source: draft/longhorn-볼륨-복구.md
+```
+
+| 폴더 | 쓰는 주체 | 들어오는 경로 | 나가는 경로 |
+|------|------|------|------|
+| `official/` | 사람 | 파일 복사 + `rag-ingest`, 또는 `rag-promote` 승격 | 사람이 파일 삭제 후 `--recreate` (또는 `source`로 청크 삭제) |
+| `draft/` | 모델 (`RAG_MCP_WRITE=true`일 때만) | `rag_add_document` | `rag_delete_document`, 또는 `rag-promote`로 `official/`에 승격 |
+
+규칙:
+
+- **폴더는 문서의 단계(정식 / 초안)를 나타냅니다.** 문서 유형(`runbook`, `rca` 등)은 front matter의 `type`이
+  나타냅니다. 단계와 유형을 분리했기 때문에 승격은 `draft/<경로>` → `official/<경로>`로 맨 앞 폴더만 바꾸는 단순한
+  이동이 되고, 모델이 쓰는 위치도 `draft/` 하나로 고정됩니다.
+- **`source`는 문서 디렉터리 기준 상대 경로입니다.** 포인트 ID(`uuid5(source#chunk)`)와 오래된 청크 정리의 기준이
+  되고, 검색 결과에도 그대로 나옵니다. `source`가 `draft/`로 시작하면 초안입니다.
+- **권한 경계는 디렉터리 하나로 판단합니다.** MCP 쓰기 도구는 경로를 정규화한 뒤 `draft/` 안인지만 확인하므로
+  (`documents._resolve_source`), `official/`을 비롯한 그 밖의 경로는 모델이 만들거나 지울 수 없습니다.
+- **두 폴더 모두 검색 대상입니다.** 초안은 저장 즉시 검색되고, 검토 여부는 `source`로 구분합니다.
+- `official/`·`draft/` 밖(예: 이전 구조의 `runbooks/`)에 둔 문서도 수집됩니다. 이 경우 맨 앞 폴더 이름이 유형이
+  됩니다(아래 "문서 형식").
 
 ### 문서 형식
 
 - **마크다운** — 선택적인 YAML front matter를 지원합니다.
 - **PDF** — 페이지 단위로 텍스트를 추출하고, 각 페이지를 `# [Page N]` 섹션으로 만듭니다. front matter가
-  없으므로 유형은 상위 폴더에서, 제목은 파일 이름에서 가져옵니다. 텍스트를 추출할 수 없는 스캔 PDF는
+  없으므로 유형은 하위 폴더 이름(없으면 `note`)에서, 제목은 파일 이름에서 가져옵니다. 텍스트를 추출할 수 없는 스캔 PDF는
   건너뜁니다.
 
 ```markdown
@@ -159,11 +192,17 @@ cluster: prod-eu      # 선택: 필터용
 # 본문...
 ```
 
-문서 디렉터리는 사람이 관리하는 정식 문서 `official/`과 모델이 만든 초안 `draft/`로 나뉩니다. 이 두 폴더는 문서의
-단계일 뿐 유형이 아니므로, `type`을 생략하면 그 아래 하위 폴더 이름에서 끝의 `s`를 뗀 값이 됩니다
-(`official/runbooks/` → `runbook`, `official/rcas/` → `rca`). 하위 폴더 없이 바로 둔 파일은 `note`입니다.
-그래서 `official/`이나 `draft/` 바로 아래 둔 문서는 front matter에 `type`을 쓰는 것을 권장합니다. `component`, `cluster`, `severity`는
-형식이 정해지지 않은 레이블이라 도메인에 맞게 자유롭게 써도 됩니다.
+문서 유형(`doc_type`)은 다음 순서로 정합니다(`ingest._infer_doc_type`).
+
+| 순서 | 조건 | 결과 (예) |
+|------|------|------|
+| 1 | front matter에 `type`이 있음 | 그 값 |
+| 2 | `official/`·`draft/`를 건너뛴 뒤 하위 폴더가 있음 | 첫 하위 폴더 이름에서 끝의 `s`를 뗀 값 (`official/runbooks/a.md` → `runbook`) |
+| 3 | 그 밖 | `note` (`official/a.md`, `draft/a.md`, `a.md`) |
+
+`official/`·`draft/` 바로 아래 둔 문서는 3번에 해당하므로 front matter에 `type`을 쓰는 것을 권장합니다.
+MCP 쓰기 도구는 항상 `type`을 front matter에 기록합니다. `component`, `cluster`, `severity`는 형식이 정해지지
+않은 레이블이라 도메인에 맞게 자유롭게 써도 됩니다.
 
 ### 청킹
 
@@ -213,7 +252,7 @@ rag-ingest --recreate           # 컬렉션을 지우고 전체 재구축
 
 ## 7. 쓰기 도구와 초안 승격
 
-기본 설정에서 지식 베이스에 문서를 넣는 길은 문서 디렉터리와 `rag-ingest`뿐입니다. 여기에 더해, 운영자가 켜면
+기본 설정에서 지식 베이스에 문서를 넣는 길은 [문서 디렉터리](#문서-디렉터리)의 `official/`과 `rag-ingest`뿐입니다. 여기에 더해, 운영자가 켜면
 모델이 대화 중에 초안을 추가·삭제할 수 있고, 사람이 그 초안을 검토해 정식 문서로 올릴 수 있습니다.
 
 ### MCP 쓰기 도구 (`rag_add_document`, `rag_delete_document`)
@@ -367,7 +406,7 @@ curl -s http://localhost:6333/collections/rag_kb | grep -o '"size":[0-9]*'
 | 실행 사용자 | 설치한 사용자 (root 불필요) |
 | 앱 / venv / Qdrant | `~/.local/share/rag-mcp/{app,venv,qdrant}` |
 | 설정 파일 | `~/.config/rag-mcp/rag-mcp.env` (권한 `600`) |
-| 데이터 | `~/.local/share/rag-mcp/data/{knowledge,qdrant,fastembed_cache}` |
+| 데이터 | `~/.local/share/rag-mcp/data/{knowledge,qdrant,fastembed_cache}` (`knowledge/` 아래 `official/`, `draft/`) |
 | systemd 유닛 | [`deploy/systemd/`](../deploy/systemd) → `~/.config/systemd/user` (경로는 `%h`) |
 | 명령 | `~/.local/bin/rag-ingest` (문서 수집), `~/.local/bin/rag-promote` (초안 승격) |
 
@@ -429,7 +468,7 @@ curl -s http://localhost:6333/collections/rag_kb | grep -o '"size":[0-9]*'
 | `EMBEDDINGS_MODEL` | `bge-m3` | 임베딩 모델 이름 (엔드포인트가 쓰는 이름에 맞춤) |
 | `EMBED_QUERY_PREFIX` / `EMBED_DOC_PREFIX` | 자동 (nomic → `search_query: `/`search_document: `, 그 외 → 빈 값) | 자동 감지가 놓치는 비대칭 모델에만 지정 (e5 등 → `query: `/`passage: `) |
 | **수집** | | |
-| `RAG_KNOWLEDGE_DIR` | `~/.local/share/rag-mcp/data/knowledge` | `rag-ingest`가 수집할 문서 디렉터리 (설치 스크립트가 실제 경로로 바꿔 넣음) |
+| `RAG_KNOWLEDGE_DIR` | `~/.local/share/rag-mcp/data/knowledge` | 문서 디렉터리 (`official/`, `draft/`). `rag-ingest`가 수집하고 쓰기 도구·`rag-promote`가 씀 (설치 스크립트가 실제 경로로 바꿔 넣음) |
 | `CHUNK_SIZE` / `CHUNK_OVERLAP` | `1500` / `100` | 청크 크기와 겹침 (글자 수) |
 | `EMBED_BATCH_SIZE` | `32` | 임베딩 요청당 청크 수 |
 | `QDRANT_UPSERT_BATCH` | `64` | Qdrant 업서트 요청당 포인트 수 |
