@@ -24,15 +24,32 @@ else
 fi
 rm -f /tmp/repo-check-compile.$$
 
-if python3 -c 'import pytest' 2>/dev/null; then
-    out=$(python3 -m pytest -q tests 2>&1 | tail -1)
-    if python3 -m pytest -q tests >/dev/null 2>&1; then
-        pass "테스트: $out"
-    else
-        fail "테스트 실패: $out"
+# 테스트에 필요한 패키지(pytest + requirements.txt)가 없으면 저장소의 .venv/ 에 설치해서 씁니다.
+# 시스템 Python에 직접 설치하지 않는 이유: 배포판에 따라 pip 설치가 막혀 있고(PEP 668),
+# 시스템 패키지를 건드리지 않기 위해서입니다. .venv/ 는 .gitignore 대상입니다.
+TEST_DEPS='import pytest, mcp, qdrant_client, httpx, yaml, pypdf'
+PY=python3
+if ! "$PY" -c "$TEST_DEPS" 2>/dev/null; then
+    PY=.venv/bin/python
+    if [ ! -x "$PY" ]; then
+        printf '  ....  테스트용 가상환경 생성 (.venv/)\n'
+        python3 -m venv .venv >/dev/null 2>&1 || PY=""
     fi
+    if [ -n "$PY" ] && ! "$PY" -c "$TEST_DEPS" 2>/dev/null; then
+        printf '  ....  테스트 패키지 설치 (pytest, requirements.txt)\n'
+        "$PY" -m pip install --quiet --disable-pip-version-check pytest -r requirements.txt >/dev/null 2>&1 \
+            || PY=""
+    fi
+fi
+if [ -z "$PY" ]; then
+    fail "테스트 패키지를 설치하지 못함 (python3 -m venv 또는 pip install 실패 — python3-venv 패키지와 네트워크 확인)"
 else
-    skip "pytest가 없어 테스트를 건너뜀 (python3 -m pip install pytest -r requirements.txt)"
+    out=$("$PY" -m pytest -q tests 2>&1 | tail -1)
+    if "$PY" -m pytest -q tests >/dev/null 2>&1; then
+        pass "테스트 ($PY): $out"
+    else
+        fail "테스트 실패 ($PY): $out"
+    fi
 fi
 
 # --- 2. 배포 스크립트 -----------------------------------------------------------------

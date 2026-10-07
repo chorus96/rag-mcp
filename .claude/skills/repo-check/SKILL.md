@@ -17,7 +17,7 @@ bash .claude/skills/repo-check/scripts/check.sh
 
 | 구역 | 확인하는 것 |
 |------|------|
-| 1. 파이썬 | `tools/*.py` 문법, `tests/` 테스트 (pytest가 없으면 SKIP) |
+| 1. 파이썬 | `tools/*.py` 문법, `tests/` 테스트 (테스트 패키지가 없으면 `.venv/`에 자동 설치) |
 | 2. 배포 스크립트 | `install.sh`·`uninstall.sh`·`rag-ingest` 문법, `install.sh`의 복사 목록과 `tools/*.py` 일치, `rag-ingest` 자리 표시자(`@...@`)를 `install.sh`가 모두 채우는지 |
 | 3. 환경 변수 | 코드가 읽는 변수가 `.env.example`과 `docs/DESIGN.md`에 모두 있는지, `.env.example`에 같은 줄 끝 주석이 없는지(systemd 규칙), `RAG_KNOWLEDGE_DIR=` 줄이 정확히 1개인지 |
 | 4. 플러그인 | 마켓플레이스·플러그인 JSON 형식, `claude plugin validate --strict`, 플러그인을 고쳤는데 `version`을 올리지 않았는지 |
@@ -30,8 +30,12 @@ bash .claude/skills/repo-check/scripts/check.sh
   사용자에게 알리세요.
 - **WARN**: 의도한 것인지 판단하세요. 예를 들어 플러그인을 고쳤다면 보통 `version`을 올려야 합니다.
   의도한 것이면 그 이유를 사용자에게 한 줄로 알리세요.
-- **SKIP**: 도구가 없어 건너뛴 항목입니다. 설치할 수 있으면 설치하고 다시 실행하고, 아니면 건너뛴
-  사실을 보고하세요.
+- **SKIP**: 도구가 없어 건너뛴 항목입니다(예: `claude` CLI가 없는 환경의 플러그인 검증). 설치할 수
+  있으면 설치하고 다시 실행하고, 아니면 건너뛴 사실을 보고하세요.
+
+테스트 패키지(pytest와 `requirements.txt`)가 없으면 스크립트가 저장소의 `.venv/`에 가상환경을 만들어
+설치합니다. 처음 한 번은 네트워크가 필요하며, 이후에는 이미 설치된 `.venv/`를 그대로 씁니다. 설치에
+실패하면 FAIL로 표시되니, `python3-venv` 패키지와 네트워크(pypi.org 접속)를 확인하세요.
 
 ## 3. 직접 확인할 것
 
