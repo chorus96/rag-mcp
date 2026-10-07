@@ -14,7 +14,7 @@
     knowledge/
     ├── official/     정식 문서 — 사람이 넣고 이 명령으로 색인
     └── draft/        초안 — MCP 쓰기 도구가 만들고 바로 색인 (이 명령도 함께 다시 색인)
-  - 디렉터리 아래의 .md / .pdf 를 폴더 구분 없이 모두 수집합니다(official/·draft/ 밖의 파일도 포함).
+  - official/·draft/ 아래의 .md / .pdf 만 수집합니다. 두 폴더 밖의 문서는 건너뛰고 개수를 경고로 알립니다.
   - source 는 문서 디렉터리 기준 상대 경로(예: official/foo.md)이고, 포인트 ID와 오래된 청크 정리의
     기준입니다. 그래서 누가 색인하든 root 를 문서 디렉터리로 맞춰야 같은 ID가 나옵니다.
   - official/·draft/ 는 문서의 단계일 뿐 유형이 아닙니다. 유형은 아래 "문서 형식"의 규칙으로 정합니다.
@@ -36,7 +36,7 @@
 
   doc_type 은 다음 순서로 정합니다 (_infer_doc_type).
     1. front matter 의 type
-    2. official/·draft/ 를 건너뛴 첫 하위 폴더 이름에서 끝의 s를 뗀 값 (official/runbooks/ → runbook)
+    2. official/·draft/ 바로 아래 하위 폴더 이름에서 끝의 s를 뗀 값 (official/runbooks/ → runbook)
     3. 그 밖에는 "note" (official/ 바로 아래 둔 문서 등) — 그래서 front matter에 type을 쓰는 것을 권장합니다.
   PDF에는 front matter가 없으므로 type은 2·3번 규칙으로, 제목은 파일 이름에서 가져옵니다.
 
@@ -181,18 +181,17 @@ def _chunk_document(body: str) -> list[str]:
     return [c for c in chunks if c] or _chunk(body, CHUNK_SIZE, CHUNK_OVERLAP)
 
 
-# 문서의 단계(정식 / 초안)를 나타내는 최상위 폴더. 문서 유형이 아니므로 유형을 정할 때 건너뜁니다.
+# 문서 디렉터리의 두 단계 폴더(정식 / 초안). 수집은 이 두 폴더 아래만 하고, 폴더 이름은 문서 유형이 아닙니다.
 _STAGE_DIRS = ("official", "draft")
 
 
 def _infer_doc_type(meta: dict[str, Any], file: Path, root: Path) -> str:
     if meta.get("type"):
         return str(meta["type"])
-    folders = list(file.relative_to(root).parts[:-1])
-    if folders and folders[0] in _STAGE_DIRS:
-        folders = folders[1:]
-    if folders:
-        return folders[0].rstrip("s")  # official/runbooks -> runbook, rcas -> rca
+    parts = file.relative_to(root).parts
+    # official/<하위 폴더>/<파일> 처럼 단계 폴더 아래 하위 폴더가 있을 때만 그 이름을 씁니다.
+    if len(parts) > 2 and parts[0] in _STAGE_DIRS:
+        return parts[1].rstrip("s")  # official/runbooks -> runbook, draft/rcas -> rca
     return "note"
 
 
@@ -285,11 +284,19 @@ def _ensure_collection(client: QdrantClient, dim: int, recreate: bool) -> None:
 
 # --- 수집 실행 ----------------------------------------------------------------
 def _discover_files(path: Path) -> list[Path]:
-    """`path` 아래의 지원되는 모든 (.md/.pdf) 파일. ID가 안정적이도록 정렬합니다."""
-    return sorted(
-        p for p in path.rglob("*")
-        if p.is_file() and p.suffix.lower() in _SUPPORTED_SUFFIXES
-    )
+    """`path`의 official/·draft/ 아래 지원되는 (.md/.pdf) 파일. ID가 안정적이도록 정렬합니다.
+
+    두 폴더 밖에 있는 문서는 수집하지 않고, 몇 개를 건너뛰었는지 경고로 알립니다.
+    """
+    def docs(base: Path) -> list[Path]:
+        return [p for p in base.rglob("*") if p.is_file() and p.suffix.lower() in _SUPPORTED_SUFFIXES]
+
+    files = sorted(p for stage in _STAGE_DIRS for p in docs(path / stage))
+    ignored = len(docs(path)) - len(files)
+    if ignored:
+        log.warning("ignored %d document(s) outside %s under %s (move them into official/)",
+                    ignored, " and ".join(f"{s}/" for s in _STAGE_DIRS), path)
+    return files
 
 
 def ingest_file(client: QdrantClient, file: Path, root: Path, *, ensure: bool = True,
@@ -352,7 +359,7 @@ def ingest_file(client: QdrantClient, file: Path, root: Path, *, ensure: bool = 
 def ingest(path: Path, recreate: bool) -> None:
     files = _discover_files(path)
     if not files:
-        log.warning("no .md or .pdf files found under %s", path)
+        log.warning("no .md or .pdf files found under %s/{official,draft}", path)
         return
 
     client = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY, timeout=HTTP_TIMEOUT)
@@ -376,7 +383,8 @@ def main() -> None:
     parser.add_argument(
         "--path",
         default="./knowledge",
-        help="Directory tree of .md and .pdf documents to ingest (default: ./knowledge).",
+        help="Knowledge directory; .md and .pdf files under its official/ and draft/ are ingested "
+             "(default: ./knowledge).",
     )
     parser.add_argument(
         "--recreate",

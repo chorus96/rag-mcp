@@ -1,9 +1,10 @@
 """tools/ingest.py 테스트 — 문서 수집.
 
 확인하는 것
-  - 파일 탐색: 문서 디렉터리 아래(official/ 등)에서 .md / .pdf 만 찾고 나머지 확장자는 무시
+  - 파일 탐색: official/·draft/ 아래에서 .md / .pdf 만 찾고 나머지 확장자는 무시. 두 폴더 밖의 문서는
+    수집하지 않고 건너뛴 개수를 경고로 알림
   - 문서 유형 추론: front matter 의 type 우선, official/·draft/ 는 단계 폴더라 건너뛰고 그 아래 하위 폴더
-    이름(끝의 s 제거), 없으면 note
+    이름(끝의 s 제거), 없으면 note. 두 폴더 밖의 경로는 폴더 이름을 유형으로 쓰지 않음
   - PDF 추출: 페이지마다 `# [Page N]` 섹션을 만들어 청킹 후에도 페이지 맥락이 남음,
     빈 페이지·이미지 전용 PDF는 건너뜀
   - 임베딩 배치: EMBED_BATCH_SIZE 단위로 요청하고, 벡터 순서가 청크 순서와 같음
@@ -39,6 +40,18 @@ def test_discover_files_picks_md_and_pdf_only(tmp_path):
     assert "d.txt" not in found and "e.yaml" not in found
 
 
+def test_discover_files_only_official_and_draft(tmp_path, caplog):
+    for rel in ("official/a.md", "official/runbooks/b.md", "draft/c.md",
+                "runbooks/old.md", "top.md", "other/x.pdf"):
+        (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / rel).write_text("x", encoding="utf-8")
+
+    found = [str(p.relative_to(tmp_path)) for p in ingest._discover_files(tmp_path)]
+    # official/·draft/ 밖의 문서는 수집하지 않고, 건너뛴 개수를 경고로 알립니다.
+    assert found == ["draft/c.md", "official/a.md", "official/runbooks/b.md"]
+    assert "ignored 3 document(s)" in caplog.text
+
+
 # --- 문서 유형 추론 -------------------------------------------------------------
 
 def test_infer_doc_type_skips_official_and_draft_folders(tmp_path):
@@ -52,7 +65,8 @@ def test_infer_doc_type_skips_official_and_draft_folders(tmp_path):
     assert infer("draft/a.md") == "note"
     assert infer("official/runbooks/a.md") == "runbook"
     assert infer("draft/rcas/a.md") == "rca"
-    # 문서 디렉터리 바로 아래 둔 문서도 note 입니다.
+    # official/·draft/ 밖의 경로는 폴더 이름을 유형으로 쓰지 않습니다.
+    assert infer("runbooks/a.md") == "note"
     assert infer("a.md") == "note"
 
 

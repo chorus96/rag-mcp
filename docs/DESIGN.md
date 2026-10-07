@@ -171,8 +171,8 @@ knowledge/
 - **권한 경계는 디렉터리 하나로 판단합니다.** MCP 쓰기 도구는 경로를 정규화한 뒤 `draft/` 안인지만 확인하므로
   (`documents._resolve_source`), `official/`을 비롯한 그 밖의 경로는 모델이 만들거나 지울 수 없습니다.
 - **두 폴더 모두 검색 대상입니다.** 초안은 저장 즉시 검색되고, 검토 여부는 `source`로 구분합니다.
-- `official/`·`draft/` 밖(예: 이전 구조의 `runbooks/`)에 둔 문서도 수집됩니다. 이 경우 맨 앞 폴더 이름이 유형이
-  됩니다(아래 "문서 형식").
+- **수집 대상은 `official/`과 `draft/` 아래뿐입니다.** 두 폴더 밖에 둔 문서는 `rag-ingest`가 건너뛰고 개수를 경고로
+  알립니다(`ingest._discover_files`).
 
 ### 문서 형식
 
@@ -197,8 +197,8 @@ cluster: prod-eu      # 선택: 필터용
 | 순서 | 조건 | 결과 (예) |
 |------|------|------|
 | 1 | front matter에 `type`이 있음 | 그 값 |
-| 2 | `official/`·`draft/`를 건너뛴 뒤 하위 폴더가 있음 | 첫 하위 폴더 이름에서 끝의 `s`를 뗀 값 (`official/runbooks/a.md` → `runbook`) |
-| 3 | 그 밖 | `note` (`official/a.md`, `draft/a.md`, `a.md`) |
+| 2 | `official/`·`draft/` 아래 하위 폴더 안에 있음 | 첫 하위 폴더 이름에서 끝의 `s`를 뗀 값 (`official/runbooks/a.md` → `runbook`) |
+| 3 | 그 밖 | `note` (`official/a.md`, `draft/a.md`) |
 
 `official/`·`draft/` 바로 아래 둔 문서는 3번에 해당하므로 front matter에 `type`을 쓰는 것을 권장합니다.
 MCP 쓰기 도구는 항상 `type`을 front matter에 기록합니다. `component`, `cluster`, `severity`는 형식이 정해지지

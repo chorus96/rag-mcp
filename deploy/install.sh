@@ -163,7 +163,7 @@ if [ -z "$(ls -A "$KNOWLEDGE_DIR")" ]; then
     log "샘플 문서 복사 → $KNOWLEDGE_DIR"
     cp -r "$SRC_DIR/knowledge/." "$KNOWLEDGE_DIR/"
 fi
-# 업그레이드 때 이전 구조(예: runbooks/)를 쓰던 설치에도 두 폴더를 만들어 둡니다. 기존 문서는 옮기지 않습니다.
+# 업그레이드 때도 두 폴더가 없으면 만듭니다. 기존 문서는 옮기지 않습니다(두 폴더 밖의 문서는 수집되지 않음).
 log "문서 디렉터리 → $KNOWLEDGE_DIR/{official,draft}"
 install -d -m 755 "$KNOWLEDGE_DIR/official" "$KNOWLEDGE_DIR/draft"
 
