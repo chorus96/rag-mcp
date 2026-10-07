@@ -121,7 +121,7 @@ ID가 문서 경로와 청크 번호에서 결정되므로, 같은 문서를 다
 | `rag_add_document(title, content, doc_type?, tags?, component?, cluster?, overwrite?)` | (선택) `draft/`에 문서 추가 — `RAG_MCP_WRITE=true`일 때만 등록. [7장](#mcp-쓰기-도구-rag_add_document-rag_delete_document) 참고 |
 | `rag_delete_document(source)` | (선택) `draft/` 문서 삭제 — 파일과 청크를 함께 삭제. `RAG_MCP_WRITE=true`일 때만 등록 |
 
-`limit`은 1부터 `RAG_MAX_LIMIT`(기본 20) 사이로 제한되며, 생략하면 `RAG_DEFAULT_LIMIT`(기본 5)입니다.
+검색 도구의 `limit`은 1부터 `RAG_MAX_LIMIT`(기본 20) 사이로 제한되며, 생략하면 `RAG_DEFAULT_LIMIT`(기본 5)입니다.
 
 ### 필터의 의미
 
@@ -139,6 +139,59 @@ ID가 문서 경로와 청크 번호에서 결정되므로, 같은 문서를 다
 | `None` | 클러스터를 지정하지 않음 |
 | `true` | 지정한 클러스터 안에서 결과를 찾음 |
 | `false` | 같은 클러스터에는 없어서 전체 범위 결과를 돌려줌 (응답에 `note` 포함) |
+
+### 문서 목록 (`rag_list_documents`)
+
+검색이 "어떤 내용이 있나"에 답한다면, 이 도구는 "어떤 파일이 있나"에 답합니다. 실제 로직은
+`documents.list_documents`에 있습니다.
+
+| 호출 | 결과 |
+|------|------|
+| `rag_list_documents()` | `official/` 전체 |
+| `rag_list_documents(subdir="runbooks")` | `official/runbooks/` 아래만 |
+| `rag_list_documents(folder="draft")` | `draft/` 전체 (항목마다 `promote_to` 포함) |
+| `rag_list_documents(limit=500)` | 최대 500개까지 (기본 100) |
+| `rag_list_documents(folder="runbooks")` | 오류 — `folder`는 `official`/`draft`만 |
+| `rag_list_documents(subdir="../draft")` | 오류 — `folder` 밖을 가리킴 |
+
+응답 예 (`rag_list_documents(subdir="runbooks")`, 하나는 색인됐고 하나는 아직 `rag-ingest` 전):
+
+```json
+{
+  "status": "ok",
+  "folder": "official/runbooks/",
+  "total": 2,
+  "returned": 2,
+  "truncated": false,
+  "documents": [
+    {"source": "official/runbooks/longhorn-volume-attach.md", "title": "Longhorn 볼륨이 \"attaching\" 상태에서 멈춤",
+     "doc_type": "runbook", "size_bytes": 1904, "modified": "2026-10-07T08:32:34+00:00", "chunks": 5},
+    {"source": "official/runbooks/node-drain.md", "title": "노드 드레인 절차",
+     "doc_type": "runbook", "size_bytes": 812, "modified": "2026-10-07T09:10:02+00:00", "chunks": 0}
+  ]
+}
+```
+
+처리 과정:
+
+1. `folder`가 `official`/`draft`인지, `subdir`를 정규화했을 때 그 폴더 안인지 확인합니다. `draft/`는 첫 초안을
+   저장할 때 만들어지므로, 아직 없으면 오류 대신 빈 목록을 돌려줍니다.
+2. 폴더 아래의 `.md`/`.pdf`를 경로 순으로 모으고, 앞에서부터 `limit`개만 자세히 읽습니다(`total`은 전체 개수).
+3. 마크다운은 front matter에서 `title`과 `type`을 읽고, `doc_type`은 수집과 같은 규칙(`ingest._infer_doc_type`)으로
+   정합니다. 그래서 목록의 `doc_type`이 검색 필터 값과 같습니다.
+4. 돌려줄 `source`들로 Qdrant **facet**(`source` 키, `MatchAny` 필터)을 한 번 호출해 문서별 청크 수를 셉니다.
+   목록에 없는 `source`는 0입니다.
+
+설계상 선택과 그 이유:
+
+- **목록은 파일에서, 색인 상태는 Qdrant에서 가져옵니다.** 원본은 문서 디렉터리이므로 파일을 기준으로 해야 아직
+  색인하지 않은 문서(`chunks: 0`)도 보입니다. 반대로 Qdrant만 보면 색인된 문서만 나옵니다.
+- **청크 수는 요청 한 번으로 셉니다.** 문서마다 `count`를 호출하면 목록 길이만큼 요청이 늘어납니다. `source`는
+  이미 키워드 인덱스가 있으므로 facet으로 한 번에 셀 수 있습니다.
+- **Qdrant가 실패해도 목록은 돌려줍니다.** 그때 `chunks`는 `null`(알 수 없음)이고, 0(색인 전)과 구분됩니다.
+- **읽기 전용이라 항상 등록합니다.** 파일을 바꾸지 않으므로 `RAG_MCP_WRITE`와 관계없이 노출합니다. 승격은 여전히
+  사람이 `rag-promote`로만 합니다.
+- **본문은 돌려주지 않습니다.** 응답을 작게 유지하고, 내용 확인은 검색 도구로 하게 합니다.
 
 ## 6. 문서 디렉터리와 수집
 
