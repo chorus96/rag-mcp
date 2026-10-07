@@ -10,7 +10,7 @@
     {
       "name": "rag-mcp",
       "source": "./plugins/rag-mcp",
-      "description": "rag-mcp 서버에 연결해 런북, RCA 같은 운영 문서를 검색하는 MCP 도구와 사용 안내 스킬",
+      "description": "rag-mcp 서버에 연결해 런북, RCA 같은 운영 문서(정식 문서 official/, 초안 draft/)를 검색하는 MCP 도구와 사용 안내 스킬",
       "category": "knowledge",
       "homepage": "https://github.com/chorus96/rag-mcp"
     }
