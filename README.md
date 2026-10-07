@@ -25,9 +25,9 @@
 
 | 구성 요소 | 역할 |
 |------|------|
-| **rag-mcp 서버** (`server.py`) | MCP 검색 도구를 `http://<서버>:8084/mcp`(streamable-http)로 제공 |
+| **rag-mcp 서버** (`tools/server.py`) | MCP 검색 도구를 `http://<서버>:8084/mcp`(streamable-http)로 제공 |
 | **Qdrant** | 문서 청크의 벡터를 저장하는 벡터 DB (`127.0.0.1:6333`) |
-| **rag-ingest** (`ingest.py`) | 문서를 청크로 나누고 임베딩해 Qdrant에 기록하는 수집 명령 |
+| **rag-ingest** (`tools/ingest.py`) | 문서를 청크로 나누고 임베딩해 Qdrant에 기록하는 수집 명령 |
 | **임베딩 엔드포인트** | 텍스트를 벡터로 바꾸는 OpenAI 호환 서버 — **별도로 준비** |
 | **Claude Code 플러그인** (`plugins/rag-mcp`) | Claude Code에서 rag-mcp 서버에 연결 |
 
@@ -388,9 +388,10 @@ LLM에 **노출되지 않으며**, `RAG_INTERNAL_TOKEN`으로 보호합니다. �
 
 | 경로 | 내용 |
 |------|------|
-| `server.py` | MCP 서버 (검색 도구 + 내부 쓰기 API) |
-| `ingest.py` | 문서 수집 |
-| `embeddings.py`, `vectorstore.py`, `reranker.py`, `capture.py` | 임베딩, Qdrant, 리랭킹, 장애 기록 |
+| `tools/server.py` | MCP 서버 (검색 도구 + 내부 쓰기 API) |
+| `tools/ingest.py` | 문서 수집 |
+| `tools/embeddings.py`, `tools/vectorstore.py`, `tools/reranker.py`, `tools/capture.py` | 임베딩, Qdrant, 리랭킹, 장애 기록 |
+| `requirements.txt` | Python 의존성 |
 | `deploy/` | 설치·제거 스크립트, systemd 유닛, `rag-ingest` 명령 |
 | `knowledge/` | 샘플 문서 |
 | `.claude-plugin/marketplace.json` | Claude Code 플러그인 마켓플레이스 정의 |
@@ -406,8 +407,8 @@ python3 -m pytest tests/
 
 # 설치 없이 직접 실행 (로컬 :6333 의 Qdrant 필요)
 cp .env.example .env && set -a && . ./.env && set +a
-python3 server.py
-python3 ingest.py --path knowledge
+python3 tools/server.py
+python3 tools/ingest.py --path knowledge
 ```
 
 ## 라이선스

@@ -140,7 +140,7 @@ fi
 # --- 2. 애플리케이션 + Python 의존성 -------------------------------------------------
 # 가상환경은 처음 한 번만 만들고, 업그레이드 때는 의존성만 갱신합니다.
 log "애플리케이션 복사 → $PREFIX/app"
-install -m 644 "$SRC_DIR"/{server,ingest,embeddings,capture,reranker,vectorstore}.py \
+install -m 644 "$SRC_DIR"/tools/{server,ingest,embeddings,capture,reranker,vectorstore}.py \
     "$SRC_DIR/requirements.txt" "$PREFIX/app/"
 
 if [ ! -x "$PREFIX/venv/bin/python" ]; then

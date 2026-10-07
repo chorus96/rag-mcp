@@ -13,7 +13,7 @@ PDF 추출은 가짜 pypdf로 검증하므로 실제 PDF가 필요 없습니다.
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
 
 import ingest  # noqa: E402
 

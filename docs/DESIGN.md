@@ -22,12 +22,12 @@ rag-mcp는 런북, 과거 장애, RCA(근본 원인 분석) 문서를 **Qdrant**
 
 | 모듈 | 역할 |
 |------|------|
-| [`server.py`](../server.py) | FastMCP 서버. 검색 도구 5개와 내부 쓰기 API(HTTP 라우트)를 제공 |
-| [`ingest.py`](../ingest.py) | 마크다운/PDF 문서를 읽어 청크로 나누고 임베딩해 Qdrant에 업서트 |
-| [`embeddings.py`](../embeddings.py) | OpenAI 호환 임베딩 호출, 비대칭 모델 접두사 처리 |
-| [`vectorstore.py`](../vectorstore.py) | Qdrant 컬렉션 스키마, BM25 희소 벡터(FastEmbed), 하이브리드 질의 |
-| [`reranker.py`](../reranker.py) | Cohere/Jina 호환 크로스 인코더 리랭킹 (선택 사항) |
-| [`capture.py`](../capture.py) | 내부 쓰기 API의 실제 로직: 장애 기록, 반복 장애 확인, 피드백, 통계 |
+| [`server.py`](../tools/server.py) | FastMCP 서버. 검색 도구 5개와 내부 쓰기 API(HTTP 라우트)를 제공 |
+| [`ingest.py`](../tools/ingest.py) | 마크다운/PDF 문서를 읽어 청크로 나누고 임베딩해 Qdrant에 업서트 |
+| [`embeddings.py`](../tools/embeddings.py) | OpenAI 호환 임베딩 호출, 비대칭 모델 접두사 처리 |
+| [`vectorstore.py`](../tools/vectorstore.py) | Qdrant 컬렉션 스키마, BM25 희소 벡터(FastEmbed), 하이브리드 질의 |
+| [`reranker.py`](../tools/reranker.py) | Cohere/Jina 호환 크로스 인코더 리랭킹 (선택 사항) |
+| [`capture.py`](../tools/capture.py) | 내부 쓰기 API의 실제 로직: 장애 기록, 반복 장애 확인, 피드백, 통계 |
 
 `ingest.py`, `capture.py`, `server.py`는 모두 `vectorstore.py`와 `embeddings.py`를 거칩니다. 그래서
 쓰기 경로와 읽기 경로 사이에서 컬렉션 스키마, 벡터 이름, 임베딩 설정이 어긋나지 않습니다.
