@@ -3,7 +3,7 @@
 확인하는 것
   - 파일 탐색: 문서 디렉터리 아래(official/ 등)에서 .md / .pdf 만 찾고 나머지 확장자는 무시
   - 문서 유형 추론: front matter 의 type 우선, official/·draft/ 는 단계 폴더라 건너뛰고 그 아래 하위 폴더
-    이름(끝의 s 제거), 없으면 note. official/·draft/ 밖의 이전 구조(runbooks/ 등)도 같은 규칙
+    이름(끝의 s 제거), 없으면 note
   - PDF 추출: 페이지마다 `# [Page N]` 섹션을 만들어 청킹 후에도 페이지 맥락이 남음,
     빈 페이지·이미지 전용 PDF는 건너뜀
   - 임베딩 배치: EMBED_BATCH_SIZE 단위로 요청하고, 벡터 순서가 청크 순서와 같음
@@ -52,8 +52,7 @@ def test_infer_doc_type_skips_official_and_draft_folders(tmp_path):
     assert infer("draft/a.md") == "note"
     assert infer("official/runbooks/a.md") == "runbook"
     assert infer("draft/rcas/a.md") == "rca"
-    # 그 밖의 폴더는 예전처럼 폴더 이름에서 유형을 정합니다.
-    assert infer("runbooks/a.md") == "runbook"
+    # 문서 디렉터리 바로 아래 둔 문서도 note 입니다.
     assert infer("a.md") == "note"
 
 
