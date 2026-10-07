@@ -50,7 +50,7 @@ services:
       # (any OpenAI-compatible endpoint: OpenAI, a LiteLLM proxy, Azure gateway,
       # TEI, ...). For 'openai' also set EMBEDDINGS_BASE_URL + EMBEDDINGS_API_KEY.
       EMBEDDINGS_PROVIDER: ${EMBEDDINGS_PROVIDER:-ollama}
-      EMBEDDINGS_MODEL: ${EMBEDDINGS_MODEL:-nomic-embed-text}
+      EMBEDDINGS_MODEL: ${EMBEDDINGS_MODEL:-bge-m3}
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
       EMBEDDINGS_BASE_URL: ${EMBEDDINGS_BASE_URL:-}
       EMBEDDINGS_API_KEY: ${EMBEDDINGS_API_KEY:-}
@@ -113,7 +113,7 @@ services:
       QDRANT_COLLECTION: ${QDRANT_COLLECTION:-rag_kb}
       QDRANT_API_KEY: ${QDRANT_API_KEY:-}
       EMBEDDINGS_PROVIDER: ${EMBEDDINGS_PROVIDER:-ollama}
-      EMBEDDINGS_MODEL: ${EMBEDDINGS_MODEL:-nomic-embed-text}
+      EMBEDDINGS_MODEL: ${EMBEDDINGS_MODEL:-bge-m3}
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
       EMBEDDINGS_BASE_URL: ${EMBEDDINGS_BASE_URL:-}
       EMBEDDINGS_API_KEY: ${EMBEDDINGS_API_KEY:-}

@@ -43,7 +43,7 @@ MCP 서버로 노출하여, 에이전트가 운영 중인 클러스터를 디버
 `rag_search("Longhorn volume stuck attaching")`를 호출하면, 두 검색 방식이 텍스트를 서로 다르게
 이해하기 때문에 질의 텍스트가 **두 가지 표현으로 동시에** 변환됩니다.
 
-- **밀집 벡터(`nomic-embed-text`)** — 질의의 *의미*가 약 768개의 숫자 목록이 됩니다. Qdrant는
+- **밀집 벡터(`bge-m3`)** — 질의의 *의미*가 1024개의 숫자 목록이 됩니다. Qdrant는
   **HNSW** 그래프 인덱스 위에서 **코사인 유사도**로 저장된 모든 청크와 비교합니다. HNSW는
   *근사* 최근접 이웃 검색입니다. 빠르고 수백만 개의 포인트까지 확장되지만, 반환된 top-k가
   수학적으로 정확한 top-k라는 보장은 없습니다 — 실제로는 매우 가깝습니다(정확한 전수 스캔은
@@ -68,7 +68,7 @@ MCP 서버로 노출하여, 에이전트가 운영 중인 클러스터를 디버
 
 | 용어 | 쉬운 의미 | 이 스택에서 |
 |------|---------------|---------------|
-| 밀집 벡터 (dense vector) | 의미 / 시맨틱 | `nomic-embed-text` → 약 768개의 float |
+| 밀집 벡터 (dense vector) | 의미 / 시맨틱 | `bge-m3` → 1024개의 float |
 | 희소 벡터 (sparse vector) | 정확한 단어 / 키워드 | FastEmbed BM25 → `{term_id: weight}` |
 | HNSW | 근사 최근접 이웃 그래프 인덱스 | 빠른 코사인 검색, 거의 정확한 top-k |
 | RRF | 두 목록을 위치 기준으로 병합하는 순위 결합 | 밀집 + 희소 순서를 결합 |
@@ -133,7 +133,7 @@ API**를 제공합니다. 이것들은 일반 HTTP 라우트(`@mcp.custom_route`
 - 임베딩 제공자:
   - 컨테이너에서 접근 가능하고 모델을 내려받은 **Ollama** (기본값, 오프라인):
     ```bash
-    ollama pull nomic-embed-text
+    ollama pull bge-m3
     ```
   - **또는** OpenAI 호환 엔드포인트 — `EMBEDDINGS_PROVIDER=openai`로 설정하세요
     ([설정](#설정-환경-변수) 참고).
@@ -243,7 +243,7 @@ docker compose up -d --build
 | `QDRANT_COLLECTION` | `rag_kb` | 컬렉션 이름 |
 | `QDRANT_API_KEY` | _(미설정)_ | Qdrant 인증을 켠 경우 |
 | `EMBEDDINGS_PROVIDER` | `ollama` | `ollama` 또는 `openai` (OpenAI 호환) |
-| `EMBEDDINGS_MODEL` | `nomic-embed-text` | 임베딩 모델 |
+| `EMBEDDINGS_MODEL` | `bge-m3` | 임베딩 모델 (다국어) |
 | `OLLAMA_BASE_URL` | `http://host.docker.internal:11434` | `ollama` 제공자 호스트 |
 | `EMBEDDINGS_BASE_URL` | `https://api.openai.com` | `openai` 제공자 기본 URL (예: LiteLLM 프록시) |
 | `EMBEDDINGS_API_KEY` | _(미설정)_ | `openai` 제공자 키 |
@@ -268,9 +268,10 @@ EMBEDDINGS_MODEL=text-embedding-3-small \       # 대칭 모델 → 접두사가
 
 ## 한국어 / 다국어 문서
 
-기본 임베딩 모델 `nomic-embed-text`는 영어 위주로 학습되어 한국어 질의·문서의 의미 검색 정확도가
-떨어질 수 있습니다. 한국어 문서가 많다면 다국어 모델 **`bge-m3`**(1024차원, 최대 입력 8192 토큰)를
-권장합니다. 코드 변경은 필요 없습니다.
+기본 임베딩 모델은 한국어를 포함한 다국어 모델 **`bge-m3`**(1024차원, 최대 입력 8192 토큰)입니다.
+영어 위주로 학습된 이전 기본값 `nomic-embed-text`(768차원)보다 한국어 질의·문서의 의미 검색이
+정확합니다. 영어 문서만 쓰고 더 가벼운 모델을 원하면 `EMBEDDINGS_MODEL=nomic-embed-text`로 바꿀 수
+있습니다(이 경우 접두사는 자동으로 붙습니다).
 
 - **차원 자동 처리** — 컬렉션은 실제 임베딩 길이로 생성되므로(`ingest.py`, `capture.py`) 1024차원에
   자동으로 맞춰집니다.
@@ -303,7 +304,8 @@ EMBEDDINGS_MODEL=BAAI/bge-m3
 
 ### 적용 및 확인
 
-모델을 바꾸면 반드시 컬렉션을 재구축해야 합니다(기존 벡터와 차원·의미가 다릅니다).
+모델을 바꾸면 반드시 컬렉션을 재구축해야 합니다(기존 벡터와 차원·의미가 다릅니다). 이전 기본값
+`nomic-embed-text`로 만든 기존 컬렉션도 마찬가지입니다.
 
 ```bash
 docker compose up -d rag-mcp                  # 새 모델로 질의하도록 재시작

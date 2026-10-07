@@ -78,7 +78,7 @@ Claude Code, LibreChat Agents, 프록시를 통한 Open WebUI, 직접 만든 도
 [Ollama](https://ollama.com)가 필요합니다.
 
 ```bash
-ollama pull nomic-embed-text     # 최초 1회
+ollama pull bge-m3               # 최초 1회 (기본 다국어 임베딩 모델)
 
 git clone https://github.com/mmelmesary/rag-mcp.git && cd rag-mcp
 cp .env.example .env             # 기본값 그대로 바로 동작합니다
@@ -183,20 +183,22 @@ EMBEDDINGS_MODEL=text-embedding-3-small
 docker compose run --rm rag-ingest --recreate
 ```
 
-## 한국어 문서를 쓰는 경우
+## 한국어 문서와 임베딩 모델
 
-기본 임베딩 모델 `nomic-embed-text`는 영어 위주라 한국어 검색 정확도가 떨어질 수 있습니다.
-한국어 문서가 많다면 다국어 모델 **`bge-m3`**를 권장합니다 — 코드 변경 없이 설정만 바꾸면 됩니다.
+기본 임베딩 모델은 한국어를 포함한 다국어 모델 **`bge-m3`**입니다. 한국어 문서와 질의를 별도
+설정 없이 바로 쓸 수 있습니다.
+
+영어 문서만 쓰고 더 가벼운 모델을 원하면 `nomic-embed-text`로 바꿀 수 있습니다.
 
 ```bash
-ollama pull bge-m3
+ollama pull nomic-embed-text
 
 # .env
-EMBEDDINGS_PROVIDER=ollama
-EMBEDDINGS_MODEL=bge-m3
+EMBEDDINGS_MODEL=nomic-embed-text
 ```
 
-모델을 바꾼 뒤에는 서버를 재시작하고 컬렉션을 재구축하세요.
+모델을 바꾼 뒤에는 서버를 재시작하고 컬렉션을 재구축하세요. 이전 기본값(`nomic-embed-text`)으로
+만든 기존 컬렉션을 bge-m3로 옮길 때도 마찬가지입니다.
 
 ```bash
 docker compose up -d rag-mcp

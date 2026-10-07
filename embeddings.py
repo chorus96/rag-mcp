@@ -45,7 +45,7 @@ class EmbeddingConfig:
 
 def _build_config() -> EmbeddingConfig:
     provider = os.environ.get("EMBEDDINGS_PROVIDER", "ollama").strip().lower()
-    model = os.environ.get("EMBEDDINGS_MODEL", "nomic-embed-text")
+    model = os.environ.get("EMBEDDINGS_MODEL", "bge-m3")
 
     ollama_url = os.environ.get("OLLAMA_BASE_URL") or "http://host.docker.internal:11434"
     openai_url = os.environ.get("EMBEDDINGS_BASE_URL") or "https://api.openai.com"

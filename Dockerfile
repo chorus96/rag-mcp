@@ -24,7 +24,7 @@ ENV MCP_HOST=0.0.0.0 \
     QDRANT_URL=http://qdrant:6333 \
     QDRANT_COLLECTION=rag_kb \
     EMBEDDINGS_PROVIDER=ollama \
-    EMBEDDINGS_MODEL=nomic-embed-text \
+    EMBEDDINGS_MODEL=bge-m3 \
     OLLAMA_BASE_URL=http://host.docker.internal:11434
 
 EXPOSE 8084
