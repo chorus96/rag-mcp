@@ -9,7 +9,7 @@
 확인하는 것
   - 파일 저장: draft/<제목>.md 에 front matter + 본문으로 저장. 문서 유형은 폴더가 아니라 front matter에만 씀
   - 저장한 파일을 ingest_file 로 색인하고, source 가 rag-ingest 와 같은 형식(상대 경로)임
-  - 입력 검증: 빈 제목·본문, 너무 긴 본문, 잘못된 doc_type 은 저장하지 않음
+  - 입력 검증: 빈 제목·본문, 너무 긴 본문은 저장하지 않음
   - 덮어쓰기: 같은 경로에 문서가 있으면 overwrite=True 일 때만 바꿈
   - 경로 안전: 제목에 경로 문자가 있어도 문서 디렉터리 밖에 쓰지 않음
   - 색인 실패: 파일은 남기고 오류를 돌려줌
@@ -72,34 +72,27 @@ def _front_matter(path):
 def test_add_document_writes_file_and_ingests(monkeypatch, tmp_path):
     rec = _setup(monkeypatch, tmp_path)
     out = documents.add_document(
-        "Longhorn 볼륨 attaching 멈춤", "# 증상\n파드가 멈춤", "rca",
+        "Longhorn 볼륨 attaching 멈춤", "# 증상\n파드가 멈춤",
         tags=["longhorn"], component="longhorn", cluster="prod-01", client=object(),
     )
-    assert out["status"] == "ok"
+    assert out["status"] == "ok" and out["doc_type"] == "draft"
     assert out["source"] == "draft/longhorn-볼륨-attaching-멈춤.md"
     assert out["chunks"] == 3 and out["replaced"] is False
 
     path = tmp_path / out["source"]
     meta, body = _front_matter(path)
-    assert meta == {"title": "Longhorn 볼륨 attaching 멈춤", "type": "rca",
+    # 문서 유형은 폴더로 정해지므로 front matter에 type 을 쓰지 않습니다.
+    assert meta == {"title": "Longhorn 볼륨 attaching 멈춤",
                     "tags": ["longhorn"], "component": "longhorn", "cluster": "prod-01"}
     assert body == "# 증상\n파드가 멈춤"
     # rag-ingest 와 같은 기준(문서 디렉터리)으로 색인해야 포인트 ID가 같아집니다.
     assert rec.calls == [(path, tmp_path)]
 
 
-def test_default_doc_type_is_note(monkeypatch, tmp_path):
+def test_saved_under_draft_root(monkeypatch, tmp_path):
     _setup(monkeypatch, tmp_path)
     out = documents.add_document("메모", "내용", client=object())
     assert out["source"] == "draft/메모.md"
-
-
-def test_doc_type_does_not_change_folder(monkeypatch, tmp_path):
-    # 문서 유형은 front matter에만 쓰고, 파일은 유형과 관계없이 draft/ 바로 아래에 둡니다.
-    _setup(monkeypatch, tmp_path)
-    out = documents.add_document("a", "b", "runbook", client=object())
-    assert out["source"] == "draft/a.md"
-    assert _front_matter(tmp_path / out["source"])[0]["type"] == "runbook"
 
 
 # --- 입력 검증 ------------------------------------------------------------------
@@ -116,15 +109,6 @@ def test_rejects_too_long_content(monkeypatch, tmp_path):
     out = documents.add_document("t", "x" * 11)
     assert out["status"] == "error" and "too long" in out["error"]
     assert rec.calls == []
-
-
-def test_rejects_unsafe_doc_type(monkeypatch, tmp_path):
-    rec = _setup(monkeypatch, tmp_path)
-    for bad in ("../etc", "Runbook!", "a/b", ""):
-        # 빈 값은 기본값 note 로 바뀌므로 통과해야 하고, 나머지는 거부해야 합니다.
-        out = documents.add_document("t", "x", bad, client=object())
-        assert (out["status"] == "ok") == (bad == "")
-    assert all(str(f).startswith(str(tmp_path)) for f, _ in rec.calls)
 
 
 # --- 덮어쓰기와 경로 안전 ----------------------------------------------------------
@@ -273,7 +257,7 @@ def test_delete_keeps_file_when_chunk_delete_fails(monkeypatch, tmp_path):
 
 def test_add_then_delete_roundtrip(monkeypatch, tmp_path):
     _setup(monkeypatch, tmp_path)
-    added = documents.add_document("복구 절차", "내용", "runbook", client=object())
+    added = documents.add_document("복구 절차", "내용", client=object())
     out = documents.delete_document(added["source"], client=_FakeQdrant(points=3))
     assert out["status"] == "ok" and not (tmp_path / added["source"]).exists()
 
@@ -281,8 +265,8 @@ def test_add_then_delete_roundtrip(monkeypatch, tmp_path):
 # --- draft/ 제한 ------------------------------------------------------------------
 def test_add_never_writes_outside_draft(monkeypatch, tmp_path):
     _setup(monkeypatch, tmp_path)
-    for title, doc_type in (("../../official/x", "runbook"), ("x", "draft"), ("y", "rca")):
-        out = documents.add_document(title, "body", doc_type, client=object())
+    for title in ("../../official/x", "x", "/etc/passwd"):
+        out = documents.add_document(title, "body", client=object())
         assert out["source"].startswith("draft/"), out
         assert (tmp_path / "draft").resolve() in (tmp_path / out["source"]).resolve().parents
 
@@ -307,7 +291,7 @@ class _PromoteQdrant(_FakeQdrant):
 def _draft(tmp_path, rel="draft/a.md", title="초안 A"):
     path = tmp_path / rel
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(f"---\ntitle: {title}\ntype: runbook\n---\nbody\n", encoding="utf-8")
+    path.write_text(f"---\ntitle: {title}\n---\nbody\n", encoding="utf-8")
     return path
 
 
@@ -399,8 +383,8 @@ class _FacetQdrant:
 
 def _official(tmp_path):
     docs = {
-        "official/a.md": "---\ntitle: 문서 A\ntype: runbook\n---\nbody\n",
-        "official/rcas/b.md": "---\ntitle: 문서 B\n---\nbody\n",
+        "official/a.md": "---\ntitle: 문서 A\ntype: legacy\n---\nbody\n",  # type 은 무시됨
+        "official/team-a/b.md": "---\ntitle: 문서 B\n---\nbody\n",
         "official/c.pdf": "%PDF-1.4",
         "official/notes.txt": "x",
         "draft/d.md": "---\ntitle: 초안 D\n---\nbody\n",
@@ -420,22 +404,22 @@ def test_list_documents_lists_documents_with_index_state(monkeypatch, tmp_path):
     # .md/.pdf 만, source 순. draft/ 와 다른 확장자는 없음.
     rows = [(d["source"], d["title"], d["doc_type"], d["chunks"]) for d in out["documents"]]
     assert rows == [
-        ("official/a.md", "문서 A", "runbook", 4),
-        ("official/c.pdf", "c", "note", 0),        # 색인 전 → 0
-        ("official/rcas/b.md", "문서 B", "rca", 0),  # type 없음 → 하위 폴더 이름
+        ("official/a.md", "문서 A", "official", 4),       # 유형은 폴더 이름 (front matter type 무시)
+        ("official/c.pdf", "c", "official", 0),            # 색인 전 → 0
+        ("official/team-a/b.md", "문서 B", "official", 0),  # 하위 폴더여도 official
     ]
     assert all(d["size_bytes"] > 0 and d["modified"].endswith("+00:00") for d in out["documents"])
     # 청크 수는 목록에 나온 source 만 대상으로 한 번에 셉니다.
     key, limit, flt = q.calls[0]
     assert key == "source" and limit == 3 and len(q.calls) == 1
-    assert sorted(flt.must[0].match.any) == ["official/a.md", "official/c.pdf", "official/rcas/b.md"]
+    assert sorted(flt.must[0].match.any) == ["official/a.md", "official/c.pdf", "official/team-a/b.md"]
 
 
 def test_list_documents_subdir_and_limit(monkeypatch, tmp_path):
     monkeypatch.setattr(documents, "KNOWLEDGE_DIR", tmp_path)
     _official(tmp_path)
-    out = documents.list_documents(subdir="rcas", client=_FacetQdrant())
-    assert out["folder"] == "official/rcas/" and [d["source"] for d in out["documents"]] == ["official/rcas/b.md"]
+    out = documents.list_documents(subdir="team-a", client=_FacetQdrant())
+    assert out["folder"] == "official/team-a/" and [d["source"] for d in out["documents"]] == ["official/team-a/b.md"]
 
     out = documents.list_documents(limit=1, client=_FacetQdrant())
     assert out["total"] == 3 and out["returned"] == 1 and out["truncated"] is True
@@ -444,7 +428,7 @@ def test_list_documents_subdir_and_limit(monkeypatch, tmp_path):
 def test_list_documents_rejects_paths_outside_official(monkeypatch, tmp_path):
     monkeypatch.setattr(documents, "KNOWLEDGE_DIR", tmp_path)
     _official(tmp_path)
-    for bad in ("../draft", "rcas/../../draft", "missing"):
+    for bad in ("../draft", "team-a/../../draft", "missing"):
         out = documents.list_documents(subdir=bad, client=_FacetQdrant())
         assert out["status"] == "error", bad
 
@@ -469,7 +453,7 @@ def test_list_documents_draft_folder(monkeypatch, tmp_path):
     out = documents.list_documents("draft", client=_FacetQdrant(counts={"draft/d.md": 2}))
     assert out["folder"] == "draft/" and out["total"] == 1
     assert out["documents"][0] | {"size_bytes": 0, "modified": ""} == {
-        "source": "draft/d.md", "title": "초안 D", "doc_type": "note", "size_bytes": 0, "modified": "",
+        "source": "draft/d.md", "title": "초안 D", "doc_type": "draft", "size_bytes": 0, "modified": "",
         "chunks": 2, "promote_to": "official/d.md",
     }
     # 정식 문서 목록에는 promote_to 가 없습니다.
@@ -488,5 +472,5 @@ def test_list_documents_empty_when_no_draft_folder(monkeypatch, tmp_path):
 def test_list_documents_rejects_unknown_folder(monkeypatch, tmp_path):
     monkeypatch.setattr(documents, "KNOWLEDGE_DIR", tmp_path)
     _official(tmp_path)
-    for bad in ("runbooks", "..", "/etc"):
+    for bad in ("team-a", "..", "/etc"):
         assert documents.list_documents(bad, client=_FacetQdrant())["status"] == "error", bad

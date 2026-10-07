@@ -75,9 +75,9 @@ agentic retrieval).
   │            rag-mcp     :8084/mcp            │         │
   │   FastMCP server — read tools               │         │
   │                                             │  2. em- │
-  │   rag_search          search_runbooks       │  beds   │
-  │   rag_collections     rag_health            │◄────────┘
-  │   rag_list_documents  (official/ · draft/)  │  the
+  │   rag_search          search_official       │  beds   │
+  │   search_draft        rag_collections       │◄────────┘
+  │   rag_health          rag_list_documents    │  the
   │   (+ optional step 3: cross-encoder rerank  │  query
   │     via a Cohere/Jina-compatible /rerank)   │
   │   (+ opt-in write tools, draft/ only:       │
@@ -299,12 +299,13 @@ RAG_MCP_URL=http://10.0.0.5:8084/mcp claude
 
 | 도구 | 용도 |
 |------|---------|
-| `rag_search(query, doc_type?, cluster?, component?, limit?)` | 지식 베이스 전체에 대한 시맨틱 검색 |
-| `search_runbooks(query, cluster?, component?, limit?)` | "처리 절차가 뭐지?" — `doc_type=runbook`으로 고정한 검색 |
+| `rag_search(query, doc_type?, cluster?, component?, limit?)` | 지식 베이스 전체에 대한 시맨틱 검색 (`doc_type`: `official` 또는 `draft`) |
+| `search_official(query, cluster?, component?, limit?)` | 정식 문서(`official/`)만 검색 — `doc_type=official`로 고정 |
+| `search_draft(query, cluster?, component?, limit?)` | 초안(`draft/`)만 검색 — `doc_type=draft`로 고정 |
 | `rag_collections()` | 컬렉션 목록과 포인트 수 (지식 베이스가 채워졌는지 확인) |
 | `rag_health()` | Qdrant와 임베딩 엔드포인트 접근 가능 여부, 리랭커·하이브리드 설정 |
 | `rag_list_documents(folder?, subdir?, limit?)` | 문서 파일 목록 — [문서 목록 보기](#문서-목록-보기-rag_list_documents) |
-| `rag_add_document(title, content, doc_type?, tags?, component?, cluster?, overwrite?)` | (선택) `draft/`에 문서 추가 — [쓰기 도구와 초안 승격](#쓰기-도구와-초안-승격) |
+| `rag_add_document(title, content, tags?, component?, cluster?, overwrite?)` | (선택) `draft/`에 문서 추가 — [쓰기 도구와 초안 승격](#쓰기-도구와-초안-승격) |
 | `rag_delete_document(source)` | (선택) `draft/` 문서 삭제 — 파일과 청크를 함께 삭제 |
 
 검색 도구의 `limit`은 1부터 `RAG_MAX_LIMIT`(기본 20) 사이로 제한되며, 생략하면 `RAG_DEFAULT_LIMIT`(기본 5)입니다.
@@ -336,11 +337,11 @@ RAG_MCP_URL=http://10.0.0.5:8084/mcp claude
 | 요청 예 | 도구 호출 | 결과 |
 |------|------|------|
 | "지식 베이스에 어떤 문서가 있어?" | `rag_list_documents()` | `official/` 전체 |
-| "official/runbooks 폴더 문서만 보여 줘" | `rag_list_documents(subdir="runbooks")` | `official/runbooks/` 아래만 |
+| "official/team-a 폴더 문서만 보여 줘" | `rag_list_documents(subdir="team-a")` | `official/team-a/` 아래만 |
 | "검토할 초안 목록 보여 줘" | `rag_list_documents(folder="draft")` | `draft/` 전체 (항목마다 `promote_to` 포함) |
 | "색인 안 된 문서 있어?" | `rag_list_documents()` | `chunks`가 0인 항목 확인 |
 | — | `rag_list_documents(limit=500)` | 최대 500개까지 (기본 100) |
-| — | `rag_list_documents(folder="runbooks")` | 오류 — `folder`는 `official`/`draft`만 |
+| — | `rag_list_documents(folder="team-a")` | 오류 — `folder`는 `official`/`draft`만 |
 | — | `rag_list_documents(subdir="../draft")` | 오류 — `folder` 밖을 가리킴 |
 
 응답 예 (`rag_list_documents(folder="draft")`):
@@ -356,7 +357,7 @@ RAG_MCP_URL=http://10.0.0.5:8084/mcp claude
     {
       "source": "draft/longhorn-볼륨-복구.md",
       "title": "Longhorn 볼륨 복구 절차",
-      "doc_type": "runbook",
+      "doc_type": "draft",
       "size_bytes": 1532,
       "modified": "2026-10-07T05:12:40+00:00",
       "chunks": 2,
@@ -368,7 +369,7 @@ RAG_MCP_URL=http://10.0.0.5:8084/mcp claude
 
 | 필드 | 의미 |
 |------|------|
-| `source`, `title`, `doc_type` | 문서 경로, 제목, 유형 (`doc_type`은 수집과 같은 규칙으로 정하므로 검색 필터 값과 같음) |
+| `source`, `title`, `doc_type` | 문서 경로, 제목, 유형 (`doc_type`은 폴더 이름 `official`/`draft`로, 검색 필터 값과 같음) |
 | `size_bytes`, `modified` | 파일 크기, 마지막 수정 시각 (UTC) |
 | `chunks` | 색인된 청크 수. **0이면 파일은 있지만 아직 `rag-ingest` 전이라 검색되지 않음.** Qdrant에 연결하지 못하면 `null` |
 | `promote_to` | (초안만) `rag-promote <source>`로 승격하면 옮겨질 위치 |
@@ -378,7 +379,7 @@ RAG_MCP_URL=http://10.0.0.5:8084/mcp claude
 
 1. `folder`가 `official`/`draft`인지, `subdir`를 정규화했을 때 그 폴더 안인지 확인합니다.
 2. 폴더 아래의 `.md`/`.pdf`를 경로 순으로 모으고, 앞에서부터 `limit`개만 자세히 읽습니다.
-3. 마크다운은 front matter에서 `title`과 `type`을 읽고, `doc_type`은 수집과 같은 규칙(`ingest._infer_doc_type`)으로
+3. 마크다운은 front matter에서 `title`을 읽고, `doc_type`은 수집과 같은 규칙(`ingest._doc_type`, 폴더 이름)으로
    정합니다.
 4. 돌려줄 `source`들로 Qdrant **facet**(`source` 키, `MatchAny` 필터)을 한 번 호출해 문서별 청크 수를 셉니다.
 
@@ -401,7 +402,7 @@ RAG_MCP_URL=http://10.0.0.5:8084/mcp claude
 knowledge/
 ├── official/                  정식 문서 — 사람이 관리
 │   ├── longhorn-volume-attach.md      → source: official/longhorn-volume-attach.md
-│   └── runbooks/...                   (선택) 하위 폴더로 나눠도 됨
+│   └── team-a/...                     (선택) 하위 폴더로 나눠도 됨
 └── draft/                     초안 — 모델이 MCP 쓰기 도구로 만듦
     └── longhorn-볼륨-복구.md          → source: draft/longhorn-볼륨-복구.md
 ```
@@ -416,9 +417,9 @@ knowledge/
 - **문서는 두 폴더 안에만 두세요.** 문서 디렉터리 바로 아래나 다른 폴더에 둔 문서는 `rag-ingest`가 수집하지 않고,
   건너뛴 개수를 경고로 알려 줍니다(`ingest._discover_files`).
 - **두 폴더 모두 검색 대상입니다.** 초안은 저장 즉시 검색되고, 검토 여부는 `source`로 구분합니다.
-- **폴더는 문서의 단계(정식 / 초안)를 나타냅니다.** 문서 유형(`runbook`, `rca` 등)은 front matter의 `type`이
-  나타냅니다. 단계와 유형을 분리했기 때문에 승격은 `draft/<경로>` → `official/<경로>`로 맨 앞 폴더만 바꾸는 단순한
-  이동이 되고, 모델이 쓰는 위치도 `draft/` 하나로 고정됩니다.
+- **폴더가 곧 문서 유형입니다.** `official/` 아래 문서는 `doc_type=official`, `draft/` 아래 문서는 `doc_type=draft`로
+  색인되고, `search_official`·`search_draft`와 `rag_search`의 `doc_type` 필터가 이 값을 씁니다. 그래서 승격은
+  `draft/<경로>` → `official/<경로>`로 맨 앞 폴더만 바꾸는 이동이면 되고, 승격하면 유형도 함께 바뀝니다.
 - **`source`는 문서 디렉터리 기준 상대 경로입니다.** 포인트 ID(`uuid5(source#chunk)`)와 오래된 청크 정리의 기준이
   되고, 검색 결과에도 그대로 나옵니다.
 - **권한 경계는 디렉터리 하나로 판단합니다.** MCP 쓰기 도구는 경로를 정규화한 뒤 `draft/` 안인지만 확인하므로
@@ -430,7 +431,7 @@ knowledge/
 `official/`에 마크다운(`.md`)이나 PDF(`.pdf`)를 넣고 수집 명령을 실행합니다. 서버 재시작은 필요 없습니다.
 
 ```bash
-cp my-runbook.md ~/.local/share/rag-mcp/data/knowledge/official/
+cp my-doc.md ~/.local/share/rag-mcp/data/knowledge/official/
 rag-ingest                      # 문서 색인
 rag-ingest --recreate           # 컬렉션을 지우고 전체 재구축
 ```
@@ -449,13 +450,12 @@ rag-ingest --recreate           # 컬렉션을 지우고 전체 재구축
 
 - **마크다운** — 선택적인 YAML front matter를 지원합니다.
 - **PDF** — 페이지 단위로 텍스트를 추출하고, 각 페이지를 `# [Page N]` 섹션으로 만듭니다. front matter가
-  없으므로 유형은 아래 규칙의 2·3번으로, 제목은 파일 이름에서 가져옵니다. 텍스트를 추출할 수 없는 스캔 PDF는
+  없으므로 제목은 파일 이름에서 가져옵니다. 텍스트를 추출할 수 없는 스캔 PDF는
   건너뜁니다.
 
 ```markdown
 ---
 title: Longhorn 볼륨이 attaching 상태에서 멈춤
-type: rca             # runbook | rca | note | ...
 tags: [longhorn, storage]
 component: longhorn   # 선택: 필터용
 cluster: prod-eu      # 선택: 필터용
@@ -464,17 +464,9 @@ cluster: prod-eu      # 선택: 필터용
 ```
 
 - **`title`:** 생략하면 파일 이름을 씁니다.
-- **`type` (문서 유형):** `search_runbooks`와 `rag_search`의 `doc_type` 필터가 이 값을 씁니다. 다음 순서로
-  정합니다(`ingest._infer_doc_type`).
-
-  | 순서 | 조건 | 결과 (예) |
-  |------|------|------|
-  | 1 | front matter에 `type`이 있음 | 그 값 |
-  | 2 | `official/`·`draft/` 아래 하위 폴더 안에 있음 | 첫 하위 폴더 이름에서 끝의 `s`를 뗀 값 (`official/runbooks/a.md` → `runbook`) |
-  | 3 | 그 밖 | `note` (`official/a.md`, `draft/a.md`) |
-
-  `official/` 바로 아래 두는 문서는 3번에 해당하므로 **`type`을 적는 것을 권장합니다.** MCP 쓰기 도구는 항상
-  `type`을 front matter에 기록합니다.
+- **문서 유형(`doc_type`):** front matter로 정하지 않습니다. 맨 앞 폴더 이름이 유형이 됩니다
+  (`official/…` → `official`, `draft/…` → `draft`, `ingest._doc_type`). 하위 폴더 이름이나 front matter의
+  `type`은 유형에 영향을 주지 않습니다.
 - **`component`, `cluster`, `severity`:** 검색 필터가 되지만 형식이 정해지지 않은 레이블입니다. 환경, 고객, 제품,
   팀 등 도메인에 맞게 쓰거나 생략해도 됩니다.
 
@@ -507,8 +499,8 @@ systemctl --user restart rag-mcp
 |------|------|
 | 등록 | `RAG_MCP_WRITE=true`일 때만 서버 시작 시 도구를 등록. 꺼져 있으면 도구 목록에도 없음 |
 | 쓰기 범위 | 문서 디렉터리의 **`draft/` 아래만** 추가·삭제. 사람이 관리하는 정식 문서(`official/`)는 만들거나 지울 수 없음 |
-| 저장 위치 | `<문서 디렉터리>/draft/<제목>.md` (예: `draft/longhorn-볼륨-복구.md`). 문서 유형은 폴더가 아니라 front matter의 `type`에 기록 |
-| 파일 내용 | 인자로 받은 `title`, `type`, `tags`, `component`, `cluster`를 front matter로 쓰고 그 아래 본문 |
+| 저장 위치 | `<문서 디렉터리>/draft/<제목>.md` (예: `draft/longhorn-볼륨-복구.md`). 폴더가 `draft/`이므로 `doc_type`은 `draft` |
+| 파일 내용 | 인자로 받은 `title`, `tags`, `component`, `cluster`를 front matter로 쓰고 그 아래 본문 |
 | 색인 | 저장 직후 `ingest.ingest_file`로 색인 — `rag-ingest`와 같은 코드라 청크 ID·페이로드가 같음 |
 | 덮어쓰기 | 같은 경로에 파일이 있으면 `overwrite=true`일 때만 바꿈 (청크 수가 줄면 남은 청크도 정리) |
 | 크기 제한 | 본문 `RAG_MAX_DOC_CHARS`자(기본 200000)까지 |
@@ -518,9 +510,8 @@ systemctl --user restart rag-mcp
 
 - **파일로 먼저 저장합니다.** 파일로 남겨야 `rag-ingest --recreate`로 재구축해도 추가한 문서가 사라지지 않고,
   사람이 직접 확인·수정·삭제할 수 있습니다.
-- **경로는 서버가 정합니다.** 호출자는 제목과 문서 유형만 넘기고, 파일 이름은 제목에서 만든 안전한 이름(글자·숫자·`-`)
-  입니다. 경로에는 `draft/`와 이 파일 이름만 쓰이므로 `draft/` 밖에 쓸 수 없습니다. `doc_type`은 front matter와 검색
-  필터 값이 되므로 소문자·숫자·`-`·`_`만 허용합니다.
+- **경로는 서버가 정합니다.** 호출자는 제목만 넘기고, 파일 이름은 제목에서 만든 안전한 이름(글자·숫자·`-`)
+  입니다. 경로에는 `draft/`와 이 파일 이름만 쓰이므로 `draft/` 밖에 쓸 수 없습니다.
 - **색인에 실패해도 파일은 남깁니다.** 응답에 `saved: true`와 오류를 함께 돌려주므로, 원인을 고친 뒤
   `rag-ingest`로 다시 색인하면 됩니다.
 - **삭제는 파일과 청크를 함께 지웁니다.** 파일이 이미 없고 청크만 남아 있어도 청크를 정리하므로, 파일을 지우거나
@@ -799,7 +790,7 @@ curl -s http://localhost:6333/collections/rag_kb | grep -o '"size":[0-9]*'
 
 | 경로 | 내용 |
 |------|------|
-| [`tools/server.py`](tools/server.py) | FastMCP 서버. 읽기 도구 5개(검색 4개 + 문서 목록)와 선택적 쓰기 도구 2개를 제공 |
+| [`tools/server.py`](tools/server.py) | FastMCP 서버. 읽기 도구 6개(검색 3개, 상태 확인 2개, 문서 목록)와 선택적 쓰기 도구 2개를 제공 |
 | [`tools/ingest.py`](tools/ingest.py) | 마크다운/PDF 문서를 읽어 청크로 나누고 임베딩해 Qdrant에 업서트 (`rag-ingest`) |
 | [`tools/documents.py`](tools/documents.py) | 문서 디렉터리 로직: 문서 목록, MCP 쓰기 도구의 추가·삭제, `rag-promote`의 목록·승격 |
 | [`tools/promote.py`](tools/promote.py) | 초안 승격 명령 `rag-promote` (사람 전용, MCP 도구 아님) |

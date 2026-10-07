@@ -14,27 +14,28 @@ description: rag MCP 서버의 rag_add_document 도구로 지식 베이스에 �
 
 ## 도구
 
-`rag_add_document(title, content, doc_type?, tags?, component?, cluster?, overwrite?)`
+`rag_add_document(title, content, tags?, component?, cluster?, overwrite?)`
 
 | 인자 | 설명 |
 |------|------|
 | `title` | 문서 제목. 파일 이름도 여기서 만들어집니다 (`draft/<제목>.md`) |
 | `content` | 마크다운 본문. front matter 없이 본문만 |
-| `doc_type` | 문서 유형 — `runbook`, `rca`, `note` 등 소문자 (기본 `note`). 검색 필터 값이 됨 |
 | `tags` | 선택. 태그 목록 (예: `["longhorn", "storage"]`) |
 | `component` | 선택. 컴포넌트 이름 — 검색 하드 필터 (예: `longhorn`) |
 | `cluster` | 선택. 클러스터 이름 — 검색 소프트 필터 (예: `prod-01`) |
 | `overwrite` | 같은 경로에 초안이 있을 때 바꿀지 여부 (기본 `false`) |
 
-성공 응답: `{"status": "ok", "source": "draft/...", "doc_type", "title", "chunks", "replaced"}`
+성공 응답: `{"status": "ok", "source": "draft/...", "doc_type": "draft", "title", "chunks", "replaced"}`
+
+문서 유형(`doc_type`)은 폴더로 정해지므로 따로 넘기지 않습니다. 추가한 문서는 항상 `draft`이고, 승격되면 `official`이 됩니다.
 
 ## 순서
 
 1. **요청 확인** — 사용자가 저장을 명시적으로 요청했을 때만 진행하세요. 대화 내용을 임의로 저장하지 마세요.
-2. **중복 확인** — 같은 주제의 문서가 이미 있는지 `rag_search`로 찾아보세요. 정식 문서에 이미 있으면 그 사실을
+2. **중복 확인** — 같은 주제의 문서가 이미 있는지 `search_official`과 `search_draft`로 찾아보세요. 정식 문서에 이미 있으면 그 사실을
    알리고, 그래도 초안으로 추가할지 물어보세요. 초안 목록은 `rag_list_documents(folder="draft")`로 볼 수 있습니다.
 3. **초안 작성** — 아래 "본문 작성 요령"대로 정리합니다.
-4. **사용자 확인** — 저장하기 전에 제목, `doc_type`, 태그·컴포넌트·클러스터, 본문 요약(또는 전문)을 보여 주고
+4. **사용자 확인** — 저장하기 전에 제목, 태그·컴포넌트·클러스터, 본문 요약(또는 전문)을 보여 주고
    확인을 받으세요.
 5. **저장** — `rag_add_document`를 호출합니다.
 6. **결과 안내** — 응답의 `source`를 알려 주고, 초안으로 저장되어 바로 검색되며, 서버 관리자가 검토한 뒤
@@ -57,7 +58,6 @@ description: rag MCP 서버의 rag_add_document 도구로 지식 베이스에 �
 | 오류 | 대응 |
 |------|------|
 | `a document already exists at ...` | 같은 제목의 초안이 있습니다. 덮어쓸지, 다른 제목으로 저장할지 사용자에게 묻고, `overwrite=true`는 **사용자가 동의했을 때만** 쓰세요. |
-| `doc_type must be lowercase ...` | `doc_type`을 소문자·숫자·`-`·`_`로 고쳐 다시 시도하세요 (예: `runbook`). |
 | `content is too long` | 본문을 나눠 여러 문서로 저장할지 사용자에게 물어보세요. |
 | `title` / `content must be a non-empty string` | 빈 제목이나 본문입니다. 채워서 다시 시도하세요. |
 | `saved the file but indexing failed` (`saved: true`) | 파일은 저장됐지만 색인에 실패했습니다. 지금은 검색되지 않으며, 서버 관리자가 원인을 고친 뒤 `rag-ingest`를 실행하면 된다고 알리세요. 다시 저장하지 마세요. |

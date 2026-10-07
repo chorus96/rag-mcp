@@ -6,7 +6,7 @@
 
 구성
   - 공통 검색 경로 `_search`: 질의 임베딩 → 하이브리드 검색 → (선택) 리랭킹 → 응답 구성
-  - MCP 도구: rag_search, search_runbooks, rag_collections, rag_health, rag_list_documents
+  - MCP 도구: rag_search, search_official, search_draft, rag_collections, rag_health, rag_list_documents
   - (선택) MCP 쓰기 도구: rag_add_document, rag_delete_document — RAG_MCP_WRITE=true 일 때만 등록,
     문서 디렉터리의 draft/ 아래만 다룸 (실제 로직은 documents.py)
 
@@ -233,8 +233,8 @@ def rag_search(
     Args:
         query: 찾고 있는 내용 (자연어). 예:
             '노드 재부팅 후 Longhorn 볼륨이 attaching 상태에서 멈춤'.
-        doc_type: 선택적 필터 — 'runbook', 'rca', 'note', 또는 수집 시 사용한
-            사용자 정의 유형. 생략하면 전체를 검색합니다.
+        doc_type: 선택적 필터 — 'official'(정식 문서) 또는 'draft'(초안). 생략하면 둘 다
+            검색합니다. 한쪽만 볼 때는 search_official / search_draft 를 써도 됩니다.
         cluster: 선택적 소프트 필터 — 이 클러스터 태그(예: 'prod-01')가 붙은 지식으로
             한정합니다. 클러스터로 한정한 검색 결과가 비어 있으면 서버가 (다른 필터는
             유지한 채) 모든 클러스터를 대상으로 다시 검색하고 `cluster_narrowed: false`를
@@ -249,26 +249,48 @@ def rag_search(
 
 
 @mcp.tool()
-def search_runbooks(
+def search_official(
     query: str,
     cluster: str | None = None,
     component: str | None = None,
     limit: int = DEFAULT_LIMIT,
 ) -> dict[str, Any]:
-    """런북 / 문서화된 절차만 검색합니다.
+    """정식 문서(official/)만 검색합니다 — 사람이 관리하고 검토한 문서.
 
-    rag_search(..., doc_type='runbook')의 단축 도구입니다. 컴포넌트나 작업에 대해
-    정해진 절차를 알고 싶을 때 사용하세요. `component`(예: 'longhorn')를 넘기면 해당
-    컴포넌트의 런북으로 범위를 좁힙니다.
+    rag_search(..., doc_type='official')의 단축 도구입니다. 검토된 문서만 근거로 답해야 할 때
+    사용하세요. `component`(예: 'longhorn')를 넘기면 해당 컴포넌트의 문서로 범위를 좁힙니다.
 
     Args:
-        query: 컴포넌트 또는 작업 (자연어).
-        cluster: 선택적 소프트 필터 — 해당 클러스터 태그가 붙은 런북만 검색하며, 같은
+        query: 찾고 있는 내용 (자연어).
+        cluster: 선택적 소프트 필터 — 해당 클러스터 태그가 붙은 문서만 검색하며, 같은
             클러스터 결과가 비어 있으면 전체 범위로 대체 검색합니다.
-        component: 선택적 하드 필터 — 이 컴포넌트 태그가 붙은 런북만 검색합니다.
+        component: 선택적 하드 필터 — 이 컴포넌트 태그가 붙은 문서만 검색합니다.
         limit: 최대 결과 수 (1-20). 기본값 5.
     """
-    return _search(query, "runbook", cluster, component, limit)
+    return _search(query, "official", cluster, component, limit)
+
+
+@mcp.tool()
+def search_draft(
+    query: str,
+    cluster: str | None = None,
+    component: str | None = None,
+    limit: int = DEFAULT_LIMIT,
+) -> dict[str, Any]:
+    """초안(draft/)만 검색합니다 — 모델이 추가했고 아직 사람이 검토하지 않은 문서.
+
+    rag_search(..., doc_type='draft')의 단축 도구입니다. 초안에 무엇이 쌓였는지 확인하거나, 정식
+    문서에서 찾지 못한 내용을 초안에서 찾아볼 때 사용하세요. 초안을 근거로 답할 때는 검토 전이라는
+    점을 밝히세요.
+
+    Args:
+        query: 찾고 있는 내용 (자연어).
+        cluster: 선택적 소프트 필터 — 해당 클러스터 태그가 붙은 초안만 검색하며, 같은
+            클러스터 결과가 비어 있으면 전체 범위로 대체 검색합니다.
+        component: 선택적 하드 필터 — 이 컴포넌트 태그가 붙은 초안만 검색합니다.
+        limit: 최대 결과 수 (1-20). 기본값 5.
+    """
+    return _search(query, "draft", cluster, component, limit)
 
 
 @mcp.tool()
@@ -346,7 +368,7 @@ def rag_list_documents(folder: str = "official", subdir: str | None = None, limi
 
     Args:
         folder: 'official'(정식 문서, 기본값) 또는 'draft'(초안).
-        subdir: 선택 — 그 폴더 아래 하위 폴더만 보기 (예: 'runbooks'). 생략하면 폴더 전체.
+        subdir: 선택 — 그 폴더 아래 하위 폴더만 보기 (예: 'team-a'). 생략하면 폴더 전체.
         limit: 돌려줄 최대 개수. 기본 100, 최대 500. 넘으면 truncated=true.
     """
     return documents.list_documents(folder, subdir, limit, client=_qdrant)
@@ -359,7 +381,6 @@ if documents.WRITE_ENABLED:
     def rag_add_document(
         title: str,
         content: str,
-        doc_type: str = "note",
         tags: list[str] | None = None,
         component: str | None = None,
         cluster: str | None = None,
@@ -375,13 +396,12 @@ if documents.WRITE_ENABLED:
         Args:
             title: 문서 제목. 파일 이름도 여기서 만들어집니다.
             content: 마크다운 본문 (front matter 없이 본문만).
-            doc_type: 문서 유형 — 'runbook', 'rca', 'note' 등 (소문자). 기본값 'note'.
             tags: 선택 — 태그 목록 (예: ['longhorn', 'storage']).
             component: 선택 — 컴포넌트 이름 (검색 하드 필터에 쓰임, 예: 'longhorn').
             cluster: 선택 — 클러스터 이름 (검색 소프트 필터에 쓰임, 예: 'prod-01').
             overwrite: 같은 경로의 기존 문서를 바꿀지 여부. 기본값 false.
         """
-        return documents.add_document(title, content, doc_type, tags, component, cluster, overwrite)
+        return documents.add_document(title, content, tags, component, cluster, overwrite)
 
     @mcp.tool()
     def rag_delete_document(source: str) -> dict[str, Any]:

@@ -15,7 +15,7 @@
     KNOWLEDGE_DIR/
     ├── official/     OFFICIAL_SUBDIR — 사람이 관리하는 정식 문서. 이 모듈은 승격할 때만 씁니다.
     └── draft/        DRAFT_SUBDIR    — 모델이 만든 초안. MCP 쓰기 도구는 여기만 다룹니다.
-  - 추가: draft/<제목>.md 로 저장합니다. 문서 유형은 폴더가 아니라 front matter의 type 에 씁니다.
+  - 추가: draft/<제목>.md 로 저장합니다. 문서 유형(doc_type)은 폴더로 정해지므로 초안은 "draft"입니다.
   - 삭제: source 를 정규화해 draft/ 안일 때만 지웁니다 (_resolve_source).
   - 승격: draft/<경로> → official/<경로>. 하위 경로는 그대로 유지합니다 (draft/a/b.md → official/a/b.md).
   - source 는 KNOWLEDGE_DIR 기준 상대 경로이고, 색인도 rag-ingest와 같이 KNOWLEDGE_DIR 을 root 로 합니다.
@@ -68,10 +68,6 @@ MAX_DOC_CHARS = int(os.environ.get("RAG_MAX_DOC_CHARS", "200000"))
 DRAFT_SUBDIR = "draft"
 OFFICIAL_SUBDIR = "official"
 
-# 문서 유형은 front matter와 검색 필터 값이 되므로 안전한 문자만 허용합니다.
-_DOC_TYPE_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,31}$")
-
-
 # --- 내부 도우미 --------------------------------------------------------------
 def _slug(title: str) -> str:
     """제목으로 파일 이름을 만듭니다. 한글 등 글자는 그대로 두고, 나머지 기호는 '-'로 바꿉니다."""
@@ -85,10 +81,10 @@ def _draft_dir() -> Path:
     return KNOWLEDGE_DIR / DRAFT_SUBDIR
 
 
-def _render(title: str, content: str, doc_type: str, tags: list[str],
+def _render(title: str, content: str, tags: list[str],
             component: str | None, cluster: str | None) -> str:
     """front matter + 본문으로 마크다운 파일 내용을 만듭니다."""
-    meta: dict[str, Any] = {"title": title, "type": doc_type}
+    meta: dict[str, Any] = {"title": title}
     if tags:
         meta["tags"] = tags
     if component:
@@ -100,13 +96,12 @@ def _render(title: str, content: str, doc_type: str, tags: list[str],
 
 
 # --- 문서 추가 -----------------------------------------------------------------
-def add_document(title: str, content: str, doc_type: str = "note", tags: list[str] | None = None,
+def add_document(title: str, content: str, tags: list[str] | None = None,
                  component: str | None = None, cluster: str | None = None,
                  overwrite: bool = False, client: QdrantClient | None = None) -> dict[str, Any]:
     """문서를 문서 디렉터리에 저장하고 색인합니다. 결과를 dict로 돌려줍니다 (오류도 status로)."""
     title = (title or "").strip()
     content = content or ""
-    doc_type = (doc_type or "note").strip().lower()
     tags = [str(t).strip() for t in (tags or []) if str(t).strip()]
 
     if not title:
@@ -116,9 +111,6 @@ def add_document(title: str, content: str, doc_type: str = "note", tags: list[st
     if len(content) > MAX_DOC_CHARS:
         return {"status": "error",
                 "error": f"content is too long ({len(content)} chars; limit {MAX_DOC_CHARS})"}
-    if not _DOC_TYPE_RE.match(doc_type):
-        return {"status": "error",
-                "error": "doc_type must be lowercase letters, digits, '-' or '_' (e.g. runbook, rca)"}
 
     # 저장은 draft/ 아래로만 합니다. source와 색인 기준은 rag-ingest와 같게 문서 디렉터리로 둡니다.
     path = _draft_dir() / f"{_slug(title)}.md"
@@ -129,7 +121,7 @@ def add_document(title: str, content: str, doc_type: str = "note", tags: list[st
                 "error": f"a document already exists at {source}; pass overwrite=true to replace it"}
 
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(_render(title, content, doc_type, tags, component, cluster), encoding="utf-8")
+    path.write_text(_render(title, content, tags, component, cluster), encoding="utf-8")
 
     try:
         if client is None:
@@ -141,8 +133,8 @@ def add_document(title: str, content: str, doc_type: str = "note", tags: list[st
         return {"status": "error", "source": source, "saved": True,
                 "error": f"saved the file but indexing failed: {exc} (run rag-ingest to retry)"}
 
-    log.info("added document %s (%s, %d chunk(s), overwrite=%s)", source, doc_type, chunks, existed)
-    return {"status": "ok", "source": source, "doc_type": doc_type, "title": title,
+    log.info("added document %s (%d chunk(s), overwrite=%s)", source, chunks, existed)
+    return {"status": "ok", "source": source, "doc_type": DRAFT_SUBDIR, "title": title,
             "chunks": chunks, "replaced": existed}
 
 
@@ -279,7 +271,7 @@ def list_documents(folder: str = OFFICIAL_SUBDIR, subdir: str | None = None, lim
         docs.append({
             "source": str(path.relative_to(kb)).replace(os.sep, "/"),
             "title": str(meta.get("title") or path.stem),
-            "doc_type": ingest._infer_doc_type(meta, path, kb),
+            "doc_type": ingest._doc_type(path, kb),
             "size_bytes": stat.st_size,
             "modified": datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat(timespec="seconds"),
         })

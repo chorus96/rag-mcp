@@ -3,8 +3,7 @@
 확인하는 것
   - 파일 탐색: official/·draft/ 아래에서 .md / .pdf 만 찾고 나머지 확장자는 무시. 두 폴더 밖의 문서는
     수집하지 않고 건너뛴 개수를 경고로 알림
-  - 문서 유형 추론: front matter 의 type 우선, official/·draft/ 는 단계 폴더라 건너뛰고 그 아래 하위 폴더
-    이름(끝의 s 제거), 없으면 note
+  - 문서 유형: 맨 앞 폴더 이름(official / draft). 하위 폴더와 front matter 의 type 은 영향을 주지 않음
   - PDF 추출: 페이지마다 `# [Page N]` 섹션을 만들어 청킹 후에도 페이지 맥락이 남음,
     빈 페이지·이미지 전용 PDF는 건너뜀
   - 임베딩 배치: EMBED_BATCH_SIZE 단위로 요청하고, 벡터 순서가 청크 순서와 같음
@@ -41,31 +40,30 @@ def test_discover_files_picks_md_and_pdf_only(tmp_path):
 
 
 def test_discover_files_only_official_and_draft(tmp_path, caplog):
-    for rel in ("official/a.md", "official/runbooks/b.md", "draft/c.md",
+    for rel in ("official/a.md", "official/team-a/b.md", "draft/c.md",
                 "notes/old.md", "top.md", "other/x.pdf"):
         (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
         (tmp_path / rel).write_text("x", encoding="utf-8")
 
     found = [str(p.relative_to(tmp_path)) for p in ingest._discover_files(tmp_path)]
     # official/·draft/ 밖의 문서는 수집하지 않고, 건너뛴 개수를 경고로 알립니다.
-    assert found == ["draft/c.md", "official/a.md", "official/runbooks/b.md"]
+    assert found == ["draft/c.md", "official/a.md", "official/team-a/b.md"]
     assert "ignored 3 document(s)" in caplog.text
 
 
-# --- 문서 유형 추론 -------------------------------------------------------------
+# --- 문서 유형 -----------------------------------------------------------------
 
-def test_infer_doc_type_skips_official_and_draft_folders(tmp_path):
-    def infer(rel, meta=None):
-        return ingest._infer_doc_type(meta or {}, tmp_path / rel, tmp_path)
+def test_doc_type_is_top_folder(tmp_path):
+    def doc_type(rel):
+        return ingest._doc_type(tmp_path / rel, tmp_path)
 
-    # front matter의 type이 항상 우선합니다.
-    assert infer("official/a.md", {"type": "runbook"}) == "runbook"
-    # official/ · draft/ 는 문서 유형이 아니라 단계이므로 건너뜁니다.
-    assert infer("official/a.md") == "note"
-    assert infer("draft/a.md") == "note"
-    assert infer("official/runbooks/a.md") == "runbook"
-    assert infer("draft/rcas/a.md") == "rca"
-    assert infer("a.md") == "note"
+    # 문서 유형은 맨 앞 폴더 이름입니다. 하위 폴더나 front matter 는 영향을 주지 않습니다.
+    assert doc_type("official/a.md") == "official"
+    assert doc_type("official/team-a/a.md") == "official"
+    assert doc_type("draft/a.md") == "draft"
+    assert doc_type("draft/team-a/a.md") == "draft"
+    # 두 폴더 밖은 수집되지 않지만, 직접 호출하면 unknown 입니다.
+    assert doc_type("a.md") == "unknown"
 
 
 # --- PDF 텍스트 추출 ----------------------------------------------------------

@@ -1,10 +1,9 @@
 ---
 title: Longhorn 볼륨이 "attaching" 상태에서 멈춤
-type: runbook
 tags: [longhorn, storage, csi, node-reboot]
 ---
 
-# 런북: Longhorn 볼륨이 "attaching" 상태에서 멈춤
+# Longhorn 볼륨이 "attaching" 상태에서 멈춤
 
 ## 증상
 파드가 `ContainerCreating` 상태에서 멈춰 있고, 이벤트에 `FailedAttachVolume` 또는

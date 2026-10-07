@@ -17,7 +17,7 @@
   - official/·draft/ 아래의 .md / .pdf 만 수집합니다. 두 폴더 밖의 문서는 건너뛰고 개수를 경고로 알립니다.
   - source 는 문서 디렉터리 기준 상대 경로(예: official/foo.md)이고, 포인트 ID와 오래된 청크 정리의
     기준입니다. 그래서 누가 색인하든 root 를 문서 디렉터리로 맞춰야 같은 ID가 나옵니다.
-  - official/·draft/ 는 문서의 단계일 뿐 유형이 아닙니다. 유형은 아래 "문서 형식"의 규칙으로 정합니다.
+  - 문서 유형(doc_type)은 맨 앞 폴더 이름입니다: official/ → "official", draft/ → "draft".
 
 처리 과정
   1. 파일 탐색 (.md, .pdf)
@@ -29,16 +29,12 @@
 문서 형식 (front matter는 선택)
     ---
     title: Longhorn 볼륨이 attaching 상태에서 멈춤
-    type: runbook           # runbook | rca | note | ...  (기본값: 하위 폴더 이름, 없으면 "note")
     tags: [longhorn, storage, node-reboot]
     ---
     # 본문 마크다운...
 
-  doc_type 은 다음 순서로 정합니다 (_infer_doc_type).
-    1. front matter 의 type
-    2. official/·draft/ 바로 아래 하위 폴더 이름에서 끝의 s를 뗀 값 (official/runbooks/ → runbook)
-    3. 그 밖에는 "note" (official/ 바로 아래 둔 문서 등) — 그래서 front matter에 type을 쓰는 것을 권장합니다.
-  PDF에는 front matter가 없으므로 type은 2·3번 규칙으로, 제목은 파일 이름에서 가져옵니다.
+  doc_type 은 front matter가 아니라 폴더로 정합니다 (_doc_type). 그래서 승격(draft/ → official/)하면 유형도
+  함께 바뀝니다. PDF에는 front matter가 없으므로 제목은 파일 이름에서 가져옵니다.
 
 멱등성
   청크 ID가 (source, chunk index)에서 정해지므로 다시 실행해도 중복이 생기지 않습니다. 문서를
@@ -181,18 +177,17 @@ def _chunk_document(body: str) -> list[str]:
     return [c for c in chunks if c] or _chunk(body, CHUNK_SIZE, CHUNK_OVERLAP)
 
 
-# 문서 디렉터리의 두 단계 폴더(정식 / 초안). 수집은 이 두 폴더 아래만 하고, 폴더 이름은 문서 유형이 아닙니다.
+# 문서 디렉터리의 두 폴더(정식 / 초안). 수집은 이 두 폴더 아래만 하고, 폴더 이름이 곧 문서 유형입니다.
 _STAGE_DIRS = ("official", "draft")
 
 
-def _infer_doc_type(meta: dict[str, Any], file: Path, root: Path) -> str:
-    if meta.get("type"):
-        return str(meta["type"])
-    parts = file.relative_to(root).parts
-    # official/<하위 폴더>/<파일> 처럼 단계 폴더 아래 하위 폴더가 있을 때만 그 이름을 씁니다.
-    if len(parts) > 2 and parts[0] in _STAGE_DIRS:
-        return parts[1].rstrip("s")  # official/runbooks -> runbook, draft/rcas -> rca
-    return "note"
+def _doc_type(file: Path, root: Path) -> str:
+    """문서 유형 = 문서 디렉터리 기준 맨 앞 폴더 이름 ("official" 또는 "draft").
+
+    front matter의 type 은 쓰지 않습니다. 두 폴더 밖의 파일은 수집되지 않지만, 직접 호출되면 "unknown"입니다.
+    """
+    top = file.relative_to(root).parts[0]
+    return top if top in _STAGE_DIRS else "unknown"
 
 
 def _extract_pdf_text(path: Path) -> str:
@@ -320,7 +315,7 @@ def ingest_file(client: QdrantClient, file: Path, root: Path, *, ensure: bool = 
             log.warning("skipping empty file %s", file)
             return 0
 
-    doc_type = _infer_doc_type(meta, file, root)
+    doc_type = _doc_type(file, root)
     source = str(file.relative_to(root)).replace(os.sep, "/")
     title = meta.get("title") or file.stem
     tags = meta.get("tags") or []

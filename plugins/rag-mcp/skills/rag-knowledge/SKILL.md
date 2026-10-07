@@ -21,21 +21,23 @@ description: 조직의 지식 베이스(마크다운·PDF 문서)를 rag MCP 서
 
 | 도구 | 언제 쓰나 |
 |------|------|
-| `search_runbooks(query, cluster?, component?, limit?)` | "처리 절차가 뭐지?" — 런북만 검색 |
-| `rag_search(query, doc_type?, cluster?, component?, limit?)` | 유형을 가리지 않고 검색 (`doc_type`: `runbook`, `rca`, `note` 등) |
+| `rag_search(query, doc_type?, cluster?, component?, limit?)` | 정식 문서와 초안을 함께 검색 (`doc_type`: `official` 또는 `draft`로 좁힐 수 있음) |
+| `search_official(query, cluster?, component?, limit?)` | 검토된 정식 문서(`official/`)만 근거로 답해야 할 때 |
+| `search_draft(query, cluster?, component?, limit?)` | 초안(`draft/`)만 볼 때 — 정식 문서에 없는 내용을 찾거나, 쌓인 초안을 확인할 때 |
 | `rag_collections()` | 결과가 계속 비어 있을 때 — 지식 베이스가 채워졌는지 확인 |
 | `rag_health()` | 도구 호출이 실패할 때 — Qdrant와 임베딩 엔드포인트 상태 확인 |
 | `rag_list_documents(folder?, subdir?, limit?)` | "어떤 문서가 있지?", "검토할 초안은?" — 정식 문서(`official/`) 또는 초안(`draft/`) 파일 목록. 자세한 사용법은 `rag-list-documents` 스킬 |
-| `rag_add_document(title, content, doc_type?, ...)` | (켜져 있을 때만) 사용자가 문서 추가를 요청했을 때 — 자세한 사용법은 `rag-add-document` 스킬 |
+| `rag_add_document(title, content, ...)` | (켜져 있을 때만) 사용자가 문서 추가를 요청했을 때 — 자세한 사용법은 `rag-add-document` 스킬 |
 | `rag_delete_document(source)` | (켜져 있을 때만) 사용자가 초안(`draft/`) 문서 삭제를 요청했을 때 — 자세한 사용법은 `rag-delete-document` 스킬 |
 
 `limit`의 기본값은 5, 최대 20입니다.
 
 ## 검색 순서
 
-1. **관련 문서 검색** — `rag_search`로 질문과 관련된 문서를 찾습니다. 특정 유형만 보려면 `doc_type`을,
-   범위를 알면 `cluster`·`component`를 넘기세요.
-2. **절차 검색** — 정해진 절차가 필요하면 `search_runbooks`로 런북(`doc_type=runbook`)만 찾습니다.
+1. **정식 문서 검색** — `search_official`로 검토된 문서부터 찾습니다. 범위를 알면 `cluster`·`component`를
+   넘기세요.
+2. **초안 확인** — 정식 문서에서 찾지 못했거나 최근 내용이 필요하면 `search_draft`로 초안도 찾아봅니다. 둘을
+   한 번에 보려면 `rag_search`를 쓰세요.
 3. **근거와 함께 답변** — 찾은 문서의 내용을 현재 상황과 비교해 설명하고, 출처를 밝힙니다.
 4. **찾지 못했다면** 그 사실을 분명히 말하고, 일반 지식에 기반한 판단임을 구분해서 답합니다.
 
@@ -82,10 +84,11 @@ description: 조직의 지식 베이스(마크다운·PDF 문서)를 rag MCP 서
 
 - 초안을 근거로 답할 때는 **검토 전 초안**이라는 점을 밝히세요.
 - 정식 문서와 초안의 내용이 다르면 정식 문서를 우선하고, 차이가 있다는 점을 알려 주세요.
-- 문서 유형(`runbook`, `rca` 등)은 폴더가 아니라 문서의 `doc_type`으로 구분합니다. 유형으로 좁히려면
-  `doc_type` 필터나 `search_runbooks`를 쓰세요.
+- 문서 유형(`doc_type`)은 폴더 이름입니다: 정식 문서는 `official`, 초안은 `draft`. 한쪽만 검색하려면
+  `search_official` / `search_draft`(또는 `rag_search`의 `doc_type`)를 쓰세요.
 - 초안은 서버 관리자가 검토한 뒤 `rag-promote` 명령으로 `official/`에 올립니다(승격). 승격하면 `source`가
-  `draft/<경로>`에서 `official/<경로>`로 바뀝니다. 승격은 모델이 할 수 없습니다.
+  `draft/<경로>`에서 `official/<경로>`로, `doc_type`은 `draft`에서 `official`로 바뀝니다. 승격은 모델이 할 수
+  없습니다.
 - `draft/`로 시작하지 않는 문서(`official/...`, 그 밖의 경로)는 모두 사람이 관리하는 문서입니다.
 
 ## 문제가 생겼을 때
@@ -101,8 +104,7 @@ description: 조직의 지식 베이스(마크다운·PDF 문서)를 rag MCP 서
 
 이 도구들은 **초안 폴더 `draft/`만** 다룹니다(위 "문서 디렉터리").
 
-- 추가한 문서는 항상 `draft/<제목>.md`에 초안으로 저장되고 바로 검색됩니다. 문서 유형은 `doc_type` 인자로
-  정하며 폴더에는 영향을 주지 않습니다.
+- 추가한 문서는 항상 `draft/<제목>.md`에 초안(`doc_type=draft`)으로 저장되고 바로 검색됩니다.
 - 정식 문서(`source`가 `draft/`로 시작하지 않는 문서)는 바꾸거나 지울 수 없습니다. 사용자가 정식 문서의
   수정·삭제를 요청하면 서버 관리자가 직접 해야 한다고 안내하세요. 고친 내용을 초안으로 추가해 두고 관리자가
   검토하게 할 수는 있습니다(사용자가 원할 때만).

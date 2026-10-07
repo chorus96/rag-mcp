@@ -18,7 +18,8 @@
 #     official/   정식 문서 — 승격한 문서가 여기로 옮겨집니다.
 #   인자 <source> 는 문서 디렉터리 기준 상대 경로로, 검색 결과나 rag_add_document 응답의 source 와 같습니다.
 #   draft/ 아래의 .md / .pdf 만 받으며, 승격하면 draft/<경로> → official/<경로> 로 하위 경로를 그대로
-#   유지해 옮깁니다(예: draft/runbooks/foo.md → official/runbooks/foo.md).
+#   유지해 옮깁니다(예: draft/team-a/foo.md → official/team-a/foo.md).
+#   폴더가 곧 문서 유형이므로 승격하면 doc_type 도 draft → official 로 바뀝니다.
 #   처리 순서: official/ 에 복사 → 색인 → 초안 파일과 초안 청크 삭제.
 #   색인에 실패하면 official/ 을 원래대로 되돌리고 초안은 그대로 둡니다.
 #
