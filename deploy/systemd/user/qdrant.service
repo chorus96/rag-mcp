@@ -1,23 +1,49 @@
-# Qdrant 벡터 DB — rag-mcp 사용자 모드 (systemctl --user).
-# deploy/install.sh --user 가 ~/.config/systemd/user/ 에 설치합니다. %h = 홈 디렉터리.
+# =============================================================================
+# qdrant.service — Qdrant 벡터 DB (사용자 모드, systemctl --user)
+# =============================================================================
+# rag-mcp 지식 베이스의 벡터를 저장합니다. rag-mcp.service가 이 서비스에 의존합니다.
+#
+# 설치 위치: ~/.config/systemd/user/qdrant.service  (deploy/install.sh --user가 복사)
+# 관리:      systemctl --user status qdrant / journalctl --user -u qdrant -f
+# 경로의 %h 는 systemd가 현재 사용자의 홈 디렉터리로 바꿉니다.
+#
+# 시스템 모드용(deploy/systemd/qdrant.service)과 같고, 다음만 다릅니다.
+#   - User=/Group= 없음 (현재 사용자로 실행)
+#   - 경로가 홈 아래 (%h/.local/share/rag-mcp, %h/.config/rag-mcp)
+#   - 보안 설정(ProtectSystem 등) 없음: 사용자 systemd에서는 배포판에 따라 동작하지 않거나
+#     서비스 시작을 막을 수 있습니다.
+#   - 부팅 대상이 default.target (로그인 세션 또는 linger가 켜져 있을 때 시작)
+
 [Unit]
 Description=Qdrant vector database (rag-mcp, user mode)
 
 [Service]
 Type=simple
 WorkingDirectory=%h/.local/share/rag-mcp/data/qdrant
+
+# 공통 설정 파일. 여기서는 QDRANT_API_KEY만 씁니다.
 EnvironmentFile=%h/.config/rag-mcp/rag-mcp.env
-# 로컬에서만 접속하도록 127.0.0.1에 바인드합니다.
+
+# --- Qdrant 설정 (QDRANT__섹션__항목 형식의 환경 변수) ---
+# rag-mcp만 접속하면 되므로 127.0.0.1에만 바인드합니다.
 Environment=QDRANT__SERVICE__HOST=127.0.0.1
+# REST(6333)와 gRPC(6334) 포트. 바꾸면 설정 파일의 QDRANT_URL도 맞추세요.
 Environment=QDRANT__SERVICE__HTTP_PORT=6333
 Environment=QDRANT__SERVICE__GRPC_PORT=6334
+# 데이터와 스냅숏은 데이터 디렉터리 아래에 둡니다.
 Environment=QDRANT__STORAGE__STORAGE_PATH=%h/.local/share/rag-mcp/data/qdrant/storage
 Environment=QDRANT__STORAGE__SNAPSHOTS_PATH=%h/.local/share/rag-mcp/data/qdrant/snapshots
+# 사용 통계 전송을 끕니다.
 Environment=QDRANT__TELEMETRY_DISABLED=true
-# Qdrant는 빈 API 키도 키로 취급해 모든 요청을 거부하므로, 값이 있을 때만 넘깁니다.
+
+# 설정 파일의 QDRANT_API_KEY를 Qdrant가 읽는 이름(QDRANT__SERVICE__API_KEY)으로 넘깁니다.
+# Qdrant는 빈 값도 "키가 설정됨"으로 보고 모든 요청을 거부하므로, 값이 있을 때만 넘깁니다.
 ExecStart=/bin/sh -c 'if [ -n "$QDRANT_API_KEY" ]; then export QDRANT__SERVICE__API_KEY="$QDRANT_API_KEY"; fi; exec %h/.local/share/rag-mcp/qdrant/qdrant'
+
+# 비정상 종료 시 5초 뒤 다시 시작합니다.
 Restart=on-failure
 RestartSec=5
 
 [Install]
+# 사용자 세션이 시작될 때 자동으로 시작합니다.
 WantedBy=default.target

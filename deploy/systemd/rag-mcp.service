@@ -1,23 +1,42 @@
-# rag-mcp MCP 서버 — 읽기 전용 검색 도구를 http://<host>:${MCP_PORT}/mcp 로 제공합니다.
-# deploy/install.sh가 /etc/systemd/system/ 에 설치합니다.
+# =============================================================================
+# rag-mcp.service — rag-mcp MCP 서버 (시스템 모드)
+# =============================================================================
+# 읽기 전용 검색 도구를 http://<서버 주소>:${MCP_PORT}/mcp (streamable-http)로 제공합니다.
+#
+# 설치 위치: /etc/systemd/system/rag-mcp.service  (deploy/install.sh가 복사)
+# 관리:      systemctl status rag-mcp / journalctl -u rag-mcp -f
+# 설정 변경: /etc/rag-mcp/rag-mcp.env 수정 후 sudo systemctl restart rag-mcp
+# 사용자 모드용은 deploy/systemd/user/rag-mcp.service 입니다. 바꿀 때 함께 고치세요.
+
 [Unit]
 Description=rag-mcp RAG memory MCP server
+# Qdrant가 먼저 뜨도록 하고, qdrant를 시작하면 함께 끌어올립니다.
 After=network-online.target qdrant.service
 Wants=network-online.target qdrant.service
 
 [Service]
 Type=simple
+# 전용 시스템 사용자로 실행합니다 (install.sh가 만듦).
 User=rag-mcp
 Group=rag-mcp
 WorkingDirectory=/opt/rag-mcp/app
+
+# 설정 파일 (임베딩 엔드포인트, 포트, 리랭킹 등 모든 설정).
 EnvironmentFile=/etc/rag-mcp/rag-mcp.env
+# 로그를 버퍼링 없이 바로 journal로 보냅니다.
 Environment=PYTHONUNBUFFERED=1
-# FastEmbed BM25 모델 캐시 (최초 실행 시 한 번 내려받습니다).
+# FastEmbed BM25 모델 캐시. 최초 실행 시 한 번 내려받고, rag-ingest와 함께 씁니다.
 Environment=FASTEMBED_CACHE_PATH=/var/lib/rag-mcp/fastembed_cache
+
 ExecStart=/opt/rag-mcp/venv/bin/python /opt/rag-mcp/app/server.py
+
+# 비정상 종료 시 5초 뒤 다시 시작합니다.
 Restart=on-failure
 RestartSec=5
 
+# --- 보안 설정 ---
+# 권한 상승 금지, 시스템 디렉터리 읽기 전용, 홈 디렉터리 숨김, 전용 /tmp.
+# 쓸 수 있는 곳은 FastEmbed 캐시뿐입니다 (문서와 Qdrant 데이터에는 쓰지 않음).
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
@@ -25,4 +44,5 @@ PrivateTmp=true
 ReadWritePaths=/var/lib/rag-mcp/fastembed_cache
 
 [Install]
+# 부팅 시 자동으로 시작합니다.
 WantedBy=multi-user.target

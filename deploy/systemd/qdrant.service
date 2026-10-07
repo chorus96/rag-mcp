@@ -1,5 +1,12 @@
-# Qdrant 벡터 DB — rag-mcp의 지식 베이스 저장소.
-# deploy/install.sh가 /etc/systemd/system/ 에 설치합니다.
+# =============================================================================
+# qdrant.service — Qdrant 벡터 DB (시스템 모드)
+# =============================================================================
+# rag-mcp 지식 베이스의 벡터를 저장합니다. rag-mcp.service가 이 서비스에 의존합니다.
+#
+# 설치 위치: /etc/systemd/system/qdrant.service  (deploy/install.sh가 복사)
+# 관리:      systemctl status qdrant / journalctl -u qdrant -f
+# 사용자 모드용은 deploy/systemd/user/qdrant.service 입니다. 바꿀 때 함께 고치세요.
+
 [Unit]
 Description=Qdrant vector database (rag-mcp)
 After=network-online.target
@@ -7,26 +14,40 @@ Wants=network-online.target
 
 [Service]
 Type=simple
+# 전용 시스템 사용자로 실행합니다 (install.sh가 만듦).
 User=rag-mcp
 Group=rag-mcp
 WorkingDirectory=/var/lib/rag-mcp/qdrant
-# QDRANT_API_KEY 등 공통 설정을 읽습니다.
+
+# 공통 설정 파일. 여기서는 QDRANT_API_KEY만 씁니다.
 EnvironmentFile=/etc/rag-mcp/rag-mcp.env
-# 로컬에서만 접속하도록 127.0.0.1에 바인드합니다. 다른 서버에서 Qdrant에 직접
+
+# --- Qdrant 설정 (QDRANT__섹션__항목 형식의 환경 변수) ---
+# rag-mcp만 접속하면 되므로 127.0.0.1에만 바인드합니다. 다른 서버에서 Qdrant에 직접
 # 접속해야 한다면 0.0.0.0으로 바꾸고 QDRANT_API_KEY를 반드시 설정하세요.
 Environment=QDRANT__SERVICE__HOST=127.0.0.1
+# REST(6333)와 gRPC(6334) 포트. 바꾸면 설정 파일의 QDRANT_URL도 맞추세요.
 Environment=QDRANT__SERVICE__HTTP_PORT=6333
 Environment=QDRANT__SERVICE__GRPC_PORT=6334
+# 데이터와 스냅숏은 데이터 디렉터리 아래에 둡니다.
 Environment=QDRANT__STORAGE__STORAGE_PATH=/var/lib/rag-mcp/qdrant/storage
 Environment=QDRANT__STORAGE__SNAPSHOTS_PATH=/var/lib/rag-mcp/qdrant/snapshots
+# 사용 통계 전송을 끕니다.
 Environment=QDRANT__TELEMETRY_DISABLED=true
-# rag-mcp.env의 QDRANT_API_KEY를 Qdrant가 읽는 변수 이름으로 넘깁니다. Qdrant는 빈 값도
-# 키로 취급해 모든 요청을 거부하므로, 값이 있을 때만 설정합니다 (비어 있으면 인증 없음).
+
+# 설정 파일의 QDRANT_API_KEY를 Qdrant가 읽는 이름(QDRANT__SERVICE__API_KEY)으로 넘깁니다.
+# Qdrant는 빈 값도 "키가 설정됨"으로 보고 모든 요청을 거부하므로, 값이 있을 때만 넘깁니다.
 ExecStart=/bin/sh -c 'if [ -n "$QDRANT_API_KEY" ]; then export QDRANT__SERVICE__API_KEY="$QDRANT_API_KEY"; fi; exec /opt/rag-mcp/qdrant/qdrant'
+
+# 비정상 종료 시 5초 뒤 다시 시작합니다.
 Restart=on-failure
 RestartSec=5
+# Qdrant는 세그먼트 파일을 많이 엽니다.
 LimitNOFILE=65536
 
+# --- 보안 설정 ---
+# 권한 상승 금지, 시스템 디렉터리 읽기 전용, 홈 디렉터리 숨김, 전용 /tmp.
+# 쓸 수 있는 곳은 Qdrant 데이터 디렉터리뿐입니다.
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
@@ -34,4 +55,5 @@ PrivateTmp=true
 ReadWritePaths=/var/lib/rag-mcp/qdrant
 
 [Install]
+# 부팅 시 자동으로 시작합니다.
 WantedBy=multi-user.target

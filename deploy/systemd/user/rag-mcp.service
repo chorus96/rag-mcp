@@ -1,19 +1,44 @@
-# rag-mcp MCP 서버 — 사용자 모드 (systemctl --user).
-# deploy/install.sh --user 가 ~/.config/systemd/user/ 에 설치합니다. %h = 홈 디렉터리.
+# =============================================================================
+# rag-mcp.service — rag-mcp MCP 서버 (사용자 모드, systemctl --user)
+# =============================================================================
+# 읽기 전용 검색 도구를 http://<서버 주소>:${MCP_PORT}/mcp (streamable-http)로 제공합니다.
+#
+# 설치 위치: ~/.config/systemd/user/rag-mcp.service  (deploy/install.sh --user가 복사)
+# 관리:      systemctl --user status rag-mcp / journalctl --user -u rag-mcp -f
+# 설정 변경: ~/.config/rag-mcp/rag-mcp.env 수정 후 systemctl --user restart rag-mcp
+# 경로의 %h 는 systemd가 현재 사용자의 홈 디렉터리로 바꿉니다.
+#
+# 시스템 모드용(deploy/systemd/rag-mcp.service)과 같고, 다음만 다릅니다.
+#   - User=/Group= 없음 (현재 사용자로 실행)
+#   - 경로가 홈 아래 (%h/.local/share/rag-mcp, %h/.config/rag-mcp)
+#   - network-online.target 의존 없음 (사용자 systemd에는 이 대상이 없음)
+#   - 보안 설정(ProtectSystem 등) 없음: 사용자 systemd에서는 배포판에 따라 동작하지 않거나
+#     서비스 시작을 막을 수 있습니다.
+#   - 부팅 대상이 default.target (로그인 세션 또는 linger가 켜져 있을 때 시작)
+
 [Unit]
 Description=rag-mcp RAG memory MCP server (user mode)
+# Qdrant가 먼저 뜨도록 하고, qdrant를 시작하면 함께 끌어올립니다.
 After=qdrant.service
 Wants=qdrant.service
 
 [Service]
 Type=simple
 WorkingDirectory=%h/.local/share/rag-mcp/app
+
+# 설정 파일 (임베딩 엔드포인트, 포트, 리랭킹 등 모든 설정).
 EnvironmentFile=%h/.config/rag-mcp/rag-mcp.env
+# 로그를 버퍼링 없이 바로 journal로 보냅니다.
 Environment=PYTHONUNBUFFERED=1
+# FastEmbed BM25 모델 캐시. 최초 실행 시 한 번 내려받고, rag-ingest와 함께 씁니다.
 Environment=FASTEMBED_CACHE_PATH=%h/.local/share/rag-mcp/data/fastembed_cache
+
 ExecStart=%h/.local/share/rag-mcp/venv/bin/python %h/.local/share/rag-mcp/app/server.py
+
+# 비정상 종료 시 5초 뒤 다시 시작합니다.
 Restart=on-failure
 RestartSec=5
 
 [Install]
+# 사용자 세션이 시작될 때 자동으로 시작합니다.
 WantedBy=default.target
