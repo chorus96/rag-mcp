@@ -15,6 +15,7 @@
 #              애플리케이션·Python 가상환경·Qdrant 바이너리
 #   --purge:   위에 더해 설정 파일(~/.config/rag-mcp)과
 #              데이터(~/.local/share/rag-mcp/data: 문서, Qdrant 저장소, 캐시)
+#              (RAG_KNOWLEDGE_DIR 을 이 밖의 경로로 바꿨다면 그 문서 디렉터리는 지우지 않습니다)
 #
 # --purge 없이 지우면 나중에 install.sh로 다시 설치했을 때 기존 설정과 데이터를 그대로 씁니다.
 set -euo pipefail

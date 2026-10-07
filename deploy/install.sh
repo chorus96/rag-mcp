@@ -22,7 +22,7 @@
 #   Qdrant       ~/.local/share/rag-mcp/qdrant
 #   설정 파일    ~/.config/rag-mcp/rag-mcp.env
 #   데이터       ~/.local/share/rag-mcp/data/{knowledge,qdrant,fastembed_cache}
-#   문서         ~/.local/share/rag-mcp/data/knowledge  (설정 파일의 RAG_KNOWLEDGE_DIR)
+#   문서         설정 파일의 RAG_KNOWLEDGE_DIR (기본 ~/.local/share/rag-mcp/data/knowledge)
 #                  official/   정식 문서 — 사람이 넣고 rag-ingest 로 색인 (샘플 문서가 여기에 들어감)
 #                  draft/      초안 — MCP 쓰기 도구를 켜면 모델이 여기에만 씀, rag-promote 로 official/ 에 승격
 #   서비스       ~/.config/systemd/user/{qdrant,rag-mcp}.service
@@ -102,8 +102,7 @@ esac
 # 데이터와 설정(API 키 포함)은 본인만 접근할 수 있게 합니다(700).
 install -d -m 755 "$PREFIX" "$PREFIX/app" "$PREFIX/qdrant" "$BIN_DIR" "$UNIT_DIR"
 install -d -m 700 "$DATA_DIR" "$DATA_DIR/qdrant" "$DATA_DIR/fastembed_cache" "$CONF_DIR"
-# 문서 디렉터리는 사람이 직접 파일을 넣는 곳이라 755로 둡니다. 하위 폴더는 5단계에서 만듭니다.
-install -d -m 755 "$DATA_DIR/knowledge"
+# 문서 디렉터리는 설정 파일의 RAG_KNOWLEDGE_DIR 을 읽은 뒤 5단계에서 만듭니다.
 
 # --- 2. 애플리케이션 + Python 의존성 -------------------------------------------------
 # 가상환경은 처음 한 번만 만들고, 업그레이드 때는 의존성만 갱신합니다.
@@ -144,16 +143,29 @@ else
 fi
 
 # --- 5. 문서 디렉터리 ----------------------------------------------------------------
-# 구조: knowledge/official/ (사람이 관리하는 정식 문서), knowledge/draft/ (모델이 만든 초안)
+# 위치: 설정 파일의 RAG_KNOWLEDGE_DIR (마지막 줄 기준, 비어 있거나 주석 처리됐으면 기본 경로).
+# 구조: official/ (사람이 관리하는 정식 문서), draft/ (모델이 만든 초안)
+KNOWLEDGE_DIR=$(sed -n 's/^RAG_KNOWLEDGE_DIR=//p' "$ENV_FILE" | tail -n 1)
+KNOWLEDGE_DIR=${KNOWLEDGE_DIR%\"}; KNOWLEDGE_DIR=${KNOWLEDGE_DIR#\"}   # 따옴표로 감쌌으면 벗김
+KNOWLEDGE_DIR=${KNOWLEDGE_DIR%\'}; KNOWLEDGE_DIR=${KNOWLEDGE_DIR#\'}
+KNOWLEDGE_DIR=${KNOWLEDGE_DIR:-$DATA_DIR/knowledge}
+case "$KNOWLEDGE_DIR" in
+    /*) ;;
+    # ~ 는 서버(Python)와 rag-ingest·rag-promote(셸)가 홈 디렉터리로 풀어 쓰므로 여기서도 같게 풉니다.
+    "~"|"~/"*) KNOWLEDGE_DIR=$HOME${KNOWLEDGE_DIR#\~} ;;
+    *) die "설정 파일의 RAG_KNOWLEDGE_DIR 은 절대 경로여야 합니다: $KNOWLEDGE_DIR ($ENV_FILE)" ;;
+esac
+# 사람이 직접 파일을 넣는 곳이라 755로 둡니다.
+install -d -m 755 "$KNOWLEDGE_DIR"
 # 샘플 문서(저장소의 knowledge/official/)는 문서 디렉터리가 비어 있을 때만 복사해, 운영 중인 문서를
-# 건드리지 않습니다. 그래서 폴더 생성보다 먼저 확인합니다.
-# 설정 파일의 RAG_KNOWLEDGE_DIR 을 다른 경로로 바꿨다면 이 단계는 그 경로가 아니라 기본 경로에 적용됩니다.
-if [ -z "$(ls -A "$DATA_DIR/knowledge")" ]; then
-    log "샘플 문서 복사 → $DATA_DIR/knowledge"
-    cp -r "$SRC_DIR/knowledge/." "$DATA_DIR/knowledge/"
+# 건드리지 않습니다. 그래서 하위 폴더를 만들기 전에 확인합니다.
+if [ -z "$(ls -A "$KNOWLEDGE_DIR")" ]; then
+    log "샘플 문서 복사 → $KNOWLEDGE_DIR"
+    cp -r "$SRC_DIR/knowledge/." "$KNOWLEDGE_DIR/"
 fi
 # 업그레이드 때 이전 구조(예: runbooks/)를 쓰던 설치에도 두 폴더를 만들어 둡니다. 기존 문서는 옮기지 않습니다.
-install -d -m 755 "$DATA_DIR/knowledge/official" "$DATA_DIR/knowledge/draft"
+log "문서 디렉터리 → $KNOWLEDGE_DIR/{official,draft}"
+install -d -m 755 "$KNOWLEDGE_DIR/official" "$KNOWLEDGE_DIR/draft"
 
 # --- 6. systemd 서비스 + 수집 명령 ---------------------------------------------------
 log "systemd 사용자 서비스 등록 → $UNIT_DIR"
@@ -207,7 +219,7 @@ cat <<EOF
        (EMBEDDINGS_BASE_URL / EMBEDDINGS_API_KEY / EMBEDDINGS_MODEL)
        \${EDITOR:-vi} $ENV_FILE
        systemctl --user restart rag-mcp
-  2. 문서 색인 (정식 문서는 $DATA_DIR/knowledge/official/ 에 넣습니다):
+  2. 문서 색인 (정식 문서는 $KNOWLEDGE_DIR/official/ 에 넣습니다):
        rag-ingest
   3. 상태 확인:
        systemctl --user status qdrant rag-mcp
