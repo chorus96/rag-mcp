@@ -1,6 +1,7 @@
 ---
 title: Longhorn 볼륨이 "attaching" 상태에서 멈춤
 tags: [longhorn, storage, csi, node-reboot]
+component: longhorn
 ---
 
 # Longhorn 볼륨이 "attaching" 상태에서 멈춤
