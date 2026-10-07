@@ -12,7 +12,7 @@
 
 문서 디렉터리 (RAG_KNOWLEDGE_DIR)
   official/(사람이 관리하는 정식 문서)와 draft/(모델이 만든 초안)로 나뉩니다. 검색은 Qdrant만 쓰고, 문서
-  디렉터리는 rag_list_documents 가 official/ 파일 목록을 만들 때만 읽습니다. 결과의 source(예: official/foo.md, draft/foo.md)로 정식 문서와 초안이 구분됩니다.
+  디렉터리는 rag_list_documents 가 파일 목록을 만들 때만 읽습니다. 결과의 source(예: official/foo.md, draft/foo.md)로 정식 문서와 초안이 구분됩니다.
   서버가 문서 디렉터리에 쓰는 것은 쓰기 도구를 켰을 때 draft/ 아래뿐이고, official/ 로의 승격은 사람이
   rag-promote(promote.py)로 합니다.
 
@@ -333,19 +333,21 @@ def rag_health() -> dict[str, Any]:
 
 
 @mcp.tool()
-def rag_list_documents(subdir: str | None = None, limit: int = 100) -> dict[str, Any]:
-    """지식 베이스의 정식 문서(official/) 파일 목록을 보여 줍니다 (읽기 전용).
+def rag_list_documents(folder: str = "official", subdir: str | None = None, limit: int = 100) -> dict[str, Any]:
+    """지식 베이스의 문서 파일 목록을 보여 줍니다 (읽기 전용). 정식 문서(official/) 또는 초안(draft/).
 
-    사용자가 어떤 문서가 있는지 물을 때, 또는 검색 전에 문서 구성을 파악할 때 사용하세요. 내용 검색이
-    아니라 파일 목록입니다(내용은 rag_search로 찾으세요). 초안(draft/)은 포함하지 않습니다.
-    항목마다 source(문서 경로), title, doc_type, size_bytes, modified(UTC), chunks(색인된 청크 수)를
-    돌려줍니다. chunks가 0이면 파일은 있지만 아직 색인(rag-ingest) 전이라 검색되지 않습니다.
+    사용자가 어떤 문서가 있는지, 검토할 초안이 무엇인지 물을 때 사용하세요. 내용 검색이 아니라 파일
+    목록입니다(내용은 rag_search로 찾으세요). 항목마다 source(문서 경로), title, doc_type, size_bytes,
+    modified(UTC), chunks(색인된 청크 수)를 돌려줍니다. chunks가 0이면 파일은 있지만 아직 색인 전이라
+    검색되지 않습니다. 초안에는 승격(rag-promote)하면 옮겨질 위치 promote_to 도 있습니다. 초안은 아직
+    사람이 검토하지 않은 문서입니다.
 
     Args:
-        subdir: 선택 — official/ 아래 하위 폴더만 보기 (예: 'runbooks'). 생략하면 official/ 전체.
+        folder: 'official'(정식 문서, 기본값) 또는 'draft'(초안).
+        subdir: 선택 — 그 폴더 아래 하위 폴더만 보기 (예: 'runbooks'). 생략하면 폴더 전체.
         limit: 돌려줄 최대 개수. 기본 100, 최대 500. 넘으면 truncated=true.
     """
-    return documents.list_official(subdir, limit, client=_qdrant)
+    return documents.list_documents(folder, subdir, limit, client=_qdrant)
 
 
 # --- MCP 쓰기 도구 (선택 — RAG_MCP_WRITE=true 일 때만 LLM에 노출) -------------------

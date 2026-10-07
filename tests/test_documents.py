@@ -18,8 +18,9 @@
   - 초안 승격(rag-promote): draft/<경로> → official/<경로> 로 옮겨 색인하고 초안을 정리, official/ 의 기존 문서는
     --overwrite 로만 바꿈, 색인 실패 시 official/ 을 되돌림, 목록에는 draft/ 문서만 나옴, MCP 도구로는 노출되지 않음
   - 도구 등록: RAG_MCP_WRITE 가 꺼져 있으면 쓰기 도구(추가·삭제)가 MCP 도구 목록에 없음
-  - 정식 문서 목록(rag_list_documents): official/ 의 .md/.pdf 만 source 순으로, 제목·유형·색인된 청크 수와 함께
-    돌려줌. subdir·limit 처리, official/ 밖 거부, Qdrant 실패 시에도 목록은 돌려줌(chunks=None), 항상 등록됨
+  - 문서 목록(rag_list_documents): official/ 또는 draft/ 의 .md/.pdf 만 source 순으로, 제목·유형·색인된 청크 수와 함께
+    돌려줌. subdir·limit 처리, official/ 밖 거부, Qdrant 실패 시에도 목록은 돌려줌(chunks=None), 항상 등록됨.
+    초안에는 promote_to, draft/ 가 없으면 빈 목록, official·draft 외 folder 는 거부
 
 방법
   - KNOWLEDGE_DIR 을 pytest 임시 폴더로 바꾸고, ingest.ingest_file 은 가짜 함수로 바꿔
@@ -409,11 +410,11 @@ def _official(tmp_path):
         (tmp_path / rel).write_text(text, encoding="utf-8")
 
 
-def test_list_official_lists_documents_with_index_state(monkeypatch, tmp_path):
+def test_list_documents_lists_documents_with_index_state(monkeypatch, tmp_path):
     monkeypatch.setattr(documents, "KNOWLEDGE_DIR", tmp_path)
     _official(tmp_path)
     q = _FacetQdrant(counts={"official/a.md": 4})
-    out = documents.list_official(client=q)
+    out = documents.list_documents(client=q)
     assert out["status"] == "ok" and out["folder"] == "official/"
     assert out["total"] == 3 and out["truncated"] is False
     # .md/.pdf 만, source 순. draft/ 와 다른 확장자는 없음.
@@ -430,29 +431,29 @@ def test_list_official_lists_documents_with_index_state(monkeypatch, tmp_path):
     assert sorted(flt.must[0].match.any) == ["official/a.md", "official/c.pdf", "official/rcas/b.md"]
 
 
-def test_list_official_subdir_and_limit(monkeypatch, tmp_path):
+def test_list_documents_subdir_and_limit(monkeypatch, tmp_path):
     monkeypatch.setattr(documents, "KNOWLEDGE_DIR", tmp_path)
     _official(tmp_path)
-    out = documents.list_official("rcas", client=_FacetQdrant())
+    out = documents.list_documents(subdir="rcas", client=_FacetQdrant())
     assert out["folder"] == "official/rcas/" and [d["source"] for d in out["documents"]] == ["official/rcas/b.md"]
 
-    out = documents.list_official(limit=1, client=_FacetQdrant())
+    out = documents.list_documents(limit=1, client=_FacetQdrant())
     assert out["total"] == 3 and out["returned"] == 1 and out["truncated"] is True
 
 
-def test_list_official_rejects_paths_outside_official(monkeypatch, tmp_path):
+def test_list_documents_rejects_paths_outside_official(monkeypatch, tmp_path):
     monkeypatch.setattr(documents, "KNOWLEDGE_DIR", tmp_path)
     _official(tmp_path)
     for bad in ("../draft", "rcas/../../draft", "missing"):
-        out = documents.list_official(bad, client=_FacetQdrant())
+        out = documents.list_documents(subdir=bad, client=_FacetQdrant())
         assert out["status"] == "error", bad
 
 
-def test_list_official_without_qdrant_still_lists(monkeypatch, tmp_path):
+def test_list_documents_without_qdrant_still_lists(monkeypatch, tmp_path):
     # Qdrant에 묻지 못해도 목록은 돌려주고, 색인 상태는 알 수 없음(None)으로 표시합니다.
     monkeypatch.setattr(documents, "KNOWLEDGE_DIR", tmp_path)
     _official(tmp_path)
-    out = documents.list_official(client=_FacetQdrant(raises=RuntimeError("qdrant down")))
+    out = documents.list_documents(client=_FacetQdrant(raises=RuntimeError("qdrant down")))
     assert out["status"] == "ok" and out["total"] == 3
     assert all(d["chunks"] is None for d in out["documents"])
 
@@ -460,3 +461,32 @@ def test_list_official_without_qdrant_still_lists(monkeypatch, tmp_path):
 def test_list_documents_tool_registered_by_default():
     # 읽기 전용 도구이므로 쓰기 도구를 켜지 않아도 등록됩니다.
     assert "rag_list_documents" in _tool_names()
+
+
+def test_list_documents_draft_folder(monkeypatch, tmp_path):
+    monkeypatch.setattr(documents, "KNOWLEDGE_DIR", tmp_path)
+    _official(tmp_path)
+    out = documents.list_documents("draft", client=_FacetQdrant(counts={"draft/d.md": 2}))
+    assert out["folder"] == "draft/" and out["total"] == 1
+    assert out["documents"][0] | {"size_bytes": 0, "modified": ""} == {
+        "source": "draft/d.md", "title": "초안 D", "doc_type": "note", "size_bytes": 0, "modified": "",
+        "chunks": 2, "promote_to": "official/d.md",
+    }
+    # 정식 문서 목록에는 promote_to 가 없습니다.
+    assert all("promote_to" not in d for d in documents.list_documents(client=_FacetQdrant())["documents"])
+
+
+def test_list_documents_empty_when_no_draft_folder(monkeypatch, tmp_path):
+    # draft/ 는 첫 초안을 저장할 때 만들어지므로, 없으면 오류가 아니라 빈 목록입니다.
+    monkeypatch.setattr(documents, "KNOWLEDGE_DIR", tmp_path)
+    out = documents.list_documents("draft", client=_FacetQdrant())
+    assert out == {"status": "ok", "folder": "draft/", "total": 0, "returned": 0, "truncated": False,
+                   "documents": []}
+    assert documents.list_documents("official", client=_FacetQdrant())["status"] == "error"
+
+
+def test_list_documents_rejects_unknown_folder(monkeypatch, tmp_path):
+    monkeypatch.setattr(documents, "KNOWLEDGE_DIR", tmp_path)
+    _official(tmp_path)
+    for bad in ("runbooks", "..", "/etc"):
+        assert documents.list_documents(bad, client=_FacetQdrant())["status"] == "error", bad

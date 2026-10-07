@@ -5,7 +5,8 @@
   - add_document (rag_add_document):    문서를 문서 디렉터리의 draft/ 아래 마크다운 파일로 저장한 뒤 rag-ingest와
                                          같은 방식(ingest.ingest_file)으로 바로 색인
   - delete_document (rag_delete_document): draft/ 아래 문서 파일과 그 문서의 청크(포인트)를 함께 삭제
-  - list_official (rag_list_documents):  정식 문서(official/) 파일 목록. 읽기 전용이라 항상 등록됩니다.
+  - list_documents (rag_list_documents): 정식 문서(official/) 또는 초안(draft/) 파일 목록. 읽기 전용이라
+                                           항상 등록됩니다.
   - list_drafts / promote_document:         초안 목록과, 검토한 초안을 정식 폴더(official/)로 옮기는 승격.
                                              사람이 쓰는 rag-promote 명령(promote.py)만 호출하며 MCP 도구가
                                              아닙니다 (모델은 정식 폴더에 쓸 수 없음)
@@ -219,7 +220,7 @@ def delete_document(source: str, client: QdrantClient | None = None) -> dict[str
     return {"status": "ok", "source": source, "file_deleted": file_exists, "chunks_deleted": points}
 
 
-# --- 정식 문서 목록 (MCP 읽기 도구 rag_list_documents) ------------------------------------
+# --- 문서 목록 (MCP 읽기 도구 rag_list_documents) -----------------------------------------
 MAX_LIST = 500
 
 
@@ -236,22 +237,32 @@ def _indexed_chunks(client: QdrantClient, sources: list[str]) -> dict[str, int] 
         return None
 
 
-def list_official(subdir: str | None = None, limit: int = 100,
-                  client: QdrantClient | None = None) -> dict[str, Any]:
-    """official/ 아래 문서(.md/.pdf) 목록을 source 순으로 돌려줍니다 (오류도 status로).
+def list_documents(folder: str = OFFICIAL_SUBDIR, subdir: str | None = None, limit: int = 100,
+                   client: QdrantClient | None = None) -> dict[str, Any]:
+    """official/ 또는 draft/ 아래 문서(.md/.pdf) 목록을 source 순으로 돌려줍니다 (오류도 status로).
 
-    subdir를 주면 official/<subdir>/ 아래만 봅니다. 항목마다 source, title, doc_type, 크기, 수정 시각과
-    색인된 청크 수(chunks; 0이면 아직 rag-ingest 전)를 넣습니다. 색인 상태를 알 수 없으면 chunks 는 None입니다.
+    subdir를 주면 <folder>/<subdir>/ 아래만 봅니다. 항목마다 source, title, doc_type, 크기, 수정 시각과
+    색인된 청크 수(chunks; 0이면 아직 색인 전)를 넣습니다. 색인 상태를 알 수 없으면 chunks 는 None입니다.
+    초안(draft/)에는 승격하면 옮겨질 위치(promote_to)도 넣습니다. draft/ 는 첫 초안을 저장할 때 만들어지므로,
+    아직 없으면 빈 목록입니다.
     """
-    root = (KNOWLEDGE_DIR / OFFICIAL_SUBDIR).resolve()
+    folder = (folder or OFFICIAL_SUBDIR).strip().strip("/").lower()
+    if folder not in (OFFICIAL_SUBDIR, DRAFT_SUBDIR):
+        return {"status": "error",
+                "error": f"folder must be '{OFFICIAL_SUBDIR}' or '{DRAFT_SUBDIR}': {folder}"}
+    root = (KNOWLEDGE_DIR / folder).resolve()
     base = root
     subdir = (subdir or "").strip().strip("/")
     if subdir:
         base = (root / subdir).resolve()
         if Path(subdir).is_absolute() or (base != root and root not in base.parents):
-            return {"status": "error", "error": f"subdir must be a folder under {OFFICIAL_SUBDIR}/: {subdir}"}
+            return {"status": "error", "error": f"subdir must be a folder under {folder}/: {subdir}"}
+    label = f"{folder}/{subdir}/" if subdir else f"{folder}/"
     if not base.is_dir():
-        return {"status": "error", "error": f"folder not found: {OFFICIAL_SUBDIR}/{subdir}".rstrip("/") + "/"}
+        if folder == DRAFT_SUBDIR and not subdir:
+            return {"status": "ok", "folder": label, "total": 0, "returned": 0, "truncated": False,
+                    "documents": []}
+        return {"status": "error", "error": f"folder not found: {label}"}
     limit = max(1, min(int(limit or 100), MAX_LIST))
 
     paths = sorted(p for p in base.rglob("*") if p.is_file() and p.suffix.lower() in (".md", ".pdf"))
@@ -276,9 +287,10 @@ def list_official(subdir: str | None = None, limit: int = 100,
     counts = _indexed_chunks(client or _client(), [d["source"] for d in docs])
     for d in docs:
         d["chunks"] = None if counts is None else counts.get(d["source"], 0)
+        if folder == DRAFT_SUBDIR:
+            d["promote_to"] = f"{OFFICIAL_SUBDIR}/{d['source'][len(DRAFT_SUBDIR) + 1:]}"
 
-    folder = f"{OFFICIAL_SUBDIR}/{subdir}/" if subdir else f"{OFFICIAL_SUBDIR}/"
-    return {"status": "ok", "folder": folder, "total": len(paths), "returned": len(docs),
+    return {"status": "ok", "folder": label, "total": len(paths), "returned": len(docs),
             "truncated": len(paths) > len(docs), "documents": docs}
 
 

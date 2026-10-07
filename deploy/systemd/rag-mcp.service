@@ -8,7 +8,7 @@
 #   official/   정식 문서 — 사람이 관리. 서버는 쓰지 않습니다. 검색은 rag-ingest 가 색인한 내용(Qdrant)으로 하고,
 #               rag_list_documents 도구가 파일 목록을 만들 때만 읽습니다.
 #   draft/      초안 — 쓰기 도구를 켰을 때만 서버가 이 아래에 파일을 만들고 지웁니다(바로 색인).
-#   쓰기 도구가 꺼져 있으면 서버는 문서 디렉터리를 읽기만 합니다(official/ 목록).
+#   쓰기 도구가 꺼져 있으면 서버는 문서 디렉터리를 읽기만 합니다(rag_list_documents 의 파일 목록).
 #
 # 설치 위치: ~/.config/systemd/user/rag-mcp.service  (deploy/install.sh가 복사)
 # 관리:      systemctl --user status rag-mcp / journalctl --user -u rag-mcp -f

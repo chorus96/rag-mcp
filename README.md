@@ -200,7 +200,7 @@ Claude Code라면 [플러그인](#claude-code-플러그인-권장)으로 연결�
 ### Claude Code 플러그인 (권장)
 
 이 저장소는 Claude Code 플러그인 마켓플레이스입니다. `rag-mcp` 플러그인을 설치하면 MCP 서버 연결과
-함께, 언제 어떤 검색 도구를 쓸지 알려 주는 스킬(`rag-knowledge`)과 정식 문서 목록을 보여 주는 스킬(`rag-list-documents`)이
+함께, 언제 어떤 검색 도구를 쓸지 알려 주는 스킬(`rag-knowledge`)과 정식 문서·초안 목록을 보여 주는 스킬(`rag-list-documents`)이
 추가됩니다.
 
 ```text
@@ -262,7 +262,7 @@ RAG_MCP_URL=http://10.0.0.5:8084/mcp claude
 | `search_runbooks(query, cluster?, component?, limit?)` | "처리 절차가 뭐지?" — 런북(`runbook`)만 검색 |
 | `rag_collections()` | 컬렉션 목록과 포인트 수 (지식 베이스가 채워졌는지 확인) |
 | `rag_health()` | Qdrant와 임베딩 엔드포인트 접근 가능 여부 |
-| `rag_list_documents(subdir?, limit?)` | 정식 문서(`official/`) 파일 목록 — 제목, 유형, 크기, 수정 시각, 색인된 청크 수(0이면 색인 전) |
+| `rag_list_documents(folder?, subdir?, limit?)` | 문서 파일 목록 — `folder`는 `official`(정식 문서, 기본) 또는 `draft`(초안). 제목, 유형, 크기, 수정 시각, 색인된 청크 수(0이면 색인 전), 초안은 승격 위치(`promote_to`)까지 |
 | `rag_add_document(title, content, doc_type?, tags?, component?, cluster?, overwrite?)` | (선택) `draft/`에 문서 추가 — [대화로 문서 추가·삭제하기](#대화로-문서-추가삭제하기-mcp-쓰기-도구) 참고 |
 | `rag_delete_document(source)` | (선택) `draft/` 문서 삭제 — 파일과 청크를 함께 삭제 |
 
