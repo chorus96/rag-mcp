@@ -120,7 +120,8 @@ ID가 문서 경로(또는 장애 fingerprint)와 청크 번호에서 결정되�
 | `search_runbooks(query, cluster?, component?, limit?)` | "처리 절차가 뭐지?" — `doc_type=runbook`으로 고정 |
 | `rag_collections()` | 컬렉션 목록과 포인트 수 (지식 베이스가 채워졌는지 확인) |
 | `rag_health()` | Qdrant와 임베딩 엔드포인트 접근 가능 여부, 리랭커·하이브리드 설정 |
-| `rag_add_document(title, content, doc_type?, tags?, component?, cluster?, overwrite?)` | (선택) 문서 추가 — `RAG_MCP_WRITE=true`일 때만 등록. [7장](#mcp-쓰기-도구-rag_add_document) 참고 |
+| `rag_add_document(title, content, doc_type?, tags?, component?, cluster?, overwrite?)` | (선택) 문서 추가 — `RAG_MCP_WRITE=true`일 때만 등록. [7장](#mcp-쓰기-도구-rag_add_document-rag_delete_document) 참고 |
+| `rag_delete_document(source)` | (선택) 문서 삭제 — 파일과 청크를 함께 삭제. `RAG_MCP_WRITE=true`일 때만 등록 |
 
 `limit`은 1부터 `RAG_MAX_LIMIT`(기본 20) 사이로 제한되며, 생략하면 `RAG_DEFAULT_LIMIT`(기본 5)입니다.
 
@@ -232,10 +233,10 @@ rag-ingest --recreate           # 컬렉션을 지우고 전체 재구축
   점수는 척도가 달라 임계값이 의미를 잃기 때문입니다.
 - 임베딩과 Qdrant를 서버가 직접 다루므로, 기록과 질의가 구조적으로 같은 방식으로 임베딩됩니다.
 
-### MCP 쓰기 도구 (`rag_add_document`)
+### MCP 쓰기 도구 (`rag_add_document`, `rag_delete_document`)
 
 내부 쓰기 API와 달리 **LLM이 직접 호출하는** 쓰기 도구입니다. 사용자가 대화 중에 "이 내용을 지식 베이스에
-추가해 줘"라고 하면 모델이 문서를 저장할 수 있습니다. 편리한 만큼 지식 베이스가 잘못된 내용으로 오염될
+추가해 줘", "그 문서 지워 줘"라고 하면 모델이 문서를 저장하거나 삭제할 수 있습니다. 편리한 만큼 지식 베이스가 잘못된 내용으로 오염될
 수 있으므로 **기본으로 꺼져 있고**, 운영자가 설정 파일에 `RAG_MCP_WRITE=true`를 넣어야 켜집니다.
 
 | 항목 | 동작 |
@@ -246,6 +247,7 @@ rag-ingest --recreate           # 컬렉션을 지우고 전체 재구축
 | 색인 | 저장 직후 `ingest.ingest_file`로 색인 — `rag-ingest`와 같은 코드라 청크 ID·페이로드가 같음 |
 | 덮어쓰기 | 같은 경로에 파일이 있으면 `overwrite=true`일 때만 바꿈 (청크 수가 줄면 남은 청크도 정리) |
 | 크기 제한 | 본문 `RAG_MAX_DOC_CHARS`자(기본 200000)까지 |
+| 삭제 | `rag_delete_document(source)` — 문서 파일과 그 `source`의 청크를 함께 삭제 |
 
 설계상 선택과 그 이유:
 
@@ -255,7 +257,13 @@ rag-ingest --recreate           # 컬렉션을 지우고 전체 재구축
   입니다. `doc_type`도 소문자·숫자·`-`·`_`만 허용하므로 문서 디렉터리 밖에 쓸 수 없습니다.
 - **색인에 실패해도 파일은 남깁니다.** 응답에 `saved: true`와 오류를 함께 돌려주므로, 원인을 고친 뒤
   `rag-ingest`로 다시 색인하면 됩니다.
-- **삭제 도구는 없습니다.** 잘못 추가한 문서는 파일을 지운 뒤 `rag-ingest --recreate`로 정리합니다.
+- **삭제는 파일과 청크를 함께 지웁니다** (`rag_delete_document(source)`). 검색 결과나 추가 응답의 `source`로
+  문서를 지정합니다. 파일이 이미 없고 청크만 남아 있어도 청크를 정리하므로, 파일을 지우거나 이름을 바꾼 뒤
+  남은 청크를 없앨 때도 쓸 수 있습니다.
+- **삭제 범위를 제한합니다.** `source`는 문서 디렉터리 기준 상대 경로여야 하고(절대 경로·`..`로 밖을 가리키면
+  거부), `.md`/`.pdf` 문서만 지울 수 있습니다. MCP로 추가한 문서뿐 아니라 `rag-ingest`로 수집한 문서도
+  지울 수 있습니다.
+- **청크 삭제에 실패하면 파일은 지우지 않습니다.** 파일만 사라지고 청크가 검색에 남는 상태를 피하기 위해서입니다.
 
 ## 8. 임베딩
 
@@ -429,7 +437,7 @@ curl -s http://localhost:6333/collections/rag_kb | grep -o '"size":[0-9]*'
 | **내부 API** | | |
 | `RAG_INTERNAL_TOKEN` | _(비어 있음)_ | 내부 쓰기 API 보호 토큰. 비워 두면 열림 (개발용) |
 | **MCP 쓰기 도구** | | |
-| `RAG_MCP_WRITE` | `false` | `true`면 MCP 쓰기 도구 `rag_add_document`를 등록 (LLM이 문서를 추가할 수 있음) |
+| `RAG_MCP_WRITE` | `false` | `true`면 MCP 쓰기 도구 `rag_add_document`, `rag_delete_document`를 등록 (LLM이 문서를 추가·삭제할 수 있음) |
 | `RAG_MAX_DOC_CHARS` | `200000` | `rag_add_document`로 추가할 수 있는 본문의 최대 글자 수 |
 
 주석이 달린 예시는 [`.env.example`](../.env.example)에 있습니다. 위 표는 모두 **서버**가 읽는 변수입니다.
@@ -442,6 +450,5 @@ curl -s http://localhost:6333/collections/rag_kb | grep -o '"size":[0-9]*'
 - BM25 키워드 검색은 한국어 형태소를 고려하지 않습니다.
 - 스캔(이미지) PDF는 OCR을 하지 않으므로 수집되지 않습니다.
 - 하이브리드 검색의 `score`는 RRF 결합 점수라서, 코사인 유사도처럼 임계값을 정하는 데 쓸 수 없습니다.
-- MCP 쓰기 도구에는 삭제 기능이 없습니다. 잘못 추가한 문서는 파일을 지우고 `--recreate`로 정리해야 합니다.
 - 같은 서버에서는 rag-mcp를 하나만 실행할 수 있습니다. Qdrant 포트(6333, 6334)가 systemd 유닛에 고정되어
   있기 때문입니다.

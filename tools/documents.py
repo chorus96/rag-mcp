@@ -1,8 +1,10 @@
 """tools/documents.py — MCP 쓰기 도구의 로직 (문서 추가).
 
 역할
-  LLM이 MCP 도구(rag_add_document)로 문서를 추가할 때, 문서를 문서 디렉터리에 마크다운 파일로 저장한 뒤
-  rag-ingest와 같은 방식(ingest.ingest_file)으로 바로 색인합니다.
+  LLM이 MCP 도구로 지식 베이스의 문서를 추가하거나 삭제할 때의 로직입니다.
+  - add_document (rag_add_document):    문서를 문서 디렉터리에 마크다운 파일로 저장한 뒤 rag-ingest와
+                                         같은 방식(ingest.ingest_file)으로 바로 색인
+  - delete_document (rag_delete_document): 문서 파일과 그 문서의 청크(포인트)를 함께 삭제
 
 왜 파일로도 저장하나
   지식 베이스의 원본은 문서 디렉터리입니다. 파일로 남겨 두면 rag-ingest --recreate 로 재구축해도
@@ -14,6 +16,8 @@
   - 파일 경로는 서버가 정합니다(문서 유형 폴더 + 제목에서 만든 파일 이름). 호출자가 경로를 지정할 수
     없으므로 문서 디렉터리 밖에 쓸 수 없습니다.
   - 같은 이름의 파일이 있으면 overwrite=True 일 때만 덮어씁니다.
+  - 삭제는 문서 디렉터리 안의 .md / .pdf 문서만 대상으로 합니다. 경로를 정규화해 디렉터리 밖을
+    가리키면 거부합니다.
   - 본문 크기는 RAG_MAX_DOC_CHARS(기본 200000자)로 제한합니다.
 """
 
@@ -29,6 +33,7 @@ from typing import Any
 
 import yaml
 from qdrant_client import QdrantClient
+from qdrant_client.models import FieldCondition, Filter, FilterSelector, MatchValue
 
 import ingest
 
@@ -116,3 +121,58 @@ def add_document(title: str, content: str, doc_type: str = "note", tags: list[st
     log.info("added document %s (%s, %d chunk(s), overwrite=%s)", source, doc_type, chunks, existed)
     return {"status": "ok", "source": source, "doc_type": doc_type, "title": title,
             "chunks": chunks, "replaced": existed}
+
+
+# --- 문서 삭제 -----------------------------------------------------------------
+def _resolve_source(source: str) -> tuple[Path, str] | None:
+    """source(문서 디렉터리 기준 상대 경로)를 실제 경로로 바꿉니다. 절대 경로이거나 디렉터리 밖이면 None."""
+    if Path(source).is_absolute():
+        return None
+    root = KNOWLEDGE_DIR.resolve()
+    path = (root / source).resolve()
+    if root not in path.parents:
+        return None
+    return path, str(path.relative_to(root)).replace(os.sep, "/")
+
+
+def delete_document(source: str, client: QdrantClient | None = None) -> dict[str, Any]:
+    """문서 파일과 그 청크를 삭제합니다. 결과를 dict로 돌려줍니다 (오류도 status로).
+
+    파일이 이미 없어도 청크가 남아 있으면 청크만 지웁니다 (파일을 지우거나 이름을 바꾼 뒤 남은 청크 정리).
+    """
+    source = (source or "").strip()
+    if not source:
+        return {"status": "error", "error": "source must be a non-empty path (e.g. runbooks/foo.md)"}
+    resolved = _resolve_source(source)
+    if resolved is None:
+        return {"status": "error", "error": f"source must be inside the knowledge directory: {source}"}
+    path, source = resolved
+    if path.suffix.lower() not in (".md", ".pdf"):
+        return {"status": "error", "error": "only .md or .pdf documents can be deleted"}
+
+    by_source = Filter(must=[FieldCondition(key="source", match=MatchValue(value=source))])
+    try:
+        if client is None:
+            client = QdrantClient(url=ingest.QDRANT_URL, api_key=ingest.QDRANT_API_KEY,
+                                  timeout=ingest.HTTP_TIMEOUT)
+        points = client.count(ingest.COLLECTION, count_filter=by_source, exact=True).count
+    except Exception as exc:  # noqa: BLE001 - 컬렉션이 없을 수도 있음
+        log.warning("counting chunks for %s failed: %s", source, exc)
+        points = 0
+
+    file_exists = path.is_file()
+    if not file_exists and not points:
+        return {"status": "error", "source": source, "error": f"no document found at {source}"}
+
+    try:
+        if points:
+            client.delete(collection_name=ingest.COLLECTION,
+                          points_selector=FilterSelector(filter=by_source))
+    except Exception as exc:  # noqa: BLE001
+        return {"status": "error", "source": source,
+                "error": f"deleting chunks failed: {exc} (the file was not deleted)"}
+    if file_exists:
+        path.unlink()
+
+    log.info("deleted document %s (file=%s, %d chunk(s))", source, file_exists, points)
+    return {"status": "ok", "source": source, "file_deleted": file_exists, "chunks_deleted": points}

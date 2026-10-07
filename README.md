@@ -261,7 +261,8 @@ RAG_MCP_URL=http://10.0.0.5:8084/mcp claude
 | `search_runbooks(query, cluster?, component?, limit?)` | "처리 절차가 뭐지?" — 런북(`runbook`)만 검색 |
 | `rag_collections()` | 컬렉션 목록과 포인트 수 (지식 베이스가 채워졌는지 확인) |
 | `rag_health()` | Qdrant와 임베딩 엔드포인트 접근 가능 여부 |
-| `rag_add_document(title, content, doc_type?, tags?, component?, cluster?, overwrite?)` | (선택) 문서 추가 — [대화로 문서 추가하기](#대화로-문서-추가하기-mcp-쓰기-도구) 참고 |
+| `rag_add_document(title, content, doc_type?, tags?, component?, cluster?, overwrite?)` | (선택) 문서 추가 — [대화로 문서 추가·삭제하기](#대화로-문서-추가삭제하기-mcp-쓰기-도구) 참고 |
+| `rag_delete_document(source)` | (선택) 문서 삭제 — 파일과 청크를 함께 삭제 |
 
 - `cluster`는 **소프트 필터**입니다. 같은 클러스터 결과가 없으면 전체 범위로 다시 검색하고
   `cluster_narrowed: false`로 알려 줍니다.
@@ -301,9 +302,9 @@ cluster: prod-eu
 > **알려진 제한:** 파일을 삭제하거나 이름을 바꿔도 기존 청크는 남습니다. 그런 경우에는
 > `rag-ingest --recreate`로 전체를 다시 만드세요.
 
-### 대화로 문서 추가하기 (MCP 쓰기 도구)
+### 대화로 문서 추가·삭제하기 (MCP 쓰기 도구)
 
-설정 파일에서 쓰기 도구를 켜면, Claude Code 같은 MCP 클라이언트에서 대화로 문서를 추가할 수 있습니다.
+설정 파일에서 쓰기 도구를 켜면, Claude Code 같은 MCP 클라이언트에서 대화로 문서를 추가하거나 삭제할 수 있습니다.
 
 ```bash
 # ~/.config/rag-mcp/rag-mcp.env 에 추가한 뒤 재시작
@@ -319,10 +320,11 @@ systemctl --user restart rag-mcp
 - 문서는 문서 디렉터리 아래 `<문서 유형>s/<제목>.md` 파일로 저장되고 바로 검색됩니다
   (예: `runbooks/longhorn-볼륨-복구.md`). 파일로 남으므로 `rag-ingest --recreate`로 재구축해도 사라지지 않습니다.
 - 같은 제목의 문서가 있으면 덮어쓰기를 명시해야만 바꿉니다.
-- 삭제 도구는 없습니다. 잘못 추가한 문서는 파일을 지운 뒤 `rag-ingest --recreate`로 정리하세요.
+- "그 런북 지워 줘"처럼 요청하면 `rag_delete_document` 도구가 문서 파일과 검색용 청크를 함께 지웁니다.
+  삭제할 문서는 검색 결과의 `source`(예: `runbooks/longhorn-볼륨-복구.md`)로 지정되며, 되돌릴 수 없습니다.
 
-> ⚠️ **기본으로 꺼져 있습니다.** 켜면 모델이 대화 중에 지식 베이스에 기록할 수 있어, 잘못된 내용이 쌓일
-> 수 있습니다. 신뢰하는 사용자와 클라이언트만 접속하는 서버에서만 켜세요. 꺼져 있으면 도구가 등록되지
+> ⚠️ **기본으로 꺼져 있습니다.** 켜면 모델이 대화 중에 지식 베이스에 기록하거나 문서를 지울 수 있어, 잘못된
+> 내용이 쌓이거나 필요한 문서가 사라질 수 있습니다. 신뢰하는 사용자와 클라이언트만 접속하는 서버에서만 켜세요. 꺼져 있으면 도구가 등록되지
 > 않아 모델에게 보이지도 않습니다.
 
 ## 임베딩 엔드포인트 설정
@@ -388,7 +390,7 @@ EMBEDDINGS_MODEL=text-embedding-3-small
 | `RAG_KNOWLEDGE_DIR` | `~/.local/share/rag-mcp/data/knowledge` | 수집할 문서 디렉터리 |
 | `MCP_PORT` | `8084` | MCP 서버 포트 |
 | `RAG_INTERNAL_TOKEN` | _(비어 있음)_ | 내부 쓰기 API 보호 토큰 |
-| `RAG_MCP_WRITE` | `false` | MCP 쓰기 도구 `rag_add_document` 켜기 |
+| `RAG_MCP_WRITE` | `false` | MCP 쓰기 도구(문서 추가·삭제) 켜기 |
 
 > 설정 파일에서는 `KEY=value  # 주석`처럼 같은 줄 끝에 주석을 달지 마세요. systemd가 주석까지 값으로
 > 읽습니다.

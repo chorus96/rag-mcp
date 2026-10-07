@@ -7,12 +7,13 @@
 구성
   - 공통 검색 경로 `_search`: 질의 임베딩 → 하이브리드 검색 → (선택) 리랭킹 → 응답 구성
   - MCP 도구: rag_search, search_incidents, search_runbooks, rag_collections, rag_health
-  - (선택) MCP 쓰기 도구: rag_add_document — RAG_MCP_WRITE=true 일 때만 등록 (실제 로직은 documents.py)
+  - (선택) MCP 쓰기 도구: rag_add_document, rag_delete_document — RAG_MCP_WRITE=true 일 때만 등록
+    (실제 로직은 documents.py)
   - 내부 쓰기 API: /internal/knowledge/{capture,similar,feedback,stats} (실제 로직은 capture.py)
 
 설계 원칙
   - 기본은 읽기 전용: MCP 도구는 검색만 합니다. 지식 베이스 기록은 rag-ingest(ingest.py)와 내부 API로
-    이루어집니다. 모델이 문서를 추가하는 rag_add_document는 운영자가 RAG_MCP_WRITE=true로 켤 때만
+    이루어집니다. 모델이 문서를 추가·삭제하는 쓰기 도구는 운영자가 RAG_MCP_WRITE=true로 켤 때만
     등록되며, 꺼져 있으면 도구 목록에도 나타나지 않습니다.
   - 벤더 중립: 채팅 LLM은 연결한 MCP 클라이언트가 정하고, 임베딩은 embeddings.py를 거쳐 OpenAI 호환
     엔드포인트를 씁니다.
@@ -384,6 +385,19 @@ if documents.WRITE_ENABLED:
             overwrite: 같은 경로의 기존 문서를 바꿀지 여부. 기본값 false.
         """
         return documents.add_document(title, content, doc_type, tags, component, cluster, overwrite)
+
+    @mcp.tool()
+    def rag_delete_document(source: str) -> dict[str, Any]:
+        """지식 베이스에서 문서 하나를 삭제합니다 (문서 파일과 검색용 청크를 함께 삭제).
+
+        사용자가 삭제를 명시적으로 요청하고, 삭제할 문서를 확인한 뒤에만 사용하세요. 되돌릴 수
+        없습니다. 삭제할 문서는 검색 결과나 rag_add_document 응답의 `source`로 지정합니다.
+        파일이 이미 없고 청크만 남아 있어도 청크를 정리합니다.
+
+        Args:
+            source: 문서 디렉터리 기준 문서 경로 (예: 'runbooks/longhorn-볼륨-복구-절차.md').
+        """
+        return documents.delete_document(source)
 
 
 # --- 내부 쓰기 API (MCP 도구 아님 — LLM에는 보이지 않음) ----------------------
