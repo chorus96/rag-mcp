@@ -10,7 +10,7 @@
                                              아닙니다 (모델은 정식 폴더에 쓸 수 없음)
 
   MCP로는 문서 디렉터리의 draft/ 하위만 추가·삭제할 수 있습니다. 사람이 관리하는 문서(runbooks/,
-  incidents/ 등)는 모델이 바꾸거나 지울 수 없고, 모델이 만든 문서는 draft/에 모여 사람이 검토한 뒤
+  rcas/ 등)는 모델이 바꾸거나 지울 수 없고, 모델이 만든 문서는 draft/에 모여 사람이 검토한 뒤
   정식 폴더로 옮길 수 있습니다. draft/ 문서도 저장 즉시 검색됩니다.
 
 왜 파일로도 저장하나
@@ -75,7 +75,7 @@ def _draft_dir() -> Path:
 
 
 def _folder_for(doc_type: str) -> str:
-    """문서 유형의 폴더 이름. 기존 관례(incidents/, runbooks/)에 맞춰 복수형으로 둡니다."""
+    """문서 유형의 폴더 이름. 기존 관례(runbooks/, rcas/)에 맞춰 복수형으로 둡니다."""
     return doc_type if doc_type.endswith("s") else f"{doc_type}s"
 
 
@@ -112,7 +112,7 @@ def add_document(title: str, content: str, doc_type: str = "note", tags: list[st
                 "error": f"content is too long ({len(content)} chars; limit {MAX_DOC_CHARS})"}
     if not _DOC_TYPE_RE.match(doc_type):
         return {"status": "error",
-                "error": "doc_type must be lowercase letters, digits, '-' or '_' (e.g. incident, runbook)"}
+                "error": "doc_type must be lowercase letters, digits, '-' or '_' (e.g. runbook, rca)"}
 
     # 저장은 draft/ 아래로만 합니다. source와 색인 기준은 rag-ingest와 같게 문서 디렉터리로 둡니다.
     path = _draft_dir() / _folder_for(doc_type) / f"{_slug(title)}.md"

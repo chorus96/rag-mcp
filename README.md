@@ -1,9 +1,9 @@
 # rag-mcp
 
-**AI 어시스턴트용 RAG 메모리 서버**입니다. 런북, 장애 보고서, RCA(근본 원인 분석), 위키 내보내기 같은
+**AI 어시스턴트용 RAG 메모리 서버**입니다. 런북, RCA(근본 원인 분석), 위키 내보내기 같은
 마크다운·PDF 문서를 색인해 두고, [Model Context Protocol](https://modelcontextprotocol.io)(MCP)로
 검색 도구를 제공합니다. Claude Code, Claude Desktop 등 MCP를 지원하는 클라이언트라면
-어디서든 "전에 이런 장애가 있었나?", "이 작업의 처리 절차는?" 같은 질문에 여러분의 문서를 근거로
+어디서든 "이 작업의 처리 절차는?", "그때 원인이 뭐였지?" 같은 질문에 여러분의 문서를 근거로
 답하게 할 수 있습니다.
 
 ## 특징
@@ -36,7 +36,7 @@
                        WRITE PATH — populate the KB
   ┌───────────────────────────┐
   │       knowledge/**        │   your markdown & PDF docs,
-  │  runbooks · incidents ·   │   optional YAML front matter
+  │  runbooks · RCAs ·        │   optional YAML front matter
   │  wikis · post-mortems     │
   └─────────────┬─────────────┘
                 │
@@ -64,24 +64,23 @@
                 │                                         │
   ┌─────────────┴───────────────────────────────┐         │
   │            rag-mcp     :8084/mcp            │         │
-  │   FastMCP server — READ-ONLY tool surface   │         │
+  │   FastMCP server — search tools             │         │
   │                                             │  2. em- │
-  │   rag_search         search_incidents       │  beds   │
-  │   search_runbooks     rag_collections       │◄────────┘
-  │   rag_health                                │  the
-  │   (+ optional step 3: cross-encoder rerank  │  query
-  │     via a Cohere/Jina-compatible /rerank)   │
-  └──▲──────────────────────▲───────────────────┘
-     │                      │
-     │  MCP                 │  POST /internal/knowledge/*
-     │  streamable-http     │  capture · similar · feedback · stats
-     │  (search queries)    │  token-gated; NEVER visible to the LLM
-     │                      │
-  ┌──┴───────────────────┐  │
-  │      MCP clients     │  ▼
-  │  Claude Code ·       │  trusted automation
-  │  Claude Desktop ·    │  (agent / CI capturing
-  │  your own agents     │  incidents + human feedback)
+  │   rag_search          search_runbooks       │  beds   │
+  │   rag_collections     rag_health            │◄────────┘
+  │   (+ optional step 3: cross-encoder rerank  │  the
+  │     via a Cohere/Jina-compatible /rerank)   │  query
+  │   (+ opt-in write tools, draft/ only:       │
+  │     rag_add_document · rag_delete_document) │
+  └──▲──────────────────────────────────────────┘
+     │
+     │  MCP streamable-http
+     │
+  ┌──┴───────────────────┐
+  │      MCP clients     │
+  │  Claude Code ·       │
+  │  Claude Desktop ·    │
+  │  your own agents     │
   └──────────────────────┘
 ```
 
@@ -89,8 +88,8 @@
   벡터를 만들어 Qdrant에 저장합니다. BM25 희소 벡터는 rag-mcp가 직접(FastEmbed) 계산합니다.
 - **읽기 경로:** MCP 클라이언트가 검색 도구를 호출하면, rag-mcp가 **같은 임베딩 엔드포인트**로 질의를
   벡터로 바꾸고 Qdrant에서 하이브리드 검색한 뒤 (선택적으로 리랭킹해) 결과를 돌려줍니다.
-- **내부 쓰기 API:** 신뢰할 수 있는 자동화(에이전트, CI)가 장애 기록과 피드백을 남기는 HTTP 경로입니다.
-  LLM에는 보이지 않습니다.
+- **(선택) MCP 쓰기 도구:** 설정으로 켜면 모델이 `draft/` 아래에 초안 문서를 추가·삭제할 수 있습니다.
+  정식 문서로 올리는 것은 사람이 `rag-promote` 명령으로 합니다.
 
 ## 빠른 시작
 
@@ -196,7 +195,7 @@ Claude Code라면 [플러그인](#claude-code-플러그인-권장)으로 연결�
 ## MCP 클라이언트 연결
 
 서버는 `http://<서버 주소>:8084/mcp`에서 **streamable-http**로 통신합니다. 다른 서버에서 접속한다면
-방화벽에서 8084 포트를 열고, 설정 파일에 `RAG_INTERNAL_TOKEN`을 설정해 내부 쓰기 API를 보호하세요.
+방화벽에서 8084 포트를 여세요. MCP 경로에는 인증이 없으므로 신뢰할 수 있는 네트워크에서만 여세요.
 
 ### Claude Code 플러그인 (권장)
 
@@ -259,7 +258,6 @@ RAG_MCP_URL=http://10.0.0.5:8084/mcp claude
 | 도구 | 용도 |
 |------|---------|
 | `rag_search(query, doc_type?, cluster?, component?, limit?)` | 지식 베이스 전체에 대한 시맨틱 검색 |
-| `search_incidents(query, cluster?, component?, limit?)` | "전에 이런 일이 있었나?" — 장애(`incident`)만 검색 |
 | `search_runbooks(query, cluster?, component?, limit?)` | "처리 절차가 뭐지?" — 런북(`runbook`)만 검색 |
 | `rag_collections()` | 컬렉션 목록과 포인트 수 (지식 베이스가 채워졌는지 확인) |
 | `rag_health()` | Qdrant와 임베딩 엔드포인트 접근 가능 여부 |
@@ -280,13 +278,13 @@ cp my-runbook.md ~/.local/share/rag-mcp/data/knowledge/runbooks/
 rag-ingest
 ```
 
-하위 폴더 이름이 기본 문서 유형이 됩니다(`knowledge/incidents/*` → `incident`,
-`knowledge/runbooks/*` → `runbook`). 마크다운은 선택적으로 YAML front matter를 쓸 수 있습니다.
+하위 폴더 이름이 기본 문서 유형이 됩니다(`knowledge/runbooks/*` → `runbook`,
+`knowledge/rcas/*` → `rca`). 마크다운은 선택적으로 YAML front matter를 쓸 수 있습니다.
 
 ```markdown
 ---
 title: Longhorn 볼륨이 attaching 상태에서 멈춤
-type: incident
+type: rca
 tags: [longhorn, storage]
 component: longhorn
 cluster: prod-eu
@@ -316,11 +314,11 @@ RAG_MCP_WRITE=true
 systemctl --user restart rag-mcp
 ```
 
-그다음 "방금 정리한 장애 대응 내용을 런북으로 지식 베이스에 추가해 줘"처럼 요청하면, 모델이
+그다음 "방금 정리한 대응 절차를 런북으로 지식 베이스에 추가해 줘"처럼 요청하면, 모델이
 `rag_add_document` 도구로 문서를 저장합니다.
 
 - **모델은 문서 디렉터리의 `draft/` 아래에만 추가·삭제할 수 있습니다.** 사람이 관리하는 정식 문서(`runbooks/`,
-  `incidents/` 등)는 모델이 만들거나 지울 수 없습니다.
+  `rcas/` 등)는 모델이 만들거나 지울 수 없습니다.
 - 문서는 `draft/<문서 유형>s/<제목>.md` 파일로 저장되고 바로 검색됩니다(예: `draft/runbooks/longhorn-볼륨-복구.md`).
   파일로 남으므로 `rag-ingest --recreate`로 재구축해도 사라지지 않습니다.
 - 초안을 검토한 뒤 정식 문서로 올리려면 서버에서 `rag-promote`를 쓰세요. 승격은 사람만 할 수 있습니다
@@ -404,28 +402,21 @@ EMBEDDINGS_MODEL=text-embedding-3-small
 | `RAG_HYBRID` | `true` | 하이브리드 검색 (바꾸면 `--recreate` 필요) |
 | `RAG_KNOWLEDGE_DIR` | `~/.local/share/rag-mcp/data/knowledge` | 수집할 문서 디렉터리 |
 | `MCP_PORT` | `8084` | MCP 서버 포트 |
-| `RAG_INTERNAL_TOKEN` | _(비어 있음)_ | 내부 쓰기 API 보호 토큰 |
 | `RAG_MCP_WRITE` | `false` | MCP 쓰기 도구(문서 추가·삭제) 켜기 |
 
 > 설정 파일에서는 `KEY=value  # 주석`처럼 같은 줄 끝에 주석을 달지 마세요. systemd가 주석까지 값으로
 > 읽습니다.
 
-## 내부 쓰기 API (선택 사항)
-
-읽기 전용 MCP 도구와 별개로, 신뢰할 수 있는 자동화 프로세스가 장애 기록을 남길 수 있는 HTTP
-경로(`/internal/knowledge/capture|similar|feedback|stats`)를 제공합니다("지식 플라이휠"). 이 경로는
-LLM에 **노출되지 않으며**, `RAG_INTERNAL_TOKEN`으로 보호합니다. 자세한 내용은
-[docs/DESIGN.md](docs/DESIGN.md)를 참고하세요.
-
 ## 저장소 구조
 
 | 경로 | 내용 |
 |------|------|
-| `tools/server.py` | MCP 서버 (검색 도구 + 내부 쓰기 API) |
+| `tools/server.py` | MCP 서버 (검색 도구 + 선택적 쓰기 도구) |
 | `tools/ingest.py` | 문서 수집 |
-| `tools/embeddings.py`, `tools/vectorstore.py`, `tools/reranker.py`, `tools/capture.py` | 임베딩, Qdrant, 리랭킹, 장애 기록 |
+| `tools/documents.py`, `tools/promote.py` | `draft/` 문서 추가·삭제, 초안 승격(`rag-promote`) |
+| `tools/embeddings.py`, `tools/vectorstore.py`, `tools/reranker.py` | 임베딩, Qdrant, 리랭킹 |
 | `requirements.txt` | Python 의존성 |
-| `deploy/` | 설치·제거 스크립트, systemd 유닛, `rag-ingest` 명령 |
+| `deploy/` | 설치·제거 스크립트, systemd 유닛, `rag-ingest`·`rag-promote` 명령 |
 | `knowledge/` | 샘플 문서 |
 | `.claude-plugin/marketplace.json` | Claude Code 플러그인 마켓플레이스 정의 |
 | `plugins/rag-mcp/` | Claude Code 플러그인 (MCP 서버 설정, `rag-knowledge` 스킬) |

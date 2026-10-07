@@ -46,7 +46,7 @@ bash .claude/skills/repo-check/scripts/check.sh
   - 검색 도구(`@mcp.tool()`)의 docstring은 LLM에 보이는 도구 설명입니다. 동작이 바뀌었으면 설명도
     맞게 고쳤는지 확인하세요.
   - 모델에게 노출되는 쓰기 도구는 `rag_add_document`, `rag_delete_document`뿐이고, `RAG_MCP_WRITE`가 꺼져
-    있으면(기본값) 둘 다 등록되지 않는지 확인하세요. 쓰기 도구가 문서 디렉터리의 `draft/` 밖을 건드리지 않는지도 보세요. 그 밖의 쓰기는 `/internal/knowledge/*` HTTP 라우트로만 합니다.
+    있으면(기본값) 둘 다 등록되지 않는지 확인하세요. 쓰기 도구가 문서 디렉터리의 `draft/` 밖을 건드리지 않는지도 보세요. 그 밖의 쓰기는 `rag-ingest`와 사람 전용 명령 `rag-promote`로만 합니다.
   - 새 환경 변수를 추가했다면 `.env.example`과 `docs/DESIGN.md`의 환경 변수 표에 함께 넣었는지 확인하세요.
 - **설치 구조를 고쳤다면** (`deploy/`)
   - `install.sh`와 `uninstall.sh`의 경로가 서로 같은지, systemd 유닛(`deploy/systemd/`)의 `%h` 경로와도

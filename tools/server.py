@@ -1,18 +1,17 @@
 """tools/server.py — rag-mcp MCP 서버.
 
 역할
-  런북, 과거 장애, RCA(근본 원인 분석) 지식 베이스에 대한 검색 도구를 MCP(streamable-http)로
-  제공합니다. 같은 프로세스에서 신뢰할 수 있는 자동화용 내부 쓰기 API(HTTP 라우트)도 제공합니다.
+  런북, RCA(근본 원인 분석) 등 운영 문서로 이루어진 지식 베이스에 대한 검색 도구를
+  MCP(streamable-http)로 제공합니다.
 
 구성
   - 공통 검색 경로 `_search`: 질의 임베딩 → 하이브리드 검색 → (선택) 리랭킹 → 응답 구성
-  - MCP 도구: rag_search, search_incidents, search_runbooks, rag_collections, rag_health
+  - MCP 도구: rag_search, search_runbooks, rag_collections, rag_health
   - (선택) MCP 쓰기 도구: rag_add_document, rag_delete_document — RAG_MCP_WRITE=true 일 때만 등록,
     문서 디렉터리의 draft/ 아래만 다룸 (실제 로직은 documents.py)
-  - 내부 쓰기 API: /internal/knowledge/{capture,similar,feedback,stats} (실제 로직은 capture.py)
 
 설계 원칙
-  - 기본은 읽기 전용: MCP 도구는 검색만 합니다. 지식 베이스 기록은 rag-ingest(ingest.py)와 내부 API로
+  - 기본은 읽기 전용: MCP 도구는 검색만 합니다. 지식 베이스 기록은 rag-ingest(ingest.py)로
     이루어집니다. 모델이 문서를 추가·삭제하는 쓰기 도구는 운영자가 RAG_MCP_WRITE=true로 켤 때만
     등록되며, 꺼져 있으면 도구 목록에도 나타나지 않습니다.
   - 벤더 중립: 채팅 LLM은 연결한 MCP 클라이언트가 정하고, 임베딩은 embeddings.py를 거쳐 OpenAI 호환
@@ -25,7 +24,6 @@
 
 from __future__ import annotations
 
-import hmac
 import logging
 import os
 import sys
@@ -35,10 +33,7 @@ from mcp.server.fastmcp import FastMCP
 from qdrant_client import QdrantClient
 from qdrant_client.http.exceptions import UnexpectedResponse
 from qdrant_client.models import FieldCondition, Filter, MatchValue
-from starlette.requests import Request
-from starlette.responses import JSONResponse
 
-import capture
 import documents
 import embeddings
 import reranker
@@ -222,16 +217,15 @@ def rag_search(
     component: str | None = None,
     limit: int = DEFAULT_LIMIT,
 ) -> dict[str, Any]:
-    """지식 베이스(런북, 장애, RCA) 전체에 대한 시맨틱 검색.
+    """지식 베이스(런북, RCA 등 운영 문서) 전체에 대한 시맨틱 검색.
 
-    문제를 진단하는 동안 과거 맥락을 가져올 때 호출하세요 — 같은 증상의 이전 장애,
-    컴포넌트의 런북, 과거의 근본 원인 등. 키워드가 아니라 의미로 검색하므로 증상을
-    서술하세요.
+    문제를 진단하는 동안 관련 문서를 가져올 때 호출하세요 — 컴포넌트의 런북, 같은 증상을
+    다룬 RCA나 운영 문서 등. 키워드가 아니라 의미로 검색하므로 증상을 서술하세요.
 
     Args:
         query: 찾고 있는 내용 (자연어). 예:
             '노드 재부팅 후 Longhorn 볼륨이 attaching 상태에서 멈춤'.
-        doc_type: 선택적 필터 — 'incident', 'runbook', 'rca', 또는 수집 시 사용한
+        doc_type: 선택적 필터 — 'runbook', 'rca', 'note', 또는 수집 시 사용한
             사용자 정의 유형. 생략하면 전체를 검색합니다.
         cluster: 선택적 소프트 필터 — 이 클러스터 태그(예: 'prod-01')가 붙은 지식으로
             한정합니다. 클러스터로 한정한 검색 결과가 비어 있으면 서버가 (다른 필터는
@@ -244,30 +238,6 @@ def rag_search(
         limit: 반환할 최대 결과 수 (1-20). 기본값 5.
     """
     return _search(query, doc_type, cluster, component, limit)
-
-
-@mcp.tool()
-def search_incidents(
-    query: str,
-    cluster: str | None = None,
-    component: str | None = None,
-    limit: int = DEFAULT_LIMIT,
-) -> dict[str, Any]:
-    """과거 장애 / RCA만 대상으로 현재 증상과 일치하는 것을 검색합니다.
-
-    rag_search(..., doc_type='incident')의 단축 도구입니다. '문서화된 절차가 뭐지?'가
-    아니라 '전에 이런 일이 있었나?'를 알고 싶을 때 사용하세요. 대상 `cluster`를 넘기면
-    '이 클러스터에서 전에 이런 일이 있었나?'를 묻게 됩니다 (소프트 필터 — 같은 클러스터
-    결과가 비어 있으면 모든 클러스터로 대체 검색).
-
-    Args:
-        query: 증상 또는 에러 (자연어).
-        cluster: 선택적 소프트 필터 — 해당 클러스터 태그가 붙은 장애만 검색하며, 같은
-            클러스터 결과가 비어 있으면 전체 범위로 대체 검색합니다.
-        component: 선택적 하드 필터 — 이 컴포넌트 태그가 붙은 장애만 검색합니다.
-        limit: 최대 결과 수 (1-20). 기본값 5.
-    """
-    return _search(query, "incident", cluster, component, limit)
 
 
 @mcp.tool()
@@ -379,7 +349,7 @@ if documents.WRITE_ENABLED:
         Args:
             title: 문서 제목. 파일 이름도 여기서 만들어집니다.
             content: 마크다운 본문 (front matter 없이 본문만).
-            doc_type: 문서 유형 — 'incident', 'runbook', 'rca', 'note' 등 (소문자). 기본값 'note'.
+            doc_type: 문서 유형 — 'runbook', 'rca', 'note' 등 (소문자). 기본값 'note'.
             tags: 선택 — 태그 목록 (예: ['longhorn', 'storage']).
             component: 선택 — 컴포넌트 이름 (검색 하드 필터에 쓰임, 예: 'longhorn').
             cluster: 선택 — 클러스터 이름 (검색 소프트 필터에 쓰임, 예: 'prod-01').
@@ -400,64 +370,6 @@ if documents.WRITE_ENABLED:
             source: 문서 디렉터리 기준 문서 경로 (예: 'draft/runbooks/longhorn-볼륨-복구-절차.md').
         """
         return documents.delete_document(source)
-
-
-# --- 내부 쓰기 API (MCP 도구 아님 — LLM에는 보이지 않음) ----------------------
-# 지식 "플라이휠": 신뢰할 수 있는 에이전트 프로세스가 조사를 마친 뒤 여기서 RCA를
-# 기록하고 사람의 피드백을 남기며, /similar로 반복 장애 사전 확인을 합니다. 이것들은
-# 일반 HTTP 라우트이므로 위의 읽기 전용 MCP 도구 인터페이스는 그대로입니다 — 모델은
-# 검색만 할 수 있고 절대 쓸 수 없습니다.
-# RAG_INTERNAL_TOKEN으로 선택적으로 보호합니다 (운영에서는 설정; 비워 두면 개발용으로 열림).
-INTERNAL_TOKEN = os.environ.get("RAG_INTERNAL_TOKEN", "")
-
-
-def _authorized(request: Request) -> bool:
-    if not INTERNAL_TOKEN:
-        return True  # 개발용: 열림
-    presented = request.headers.get("x-internal-token") or ""
-    auth = request.headers.get("authorization", "")
-    if not presented and auth.lower().startswith("bearer "):
-        presented = auth[7:]
-    return bool(presented) and hmac.compare_digest(presented, INTERNAL_TOKEN)
-
-
-async def _guarded(request: Request, fn) -> JSONResponse:
-    if not _authorized(request):
-        return JSONResponse({"status": "error", "error": "unauthorized"}, status_code=401)
-    try:
-        body = await request.json() if request.method == "POST" else {}
-    except Exception:  # noqa: BLE001
-        body = {}
-    try:
-        return JSONResponse(fn(body))
-    except Exception as exc:  # noqa: BLE001 - 호출자에게 원인 없는 500을 절대 돌려주지 않음
-        log.exception("internal knowledge route failed")
-        return JSONResponse({"status": "error", "error": str(exc)}, status_code=500)
-
-
-@mcp.custom_route("/internal/knowledge/capture", methods=["POST"])
-async def _capture_route(request: Request) -> JSONResponse:
-    return await _guarded(request, lambda b: capture.capture_incident(b))
-
-
-@mcp.custom_route("/internal/knowledge/similar", methods=["POST"])
-async def _similar_route(request: Request) -> JSONResponse:
-    return await _guarded(request, lambda b: capture.find_similar(
-        b.get("query", ""), b.get("doc_type", "incident"),
-        int(b.get("limit", 3)), float(b.get("min_score", 0.0)), b.get("cluster"),
-    ))
-
-
-@mcp.custom_route("/internal/knowledge/feedback", methods=["POST"])
-async def _feedback_route(request: Request) -> JSONResponse:
-    return await _guarded(request, lambda b: capture.record_feedback(
-        b.get("fingerprint", ""), b.get("status"), b.get("confidence"), b.get("note"),
-    ))
-
-
-@mcp.custom_route("/internal/knowledge/stats", methods=["GET"])
-async def _stats_route(request: Request) -> JSONResponse:
-    return await _guarded(request, lambda _b: capture.stats())
 
 
 # --- 실행 ---------------------------------------------------------------------

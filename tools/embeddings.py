@@ -3,7 +3,7 @@
 역할
   OpenAI 호환 /v1/embeddings 엔드포인트로 텍스트를 밀집 벡터로 바꿉니다. OpenAI API, Hugging Face
   TEI, vLLM, LocalAI, LiteLLM 프록시 등 이 형식을 제공하는 서버라면 무엇이든 쓸 수 있습니다.
-  server.py, ingest.py, capture.py가 모두 이 모듈을 거칩니다.
+  server.py, ingest.py가 모두 이 모듈을 거칩니다.
 
 공개 함수
   - embed(text, kind):     텍스트 하나 (kind는 'query' 또는 'document')
@@ -171,7 +171,7 @@ def _embed_batch(texts: list[str]) -> list[list[float]]:
 
 def embed(text: str, kind: str) -> list[float]:
     """텍스트 하나를 임베딩합니다. `kind`는 'query' 또는 'document'이며 비대칭 작업
-    접두사를 고릅니다. server.py / ingest.py / capture.py가 쓰는 진입점입니다."""
+    접두사를 고릅니다. server.py / ingest.py가 쓰는 진입점입니다."""
     return _embed_batch([_apply_prefix(text, kind)])[0]
 
 

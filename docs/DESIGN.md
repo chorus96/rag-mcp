@@ -5,7 +5,7 @@
 
 ## 1. 개요
 
-rag-mcp는 런북, 과거 장애, RCA(근본 원인 분석) 문서를 **Qdrant**에 색인하고, 그 지식 베이스에 대한
+rag-mcp는 런북, RCA(근본 원인 분석) 같은 운영 문서를 **Qdrant**에 색인하고, 그 지식 베이스에 대한
 시맨틱 검색을 MCP 서버로 제공합니다. AI 에이전트는 운영 중인 시스템을 디버깅하면서 필요할 때마다
 과거 맥락을 직접 찾아 씁니다(에이전틱 검색, agentic retrieval).
 
@@ -13,7 +13,7 @@ rag-mcp는 런북, 과거 장애, RCA(근본 원인 분석) 문서를 **Qdrant**
 
 | 원칙 | 내용 |
 |------|------|
-| **기본은 읽기 전용** | 기본 설정에서 MCP 도구는 검색만 합니다. 지식 베이스 기록은 수집 명령과 내부 API로 이루어집니다. 모델이 문서를 추가하는 쓰기 도구(`rag_add_document`)는 운영자가 `RAG_MCP_WRITE=true`로 켤 때만 등록됩니다. |
+| **기본은 읽기 전용** | 기본 설정에서 MCP 도구는 검색만 합니다. 지식 베이스 기록은 수집 명령(`rag-ingest`)으로 이루어집니다. 모델이 문서를 추가·삭제하는 쓰기 도구는 운영자가 `RAG_MCP_WRITE=true`로 켤 때만 등록됩니다. |
 | **벤더 중립** | 채팅 LLM은 연결하는 MCP 클라이언트가 정합니다. 임베딩은 OpenAI 호환 `/v1/embeddings`라면 무엇이든 씁니다. |
 | **수집과 질의의 일관성** | 수집과 질의가 같은 임베딩 코드와 설정을 공유하도록 만들어, 벡터가 어긋날 여지를 없앴습니다. |
 | **실패해도 검색은 유지** | 리랭킹, BM25, 오래된 청크 정리 같은 부가 기능은 실패하면 조용히 건너뛰고, 기본 검색은 계속 동작합니다(최선형, best-effort). |
@@ -22,17 +22,16 @@ rag-mcp는 런북, 과거 장애, RCA(근본 원인 분석) 문서를 **Qdrant**
 
 | 모듈 | 역할 |
 |------|------|
-| [`server.py`](../tools/server.py) | FastMCP 서버. 검색 도구 5개와 내부 쓰기 API(HTTP 라우트)를 제공 |
+| [`server.py`](../tools/server.py) | FastMCP 서버. 검색 도구 4개와 선택적 쓰기 도구 2개를 제공 |
 | [`ingest.py`](../tools/ingest.py) | 마크다운/PDF 문서를 읽어 청크로 나누고 임베딩해 Qdrant에 업서트 |
 | [`embeddings.py`](../tools/embeddings.py) | OpenAI 호환 임베딩 호출, 비대칭 모델 접두사 처리 |
 | [`vectorstore.py`](../tools/vectorstore.py) | Qdrant 컬렉션 스키마, BM25 희소 벡터(FastEmbed), 하이브리드 질의 |
 | [`reranker.py`](../tools/reranker.py) | Cohere/Jina 호환 크로스 인코더 리랭킹 (선택 사항) |
-| [`capture.py`](../tools/capture.py) | 내부 쓰기 API의 실제 로직: 장애 기록, 반복 장애 확인, 피드백, 통계 |
 | [`documents.py`](../tools/documents.py) | 초안(`draft/`) 문서 로직: MCP 쓰기 도구의 추가·삭제, `rag-promote`의 목록·승격 |
 | [`promote.py`](../tools/promote.py) | 초안 승격 명령 `rag-promote` (사람 전용, MCP 도구 아님) |
 | [`plugins/rag-mcp`](../plugins/rag-mcp) | Claude Code 플러그인: MCP 서버 연결 설정과 검색 도구 사용 안내 스킬 (서버 코드는 포함하지 않음) |
 
-`ingest.py`, `capture.py`, `server.py`는 모두 `vectorstore.py`와 `embeddings.py`를 거칩니다. 그래서
+`ingest.py`, `documents.py`, `server.py`는 모두 `vectorstore.py`와 `embeddings.py`를 거칩니다. 그래서
 쓰기 경로와 읽기 경로 사이에서 컬렉션 스키마, 벡터 이름, 임베딩 설정이 어긋나지 않습니다.
 
 ## 3. 데이터 모델
@@ -54,17 +53,15 @@ Qdrant 컬렉션 하나(기본 이름 `rag_kb`)에 모든 문서를 저장합니
 | 출처 | 포인트 ID | 주요 페이로드 |
 |------|------|------|
 | 문서 수집 (`ingest.py`) | `uuid5(source#chunk)` | `text`, `doc_type`, `title`, `source`, `tags`, `chunk`, 그리고 front matter의 `component`/`severity`/`cluster` |
-| 장애 기록 (`capture.py`) | `uuid5(incident:fingerprint#chunk)` | 위 항목에 더해 `fingerprint`, `status`, `cluster`, `namespace`, `alertname`, `root_cause`, `proposed_fix`, `occurrence_count`, `first_seen`, `last_seen` 등 |
 
-ID가 문서 경로(또는 장애 fingerprint)와 청크 번호에서 결정되므로, 같은 문서를 다시 수집하면 중복이
+ID가 문서 경로와 청크 번호에서 결정되므로, 같은 문서를 다시 수집하면 중복이
 생기지 않고 기존 포인트를 덮어씁니다.
 
 ### 페이로드 인덱스
 
 필터링을 빠르게 하려고 다음 필드에 키워드 인덱스를 만듭니다.
 
-- 문서 수집: `doc_type`, `component`, `cluster`, `source` (`source`는 오래된 청크 정리용)
-- 장애 기록: `doc_type`, `fingerprint`, `status`, `cluster`, `namespace`, `alertname`, `component`
+- `doc_type`, `component`, `cluster`, `source` (`source`는 오래된 청크 정리용)
 
 ## 4. 검색 파이프라인
 
@@ -117,7 +114,6 @@ ID가 문서 경로(또는 장애 fingerprint)와 청크 번호에서 결정되�
 | 도구 | 용도 |
 |------|------|
 | `rag_search(query, doc_type?, cluster?, component?, limit?)` | 지식 베이스 전체에 대한 시맨틱 검색 |
-| `search_incidents(query, cluster?, component?, limit?)` | "전에 이런 일이 있었나?" — `doc_type=incident`로 고정 |
 | `search_runbooks(query, cluster?, component?, limit?)` | "처리 절차가 뭐지?" — `doc_type=runbook`으로 고정 |
 | `rag_collections()` | 컬렉션 목록과 포인트 수 (지식 베이스가 채워졌는지 확인) |
 | `rag_health()` | Qdrant와 임베딩 엔드포인트 접근 가능 여부, 리랭커·하이브리드 설정 |
@@ -155,7 +151,7 @@ ID가 문서 경로(또는 장애 fingerprint)와 청크 번호에서 결정되�
 ```markdown
 ---
 title: Longhorn 볼륨이 attaching 상태에서 멈춤
-type: incident        # incident | runbook | rca | ...  (기본값: 폴더 이름)
+type: rca             # runbook | rca | note | ...  (기본값: 폴더 이름)
 tags: [longhorn, storage]
 component: longhorn   # 선택: 필터용
 cluster: prod-eu      # 선택: 필터용
@@ -163,13 +159,13 @@ cluster: prod-eu      # 선택: 필터용
 # 본문...
 ```
 
-`type`을 생략하면 상위 폴더 이름에서 끝의 `s`를 뗀 값이 됩니다(`incidents/` → `incident`,
-`runbooks/` → `runbook`). 최상위에 바로 둔 파일은 `note`입니다. `component`, `cluster`, `severity`는
+`type`을 생략하면 상위 폴더 이름에서 끝의 `s`를 뗀 값이 됩니다(`runbooks/` → `runbook`,
+`rcas/` → `rca`). 최상위에 바로 둔 파일은 `note`입니다. `component`, `cluster`, `severity`는
 형식이 정해지지 않은 레이블이라 도메인에 맞게 자유롭게 써도 됩니다.
 
 ### 청킹
 
-1. 마크다운 헤딩 기준으로 섹션을 나눕니다. 런북의 단계나 장애 보고서의 한 섹션이 한 덩어리로 남습니다.
+1. 마크다운 헤딩 기준으로 섹션을 나눕니다. 런북의 단계나 RCA 문서의 한 섹션이 한 덩어리로 남습니다.
 2. 각 청크 앞에 섹션 헤딩을 붙여, 청크 하나만 검색돼도 맥락을 알 수 있게 합니다.
 3. 섹션이 `CHUNK_SIZE`(기본 1500자)보다 크면 문단 단위로 나누고, 청크 사이에 `CHUNK_OVERLAP`(기본
    100자)만큼 겹치게 합니다. 너무 큰 문단은 강제로 자릅니다.
@@ -213,38 +209,22 @@ rag-ingest --recreate           # 컬렉션을 지우고 전체 재구축
 0 * * * * $HOME/.local/bin/rag-ingest >> $HOME/.local/share/rag-mcp/rag-ingest.log 2>&1
 ```
 
-## 7. 내부 쓰기 API — 지식 플라이휠
+## 7. 쓰기 도구와 초안 승격
 
-검색 도구와 별개로, 조사가 끝날 때마다 그 결과가 지식 베이스에 쌓이도록 작은 HTTP API를 제공합니다.
-이 경로는 `@mcp.tool()`이 아니라 일반 HTTP 라우트(`@mcp.custom_route`)이므로 **LLM은 보지도 호출하지도
-못합니다.** 신뢰할 수 있는 에이전트나 CI 같은 자동화만 호출해야 합니다.
-
-| 라우트 (별도 표시가 없으면 POST) | 용도 |
-|------|------|
-| `/internal/knowledge/capture` | 장애/RCA 하나를 기록. 같은 `fingerprint`면 청크를 교체하고 `occurrence_count`를 올림 |
-| `/internal/knowledge/similar` | 반복 장애 사전 확인 — "이 증상을 본 적이 있나?" (`cluster`는 소프트 필터) |
-| `/internal/knowledge/feedback` | 기록된 장애에 사람의 판단(상태, 신뢰도, 메모)을 덧붙임 |
-| `/internal/knowledge/stats` (GET) | 지식 베이스 개수 (전체 / 장애 / 런북)와 현재 설정 |
-
-- **인증:** `RAG_INTERNAL_TOKEN`을 설정하면, 호출자는 같은 값을 `X-Internal-Token` 헤더나
-  `Authorization: Bearer` 헤더로 보내야 합니다. 비워 두면 열려 있으므로 개발용으로만 쓰세요.
-- **fingerprint:** 알림의 fingerprint를 쓰고, 없으면 `alertname`·`cluster`·`namespace`·`component`·
-  `title`로 결정적 해시를 만들어 수동 기록도 중복 제거되게 합니다.
-- **`similar`는 밀집 검색만 씁니다.** `min_score`로 코사인 유사도 임계값을 판단하는데, 하이브리드의 RRF
-  점수는 척도가 달라 임계값이 의미를 잃기 때문입니다.
-- 임베딩과 Qdrant를 서버가 직접 다루므로, 기록과 질의가 구조적으로 같은 방식으로 임베딩됩니다.
+기본 설정에서 지식 베이스에 문서를 넣는 길은 문서 디렉터리와 `rag-ingest`뿐입니다. 여기에 더해, 운영자가 켜면
+모델이 대화 중에 초안을 추가·삭제할 수 있고, 사람이 그 초안을 검토해 정식 문서로 올릴 수 있습니다.
 
 ### MCP 쓰기 도구 (`rag_add_document`, `rag_delete_document`)
 
-내부 쓰기 API와 달리 **LLM이 직접 호출하는** 쓰기 도구입니다. 사용자가 대화 중에 "이 내용을 지식 베이스에
+**LLM이 직접 호출하는** 쓰기 도구입니다. 사용자가 대화 중에 "이 내용을 지식 베이스에
 추가해 줘", "그 문서 지워 줘"라고 하면 모델이 문서를 저장하거나 삭제할 수 있습니다. 편리한 만큼 지식 베이스가 잘못된 내용으로 오염될
 수 있으므로 **기본으로 꺼져 있고**, 운영자가 설정 파일에 `RAG_MCP_WRITE=true`를 넣어야 켜집니다.
 
 | 항목 | 동작 |
 |------|------|
 | 등록 | `RAG_MCP_WRITE=true`일 때만 서버 시작 시 도구를 등록. 꺼져 있으면 도구 목록에도 없음 |
-| 쓰기 범위 | 문서 디렉터리의 **`draft/` 아래만** 추가·삭제. 사람이 관리하는 정식 문서(`runbooks/`, `incidents/` 등)는 만들거나 지울 수 없음 |
-| 저장 위치 | `<문서 디렉터리>/draft/<doc_type>s/<제목>.md` (예: `draft/incidents/longhorn-볼륨-멈춤.md`) |
+| 쓰기 범위 | 문서 디렉터리의 **`draft/` 아래만** 추가·삭제. 사람이 관리하는 정식 문서(`runbooks/`, `rcas/` 등)는 만들거나 지울 수 없음 |
+| 저장 위치 | `<문서 디렉터리>/draft/<doc_type>s/<제목>.md` (예: `draft/rcas/longhorn-볼륨-멈춤.md`) |
 | 파일 내용 | 인자로 받은 `title`, `type`, `tags`, `component`, `cluster`를 front matter로 쓰고 그 아래 본문 |
 | 색인 | 저장 직후 `ingest.ingest_file`로 색인 — `rag-ingest`와 같은 코드라 청크 ID·페이로드가 같음 |
 | 덮어쓰기 | 같은 경로에 파일이 있으면 `overwrite=true`일 때만 바꿈 (청크 수가 줄면 남은 청크도 정리) |
@@ -439,7 +419,7 @@ curl -s http://localhost:6333/collections/rag_kb | grep -o '"size":[0-9]*'
 | `QDRANT_URL` | `http://localhost:6333` | Qdrant REST 엔드포인트 |
 | `QDRANT_COLLECTION` | `rag_kb` | 컬렉션 이름 |
 | `QDRANT_API_KEY` | _(미설정)_ | Qdrant 인증 키 (설정하면 Qdrant와 rag-mcp가 함께 사용) |
-| `RAG_TIMEOUT_SECONDS` | `30` (서버의 Qdrant 연결) / `60` (임베딩 요청, 수집, 기록) | HTTP 타임아웃 (초). 설정하면 모두 이 값을 사용 |
+| `RAG_TIMEOUT_SECONDS` | `30` (서버의 Qdrant 연결) / `60` (임베딩 요청, 수집) | HTTP 타임아웃 (초). 설정하면 모두 이 값을 사용 |
 | **임베딩** | | |
 | `EMBEDDINGS_BASE_URL` | _(없음, 필수)_ | OpenAI 호환 임베딩 엔드포인트 (`/v1`은 자동으로 붙음). 예: `http://localhost:8080`(TEI), `https://api.openai.com` |
 | `EMBEDDINGS_API_KEY` | _(미설정)_ | 엔드포인트 API 키 (비워 두면 인증 헤더를 보내지 않음) |
@@ -462,8 +442,6 @@ curl -s http://localhost:6333/collections/rag_kb | grep -o '"size":[0-9]*'
 | `RERANK_API_KEY` | _(미설정)_ | 리랭커 API 키 |
 | `RERANK_CANDIDATES` | `30` | 리랭킹 전에 가져오는 후보 수 |
 | `RERANK_TIMEOUT` | `30` | 리랭커 HTTP 타임아웃 (초) |
-| **내부 API** | | |
-| `RAG_INTERNAL_TOKEN` | _(비어 있음)_ | 내부 쓰기 API 보호 토큰. 비워 두면 열림 (개발용) |
 | **MCP 쓰기 도구** | | |
 | `RAG_MCP_WRITE` | `false` | `true`면 MCP 쓰기 도구 `rag_add_document`, `rag_delete_document`를 등록 (LLM이 문서를 추가·삭제할 수 있음) |
 | `RAG_MAX_DOC_CHARS` | `200000` | `rag_add_document`로 추가할 수 있는 본문의 최대 글자 수 |

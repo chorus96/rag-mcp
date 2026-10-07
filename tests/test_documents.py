@@ -63,16 +63,16 @@ def _front_matter(path):
 def test_add_document_writes_file_and_ingests(monkeypatch, tmp_path):
     rec = _setup(monkeypatch, tmp_path)
     out = documents.add_document(
-        "Longhorn 볼륨 attaching 멈춤", "# 증상\n파드가 멈춤", "incident",
+        "Longhorn 볼륨 attaching 멈춤", "# 증상\n파드가 멈춤", "rca",
         tags=["longhorn"], component="longhorn", cluster="prod-01", client=object(),
     )
     assert out["status"] == "ok"
-    assert out["source"] == "draft/incidents/longhorn-볼륨-attaching-멈춤.md"
+    assert out["source"] == "draft/rcas/longhorn-볼륨-attaching-멈춤.md"
     assert out["chunks"] == 3 and out["replaced"] is False
 
     path = tmp_path / out["source"]
     meta, body = _front_matter(path)
-    assert meta == {"title": "Longhorn 볼륨 attaching 멈춤", "type": "incident",
+    assert meta == {"title": "Longhorn 볼륨 attaching 멈춤", "type": "rca",
                     "tags": ["longhorn"], "component": "longhorn", "cluster": "prod-01"}
     assert body == "# 증상\n파드가 멈춤"
     # rag-ingest 와 같은 기준(문서 디렉터리)으로 색인해야 포인트 ID가 같아집니다.
@@ -270,7 +270,7 @@ def test_add_then_delete_roundtrip(monkeypatch, tmp_path):
 # --- draft/ 제한 ------------------------------------------------------------------
 def test_add_never_writes_outside_draft(monkeypatch, tmp_path):
     _setup(monkeypatch, tmp_path)
-    for title, doc_type in (("../../runbooks/x", "runbook"), ("x", "draft"), ("y", "incident")):
+    for title, doc_type in (("../../runbooks/x", "runbook"), ("x", "draft"), ("y", "rca")):
         out = documents.add_document(title, "body", doc_type, client=object())
         assert out["source"].startswith("draft/"), out
         assert (tmp_path / "draft").resolve() in (tmp_path / out["source"]).resolve().parents

@@ -2,7 +2,7 @@
 
 역할
   Qdrant 컬렉션 스키마, BM25 희소 벡터 계산, 하이브리드 질의를 한곳에서 다룹니다. ingest.py,
-  capture.py, server.py가 모두 이 모듈을 거치므로, 쓰기 경로와 읽기 경로 사이에서 컬렉션 구조와
+  server.py, documents.py가 모두 이 모듈을 거치므로, 쓰기 경로와 읽기 경로 사이에서 컬렉션 구조와
   벡터 이름이 어긋나지 않습니다.
 
 벡터 구성 (Qdrant 명명된 벡터)
@@ -171,7 +171,7 @@ def query(
     hybrid=True (기본값): 희소 벡터를 쓸 수 있으면 밀집 + BM25 희소를 RRF로 결합 —
     재현율이 가장 좋음; `point.score`는 (작은) RRF 결합 점수입니다.
     hybrid=False: 일반 밀집 검색 — `point.score`는 코사인 유사도입니다. 호출자가
-    코사인 값으로 임계값을 판단할 때(예: 반복 장애 감지) 사용하세요. 결합 점수는
+    코사인 값으로 임계값을 판단할 때 사용하세요. 결합 점수는
     척도가 다르기 때문입니다.
     희소 벡터를 쓸 수 없으면 항상 밀집 전용으로 대체됩니다."""
     sparse = embed_query_sparse(query_text) if (hybrid and query_text) else None

@@ -1,7 +1,7 @@
 """tools/ingest.py — 문서 수집.
 
 역할
-  마크다운과 PDF 문서(런북, 과거 장애, RCA, 참고 자료)를 읽어 청크로 나누고, OpenAI 호환 임베딩
+  마크다운과 PDF 문서(런북, RCA, 참고 자료 등)를 읽어 청크로 나누고, OpenAI 호환 임베딩
   엔드포인트로 임베딩한 뒤 Qdrant에 업서트합니다. MCP 서버는 읽기 전용이므로, 이 명령이 지식
   베이스를 채우는 정해진 쓰기 경로입니다.
 
@@ -19,12 +19,12 @@
 문서 형식 (front matter는 선택)
     ---
     title: Longhorn 볼륨이 attaching 상태에서 멈춤
-    type: incident          # incident | runbook | rca | ...  (기본값: 폴더 이름, 없으면 "note")
+    type: runbook           # runbook | rca | note | ...  (기본값: 폴더 이름, 없으면 "note")
     tags: [longhorn, storage, node-reboot]
     ---
     # 본문 마크다운...
 
-  `type`을 생략하면 상위 폴더 이름에서 끝의 s를 뗀 값입니다 (incidents/ → incident).
+  `type`을 생략하면 상위 폴더 이름에서 끝의 s를 뗀 값입니다 (runbooks/ → runbook).
   PDF에는 front matter가 없으므로 type은 폴더 이름, 제목은 파일 이름에서 가져옵니다.
 
 멱등성
@@ -141,7 +141,7 @@ def _chunk(text: str, size: int, overlap: int) -> list[str]:
 
 
 def _chunk_document(body: str) -> list[str]:
-    """섹션 인식 청킹: 마크다운 헤딩 기준으로 나눠 런북 단계나 장애 섹션이
+    """섹션 인식 청킹: 마크다운 헤딩 기준으로 나눠 런북 단계나 RCA 섹션이
     온전히 유지되게 하고, 각 청크 앞에 헤딩을 붙여 단독으로도 맥락을 갖게 한 뒤,
     너무 큰 섹션 안에서는 문단 청커로 대체합니다. 헤딩이 없는 본문은 이전과 똑같이
     동작합니다."""
@@ -173,7 +173,7 @@ def _infer_doc_type(meta: dict[str, Any], file: Path, root: Path) -> str:
         return str(meta["type"])
     rel = file.relative_to(root)
     if len(rel.parts) > 1:
-        folder = rel.parts[0].rstrip("s")  # incidents -> incident, runbooks -> runbook
+        folder = rel.parts[0].rstrip("s")  # runbooks -> runbook, rcas -> rca
         return folder
     return "note"
 
@@ -261,7 +261,7 @@ def _ensure_collection(client: QdrantClient, dim: int, recreate: bool) -> None:
     if client.collection_exists(COLLECTION) and recreate:
         log.info("recreating collection %s", COLLECTION)
         client.delete_collection(COLLECTION)
-    # 명명된 밀집 벡터(+ 하이브리드가 켜져 있으면 BM25 희소 벡터) 스키마, capture와 공유.
+    # 명명된 밀집 벡터(+ 하이브리드가 켜져 있으면 BM25 희소 벡터) 스키마 (vectorstore와 공유).
     vectorstore.ensure_collection(client, COLLECTION, dim, payload_indexes=_INDEXED_FIELDS)
 
 
