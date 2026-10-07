@@ -270,6 +270,46 @@ RAG_MCP_URL=http://10.0.0.5:8084/mcp claude
   `cluster_narrowed: false`로 알려 줍니다.
 - `doc_type`과 `component`는 **하드 필터**입니다. 결과가 없으면 그대로 비어 있습니다.
 
+### 문서 목록 보기 (`rag_list_documents`)
+
+내용을 찾는 검색과 달리, 문서 디렉터리에 **어떤 파일이 있는지** 보여 주는 읽기 전용 도구입니다. 항상 켜져 있습니다.
+Claude Code에서는 이렇게 물으면 됩니다(플러그인의 `rag-list-documents` 스킬이 알맞은 호출을 고릅니다).
+
+| 요청 예 | 도구 호출 |
+|------|------|
+| "지식 베이스에 어떤 문서가 있어?" | `rag_list_documents()` |
+| "official/runbooks 폴더 문서만 보여 줘" | `rag_list_documents(subdir="runbooks")` |
+| "검토할 초안 목록 보여 줘" | `rag_list_documents(folder="draft")` |
+| "색인 안 된 문서 있어?" | `rag_list_documents()` 후 `chunks`가 0인 항목 확인 |
+
+응답 예 (`rag_list_documents(folder="draft")`):
+
+```json
+{
+  "status": "ok",
+  "folder": "draft/",
+  "total": 1,
+  "returned": 1,
+  "truncated": false,
+  "documents": [
+    {
+      "source": "draft/longhorn-볼륨-복구.md",
+      "title": "Longhorn 볼륨 복구 절차",
+      "doc_type": "runbook",
+      "size_bytes": 1532,
+      "modified": "2026-10-07T05:12:40+00:00",
+      "chunks": 2,
+      "promote_to": "official/longhorn-볼륨-복구.md"
+    }
+  ]
+}
+```
+
+- `chunks`는 색인된 청크 수입니다. **0이면 파일은 있지만 아직 `rag-ingest` 전이라 검색되지 않습니다.** Qdrant에
+  연결하지 못하면 `null`이고, 목록은 그대로 돌려줍니다.
+- `promote_to`는 초안에만 있으며, 서버에서 `rag-promote <source>`로 승격하면 옮겨질 위치입니다.
+- 기본 100개, 최대 500개(`limit`)까지 돌려주고, 넘으면 `truncated: true`입니다. `draft/`가 아직 없으면 빈 목록입니다.
+
 ## 문서 디렉터리
 
 지식 베이스의 원본은 **문서 디렉터리**입니다. 기본 위치는 `~/.local/share/rag-mcp/data/knowledge`이고, 설정 파일의
