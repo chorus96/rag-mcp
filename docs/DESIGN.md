@@ -28,6 +28,7 @@ rag-mcp는 런북, 과거 장애, RCA(근본 원인 분석) 문서를 **Qdrant**
 | [`vectorstore.py`](../tools/vectorstore.py) | Qdrant 컬렉션 스키마, BM25 희소 벡터(FastEmbed), 하이브리드 질의 |
 | [`reranker.py`](../tools/reranker.py) | Cohere/Jina 호환 크로스 인코더 리랭킹 (선택 사항) |
 | [`capture.py`](../tools/capture.py) | 내부 쓰기 API의 실제 로직: 장애 기록, 반복 장애 확인, 피드백, 통계 |
+| [`plugins/rag-mcp`](../plugins/rag-mcp) | Claude Code 플러그인: MCP 서버 연결 설정과 검색 도구 사용 안내 스킬 (서버 코드는 포함하지 않음) |
 
 `ingest.py`, `capture.py`, `server.py`는 모두 `vectorstore.py`와 `embeddings.py`를 거칩니다. 그래서
 쓰기 경로와 읽기 경로 사이에서 컬렉션 스키마, 벡터 이름, 임베딩 설정이 어긋나지 않습니다.
@@ -347,6 +348,24 @@ curl -s http://localhost:6333/collections/rag_kb | grep -o '"size":[0-9]*'
 > `fastembed_cache`에 저장합니다. 프록시가 필요하면 설정 파일에 `HTTPS_PROXY`를 넣으세요. 내려받지
 > 못하면 밀집 검색만으로 동작합니다(로그에 `FastEmbed unavailable` 경고, 시작 로그에 `hybrid=False`).
 
+### 클라이언트 쪽 서버 주소 (`RAG_MCP_URL`)
+
+서버가 열리는 포트(`MCP_PORT`)는 서버 설정 파일에서 정하지만, 클라이언트가 **어느 주소로 접속할지**는
+클라이언트 쪽에서 정합니다. Claude Code 플러그인과 README의 프로젝트 `.mcp.json` 예시는 모두 환경 변수
+`RAG_MCP_URL`을 먼저 보고, 없을 때 기본 주소를 씁니다.
+
+| 연결 방식 | 주소 결정 | 기본 주소 |
+|------|------|------|
+| 플러그인 (`plugins/rag-mcp/.mcp.json`) | `${RAG_MCP_URL:-${user_config.server_url}}` | 플러그인 설정 `server_url` (`/plugin configure`) |
+| 프로젝트 `.mcp.json` | `${RAG_MCP_URL:-http://localhost:8084/mcp}` | `http://localhost:8084/mcp` |
+
+- **왜 환경 변수인가:** 설정 파일이나 플러그인 설정을 고치지 않고도 셸·서버·CI마다 다른 rag-mcp 서버에
+  접속할 수 있습니다 (예: `RAG_MCP_URL=http://10.0.0.5:8084/mcp claude`).
+- **언제 읽히나:** Claude Code가 시작할 때 MCP 서버 설정을 만들면서 읽습니다. 값을 바꿨다면 Claude Code를
+  다시 시작하세요.
+- **서버는 이 변수를 읽지 않습니다.** 서버의 바인드 주소와 포트는 `MCP_HOST` / `MCP_PORT`(아래 표)로
+  정하며, 둘을 바꾸면 클라이언트의 `RAG_MCP_URL`이나 `server_url`도 맞춰야 합니다.
+
 ## 10. 환경 변수
 
 | 변수 | 기본값 | 설명 |
@@ -383,7 +402,9 @@ curl -s http://localhost:6333/collections/rag_kb | grep -o '"size":[0-9]*'
 | **내부 API** | | |
 | `RAG_INTERNAL_TOKEN` | _(비어 있음)_ | 내부 쓰기 API 보호 토큰. 비워 두면 열림 (개발용) |
 
-주석이 달린 예시는 [`.env.example`](../.env.example)에 있습니다.
+주석이 달린 예시는 [`.env.example`](../.env.example)에 있습니다. 위 표는 모두 **서버**가 읽는 변수입니다.
+클라이언트(Claude Code)가 읽는 `RAG_MCP_URL`은
+[클라이언트 쪽 서버 주소](#클라이언트-쪽-서버-주소-rag_mcp_url)를 참고하세요.
 
 ## 11. 알려진 제한
 
