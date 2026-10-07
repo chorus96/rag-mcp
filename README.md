@@ -161,7 +161,31 @@ rag-ingest                                  # ~/.local/bin 이 PATH에 있어야
 
 서버는 `http://localhost:8084/mcp`에서 **streamable-http**로 통신합니다.
 
-**Claude Code** (프로젝트의 `.mcp.json`):
+**Claude Code — 플러그인 (권장)**: 이 저장소는 Claude Code 플러그인 마켓플레이스이기도 합니다.
+`rag-mcp` 플러그인을 설치하면 MCP 서버 연결과 함께, 언제 어떤 검색 도구를 쓸지 알려 주는 스킬
+(`rag-knowledge`)이 추가됩니다.
+
+```text
+/plugin marketplace add chorus96/rag-mcp
+/plugin install rag-mcp@rag-mcp
+/plugin configure rag-mcp@rag-mcp      # server_url: 예) http://localhost:8084/mcp
+```
+
+설정한 뒤 Claude Code를 재시작하고 `/mcp`에서 `plugin:rag-mcp:rag`가 연결됐는지 확인하세요.
+터미널에서는 `claude plugin install rag-mcp@rag-mcp --config server_url=http://<서버>:8084/mcp`처럼
+한 번에 설정할 수도 있습니다.
+
+| 경로 | 내용 |
+|------|------|
+| `.claude-plugin/marketplace.json` | 마켓플레이스 정의 (이름 `rag-mcp`) |
+| `plugins/rag-mcp/.claude-plugin/plugin.json` | 플러그인 정의, `server_url` 설정 항목 |
+| `plugins/rag-mcp/.mcp.json` | MCP 서버 `rag` (HTTP, `${user_config.server_url}`) |
+| `plugins/rag-mcp/skills/rag-knowledge/` | 검색 도구 사용 안내 스킬 |
+
+플러그인은 서버에 연결만 합니다. rag-mcp 서버 자체는 위의 [빠른 시작](#빠른-시작-linux-서버-설치)대로
+따로 설치해 두어야 합니다.
+
+**Claude Code — 직접 설정** (프로젝트의 `.mcp.json`):
 
 ```json
 {

@@ -1,0 +1,27 @@
+{
+  "name": "rag-mcp",
+  "version": "0.1.0",
+  "description": "rag-mcp 서버(읽기 전용 RAG 메모리)에 연결해 런북, 과거 장애, RCA를 검색하는 MCP 도구를 제공합니다.",
+  "author": {
+    "name": "chorus96"
+  },
+  "repository": "https://github.com/chorus96/rag-mcp",
+  "license": "MIT",
+  "keywords": [
+    "rag",
+    "mcp",
+    "knowledge-base",
+    "runbook",
+    "incident",
+    "qdrant"
+  ],
+  "userConfig": {
+    "server_url": {
+      "type": "string",
+      "title": "rag-mcp 서버 URL",
+      "description": "rag-mcp 서버의 MCP 엔드포인트 URL (예: http://localhost:8084/mcp)",
+      "default": "http://localhost:8084/mcp",
+      "sensitive": false
+    }
+  }
+}
