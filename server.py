@@ -12,9 +12,9 @@
 --------------
 특정 LLM, UI, 임베딩 벤더에 묶여 있지 않습니다. 채팅 LLM은 연결하는 MCP
 클라이언트(LibreChat, mcpo를 통한 Open WebUI, 직접 만든 UI/CLI 등)가 정합니다.
-임베딩은 `embeddings.py`의 교체 가능한 제공자(Ollama / OpenAI 호환 엔드포인트)를
-거치므로, 같은 서버가 코드 변경 없이 Ollama로 오프라인 동작하거나 호스팅
-제공자와 함께 동작합니다.
+임베딩은 `embeddings.py`를 거쳐 OpenAI 호환 /v1/embeddings 엔드포인트를 사용하므로,
+코드 변경 없이 직접 띄운 서버(TEI, vLLM 등)로 오프라인 동작하거나 호스팅 API와 함께
+동작합니다.
 """
 
 from __future__ import annotations

@@ -10,9 +10,9 @@ MCP 서버로 노출하여, 에이전트가 운영 중인 클러스터를 디버
   [`ingest.py`](../ingest.py)가 별도 경로로 기록하므로, LLM에 노출되는 인터페이스는 읽기 전용으로
   유지됩니다.
 - **벤더 중립.** 특정 LLM, UI, 임베딩 벤더에 묶여 있지 않습니다. 채팅 LLM은 연결하는 MCP
-  클라이언트가 정합니다. 임베딩은 교체 가능한 제공자([`embeddings.py`](../embeddings.py))를
-  거칩니다 — `ollama`(오프라인 기본값) 또는 `openai`(OpenAI 호환 엔드포인트). 코드는 같고 환경
-  변수 하나만 바꾸면 됩니다. 접두사는 자동으로 붙습니다. 비대칭 모델(nomic)에는
+  클라이언트가 정합니다. 임베딩은 [`embeddings.py`](../embeddings.py)를
+  거쳐 OpenAI 호환 `/v1/embeddings` 엔드포인트를 씁니다 — 직접 띄운 서버(TEI, vLLM, LocalAI 등)든
+  호스팅 API(OpenAI 등)든 `EMBEDDINGS_BASE_URL`만 바꾸면 됩니다. 접두사는 자동으로 붙습니다. 비대칭 모델(nomic)에는
   `search_query:`/`search_document:` 접두사가 붙고, 대칭 모델(OpenAI `text-embedding-*`)에는
   붙지 않습니다 — 별도 설정이 필요 없습니다. 자동 감지가 모르는 다른 비대칭 모델 계열(e5/bge는
   `query:`/`passage:` 사용)은 `EMBED_QUERY_PREFIX`/`EMBED_DOC_PREFIX`로 재정의하세요.
@@ -132,13 +132,9 @@ API**를 제공합니다. 이것들은 일반 HTTP 라우트(`@mcp.custom_route`
 - systemd를 쓰는 Linux 서버, Python 3.10 이상(venv 모듈 포함), `curl`.
 - 실행 중인 Qdrant — [`deploy/install.sh`](../deploy/install.sh)가 바이너리를 설치하고
   `qdrant.service`로 `127.0.0.1:6333`에서 실행합니다.
-- 임베딩 제공자:
-  - 같은 서버에서 실행 중이고 모델을 내려받은 **Ollama** (기본값, 오프라인):
-    ```bash
-    ollama pull bge-m3
-    ```
-  - **또는** OpenAI 호환 엔드포인트 — `EMBEDDINGS_PROVIDER=openai`로 설정하세요
-    ([설정](#설정-환경-변수) 참고).
+- **OpenAI 호환 임베딩 엔드포인트** — 직접 띄운 서버(예: TEI로 `BAAI/bge-m3` 서빙) 또는 호스팅
+  API. `EMBEDDINGS_BASE_URL`은 기본값이 없으므로 반드시 설정하세요
+  ([설정](#설정-환경-변수), [한국어 / 다국어 문서](#한국어--다국어-문서) 참고).
 
 ## 지식 베이스 채우기
 
@@ -217,10 +213,8 @@ QDRANT_URL=http://localhost:6333 python3 ingest.py --path knowledge
 담고 있어, 한 번의 호출로 보내면 `RAG_TIMEOUT_SECONDS` 안에 수 메가바이트를 보내야 합니다. 배치로
 나누면 큰 파일 처리 도중 실패하더라도 문서 전체를 잃지 않고 앞선 배치는 커밋된 채로 남습니다.
 
-> **`EMBED_BATCH_SIZE`와 Ollama에 관한 참고:** 이 값은 네이티브 배치 입력을 지원하는 제공자
-> (OpenAI 호환 `/v1/embeddings`)에서만 효과가 있습니다. Ollama의 `/api/embeddings`는 한 번에
-> 프롬프트 하나만 받으므로, 기본 제공자에서는 이 값을 무엇으로 설정하든 청크를 HTTP 호출 한 번에
-> 하나씩 임베딩합니다 — 값을 올려도 아무 변화가 없습니다.
+> **`EMBED_BATCH_SIZE` 참고:** 엔드포인트마다 요청당 입력 개수와 토큰 수 상한이 다릅니다
+> (예: OpenAI는 입력 2048개). 엔드포인트가 413/400 오류를 돌려주면 이 값을 줄이세요.
 
 ## 실행
 
@@ -299,14 +293,12 @@ systemctl --user restart rag-mcp            # 설정 변경 적용
 | `QDRANT_URL` | `http://localhost:6333` | Qdrant REST 엔드포인트 |
 | `QDRANT_COLLECTION` | `rag_kb` | 컬렉션 이름 |
 | `QDRANT_API_KEY` | _(미설정)_ | Qdrant 인증을 켠 경우 |
-| `EMBEDDINGS_PROVIDER` | `ollama` | `ollama` 또는 `openai` (OpenAI 호환) |
-| `EMBEDDINGS_MODEL` | `bge-m3` | 임베딩 모델 (다국어) |
-| `OLLAMA_BASE_URL` | `http://localhost:11434` | `ollama` 제공자 호스트 |
-| `EMBEDDINGS_BASE_URL` | `https://api.openai.com` | `openai` 제공자 기본 URL (예: LiteLLM 프록시) |
-| `EMBEDDINGS_API_KEY` | _(미설정)_ | `openai` 제공자 키 |
+| `EMBEDDINGS_MODEL` | `bge-m3` | 임베딩 모델 이름 (엔드포인트가 쓰는 이름에 맞춤) |
+| `EMBEDDINGS_BASE_URL` | _(없음, 필수)_ | OpenAI 호환 임베딩 엔드포인트 기본 URL (`/v1`은 자동으로 붙음). 예: `http://localhost:8080`(TEI), `https://api.openai.com` |
+| `EMBEDDINGS_API_KEY` | _(미설정)_ | 엔드포인트 API 키 (비워 두면 인증 헤더를 보내지 않음) |
 | `EMBED_QUERY_PREFIX` / `EMBED_DOC_PREFIX` | 자동 (모델에 따라 설정: nomic → `search_query: `/`search_document: `, 대칭 모델 → 빈 값) | 자동 감지가 놓치는 비대칭 모델 계열에만 재정의 (e5/bge → `query: `/`passage: `) |
 | `CHUNK_SIZE` / `CHUNK_OVERLAP` | `1500` / `100` | 수집 시 청킹 |
-| `EMBED_BATCH_SIZE` | `32` | 임베딩 요청당 청크 수. `ollama` 제공자에는 효과 없음 (단일 프롬프트 API) |
+| `EMBED_BATCH_SIZE` | `32` | 임베딩 요청당 청크 수 |
 | `QDRANT_UPSERT_BATCH` | `64` | 수집 중 Qdrant 업서트 요청당 포인트 수 |
 | `RAG_TIMEOUT_SECONDS` | `30` (서버의 Qdrant 연결) / `60` (임베딩 요청, 수집, 기록) | HTTP 타임아웃 (초). 설정하면 모두 이 값을 사용 |
 | `RAG_HYBRID` | `true` | 하이브리드 검색(밀집 + BM25) 켜기/끄기. 바꾸면 `--recreate` 필요 |
@@ -324,10 +316,9 @@ systemctl --user restart rag-mcp            # 설정 변경 적용
 | `RAG_KNOWLEDGE_DIR` | `/var/lib/rag-mcp/knowledge` | `rag-ingest` 명령이 수집할 문서 디렉터리 |
 | `RAG_INTERNAL_TOKEN` | _(비어 있음)_ | 내부 쓰기 API(`/internal/knowledge/*`) 보호 토큰. 비워 두면 열림 (개발용) |
 
-### 호스팅 / OpenAI 호환 임베딩 제공자 사용하기
+### 호스팅 API로 임베딩하기 (예: OpenAI)
 
 ```bash
-EMBEDDINGS_PROVIDER=openai \
 EMBEDDINGS_BASE_URL=https://api.openai.com \   # 또는 LiteLLM 프록시 등
 EMBEDDINGS_API_KEY=sk-... \
 EMBEDDINGS_MODEL=text-embedding-3-small \       # 대칭 모델 → 접두사가 자동으로 비워지므로 설정 불필요
@@ -338,44 +329,36 @@ EMBEDDINGS_MODEL=text-embedding-3-small \       # 대칭 모델 → 접두사가
 
 ## 한국어 / 다국어 문서
 
-기본 임베딩 모델은 한국어를 포함한 다국어 모델 **`bge-m3`**(1024차원, 최대 입력 8192 토큰)입니다.
-영어 위주로 학습된 이전 기본값 `nomic-embed-text`(768차원)보다 한국어 질의·문서의 의미 검색이
-정확합니다. 영어 문서만 쓰고 더 가벼운 모델을 원하면 `EMBEDDINGS_MODEL=nomic-embed-text`로 바꿀 수
-있습니다(이 경우 접두사는 자동으로 붙습니다).
+기본 임베딩 모델 이름은 한국어를 포함한 다국어 모델 **`bge-m3`**(1024차원, 최대 입력 8192
+토큰)입니다. 영어 위주로 학습된 `nomic-embed-text`(768차원)보다 한국어 질의·문서의 의미 검색이
+정확합니다. 영어 문서만 쓰고 더 가벼운 모델을 원하면 엔드포인트에서 `nomic-embed-text`를 서빙하고
+`EMBEDDINGS_MODEL=nomic-embed-text`로 바꿀 수 있습니다(이 경우 접두사는 자동으로 붙습니다).
+호스팅 API라면 OpenAI `text-embedding-3-small`/`-large`도 다국어를 지원합니다.
 
 - **차원 자동 처리** — 컬렉션은 실제 임베딩 길이로 생성되므로(`ingest.py`, `capture.py`) 1024차원에
   자동으로 맞춰집니다.
 - **접두사 불필요** — bge-m3는 질의/문서 접두사가 필요 없습니다. 자동 감지는 `nomic`에만 접두사를
   붙이므로 기본값(빈 값) 그대로 두고, `EMBED_QUERY_PREFIX`/`EMBED_DOC_PREFIX`는 설정하지 마세요.
 
-### Ollama로 설정하기 (오프라인, 권장)
+### TEI로 bge-m3 서빙하기 (오프라인, 권장)
 
-```bash
-ollama pull bge-m3
-```
+[Hugging Face TEI](https://github.com/huggingface/text-embeddings-inference)(Text Embeddings
+Inference)는 `BAAI/bge-m3`를 OpenAI 호환 `/v1/embeddings`로 서빙합니다. 설치 방법은 TEI 문서를
+따르세요(CPU/GPU 빌드 제공). 같은 서버의 8080 포트에서 띄웠다면:
 
 ```bash
 # /etc/rag-mcp/rag-mcp.env
-EMBEDDINGS_PROVIDER=ollama
+EMBEDDINGS_BASE_URL=http://localhost:8080   # /v1 은 자동으로 붙습니다
+EMBEDDINGS_API_KEY=                         # 인증이 없으면 비워 둠
 EMBEDDINGS_MODEL=bge-m3
 ```
 
-### OpenAI 호환 서버로 설정하기 (예: TEI)
-
-GPU 서버에서 Hugging Face TEI(Text Embeddings Inference)로 `BAAI/bge-m3`를 서빙하는 경우:
-
-```bash
-# /etc/rag-mcp/rag-mcp.env
-EMBEDDINGS_PROVIDER=openai
-EMBEDDINGS_BASE_URL=http://<tei-host>:8080   # /v1 은 자동으로 붙습니다
-EMBEDDINGS_API_KEY=dummy                     # 인증이 없으면 아무 값
-EMBEDDINGS_MODEL=BAAI/bge-m3
-```
+vLLM, LocalAI 등 다른 OpenAI 호환 서버도 같은 방식으로 지정합니다. 모델 이름은 그 서버가 쓰는
+이름에 맞추세요(예: vLLM은 기본으로 `BAAI/bge-m3`).
 
 ### 적용 및 확인
 
-모델을 바꾸면 반드시 컬렉션을 재구축해야 합니다(기존 벡터와 차원·의미가 다릅니다). 이전 기본값
-`nomic-embed-text`로 만든 기존 컬렉션도 마찬가지입니다.
+모델을 바꾸면 반드시 컬렉션을 재구축해야 합니다(기존 벡터와 차원·의미가 다릅니다). 
 
 ```bash
 sudo systemctl restart rag-mcp               # 새 모델로 질의하도록 재시작
@@ -398,7 +381,7 @@ curl -s http://localhost:6333/collections/rag_kb | grep -o '"size":[0-9]*'
 - **리랭커도 다국어 모델이 기본값입니다.** 리랭킹을 켜면(`RERANK_PROVIDER=cohere`) 기본 모델은 Cohere
   `rerank-multilingual-v3.0`입니다. Jina를 쓴다면 `jina-reranker-v2-base-multilingual`을 지정하세요.
   영어 전용 `rerank-english-v3.0`은 한국어 문서에 쓰지 마세요.
-- **속도.** bge-m3(약 1.2GB)는 nomic보다 커서 CPU에서는 수집이 느려질 수 있습니다. Ollama는 청크를
-  하나씩 임베딩하므로 문서가 많으면 시간이 걸립니다.
+- **속도.** bge-m3(약 1.2GB)는 nomic보다 커서 CPU로 서빙하면 수집이 느려질 수 있습니다. 문서가
+  많다면 GPU에서 서빙하거나 `EMBED_BATCH_SIZE`를 엔드포인트가 허용하는 범위에서 늘리세요.
 - **청크 크기.** 기본 `CHUNK_SIZE=1500`자는 bge-m3의 최대 입력 길이보다 훨씬 작아 그대로 써도
   됩니다.

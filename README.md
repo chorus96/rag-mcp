@@ -12,8 +12,8 @@ Claude Code, LibreChat Agents, 프록시를 통한 Open WebUI, 직접 만든 도
   Reciprocal Rank Fusion으로 결합합니다. 임베딩이 놓치더라도 정확한 토큰(`CrashLoopBackOff`,
   에러 코드, 리소스 이름)을 찾아냅니다.
 - **선택적 크로스 인코더 리랭킹**(Cohere/Jina 호환)으로 정밀도를 높일 수 있습니다.
-- **교체 가능한 임베딩** — 로컬 [Ollama](https://ollama.com)(오프라인 기본값) 또는
-  OpenAI 호환 `/v1/embeddings` 엔드포인트. 환경 변수 하나로 전환합니다.
+- **OpenAI 호환 임베딩** — `/v1/embeddings`를 제공하는 엔드포인트라면 무엇이든 씁니다. 직접 띄운
+  서버(TEI, vLLM 등, 오프라인)나 호스팅 API(OpenAI 등)를 설정 몇 줄로 지정합니다.
 - **마크다운 + PDF 수집** — YAML front matter, 헤딩 인식 청킹, 멱등(idempotent) 재실행을 지원합니다.
 - **벤더 중립 MCP** — streamable-http MCP를 지원하는 모든 클라이언트와 함께 동작합니다.
 
@@ -30,9 +30,9 @@ Claude Code, LibreChat Agents, 프록시를 통한 Open WebUI, 직접 만든 도
                 ▼
   ┌───────────────────────────┐   embed    ┌─────────────────────────────┐
   │        rag-ingest         │  chunks    │     embedding provider      │
-  │  · parses front matter    │───────────►│   ollama (offline default)  │
-  │  · heading-aware chunks   │            │   or any OpenAI-compatible  │
-  │    (PDF pages = sections) │◄───────────│   /v1/embeddings endpoint   │
+  │  · parses front matter    │───────────►│   any OpenAI-compatible     │
+  │  · heading-aware chunks   │            │   /v1/embeddings endpoint   │
+  │    (PDF pages = sections) │◄───────────│   (TEI, vLLM, OpenAI, ...)  │
   │  · idempotent upserts,    │  vectors   └──────────────▲──────────────┘
   │    stale-tail cleanup     │                           │
   └─────────────┬─────────────┘                           │  the SAME
@@ -75,15 +75,16 @@ Claude Code, LibreChat Agents, 프록시를 통한 Open WebUI, 직접 만든 도
 ## 빠른 시작 (Linux 서버 설치)
 
 사전 요구 사항: systemd를 쓰는 Linux 서버(Ubuntu, Debian, RHEL 계열 등), Python 3.10 이상과
-venv 모듈(Debian/Ubuntu: `apt install python3-venv`), `curl`, 그리고 기본 오프라인 임베딩 경로를
-쓰려면 같은 서버에 [Ollama](https://ollama.com)가 필요합니다.
+venv 모듈(Debian/Ubuntu: `apt install python3-venv`), `curl`, 그리고 **OpenAI 호환 임베딩
+엔드포인트**(아래 [임베딩 엔드포인트 설정](#임베딩-엔드포인트-설정) 참고)가 필요합니다.
 
 ```bash
-curl -fsSL https://ollama.com/install.sh | sh   # Ollama가 없다면
-ollama pull bge-m3                              # 최초 1회 (기본 다국어 임베딩 모델)
-
 git clone https://github.com/mmelmesary/rag-mcp.git && cd rag-mcp
 sudo ./deploy/install.sh        # Qdrant + rag-mcp 설치, systemd 서비스로 시작
+
+# 임베딩 엔드포인트 지정 (EMBEDDINGS_BASE_URL / EMBEDDINGS_API_KEY / EMBEDDINGS_MODEL)
+sudo vi /etc/rag-mcp/rag-mcp.env
+sudo systemctl restart rag-mcp
 
 sudo rag-ingest                 # 샘플 문서 색인
 ```
@@ -152,8 +153,7 @@ rag-ingest                                  # ~/.local/bin 이 PATH에 있어야
   systemd에 연결되지 않아 설치 스크립트가 멈춥니다. 서비스 등록 없이 파일만 설치하려면
   `SKIP_START=1 ./deploy/install.sh --user`를 쓰세요.
 - **Python venv 모듈**(Debian/Ubuntu의 `python3-venv`)이 없다면 그 설치만은 관리자에게
-  요청해야 합니다. Ollama도 이미 설치되어 있지 않다면, 공식 설치 스크립트 대신
-  [바이너리](https://github.com/ollama/ollama/releases)를 홈에 풀어 `ollama serve`로 실행할 수 있습니다.
+  요청해야 합니다.
 - 같은 서버에서 여러 사용자가 설치하면 포트(8084, 6333, 6334)가 겹치므로 한 명만 실행할 수
   있습니다.
 
@@ -234,34 +234,57 @@ sudo rag-ingest
 알려진 제한 사항: 파일을 삭제하거나 이름을 바꿔도 기존 청크는 제거되지 않습니다 — 삭제/이름 변경
 후에는 `sudo rag-ingest --recreate`를 사용하세요.
 
-## 호스팅 임베딩 제공자로 전환하기
+## 임베딩 엔드포인트 설정
+
+임베딩은 OpenAI 호환 `/v1/embeddings` 엔드포인트로만 처리합니다. `EMBEDDINGS_BASE_URL`에는
+기본값이 없으므로 반드시 지정해야 합니다(문서가 의도치 않게 외부로 전송되지 않도록). `/v1`은
+자동으로 붙습니다.
+
+**직접 띄운 서버 (오프라인, 권장)** — 예: 같은 서버에서
+[Hugging Face TEI](https://github.com/huggingface/text-embeddings-inference)로 `BAAI/bge-m3` 서빙.
+vLLM, LocalAI 등도 같은 방식입니다.
 
 ```bash
 # /etc/rag-mcp/rag-mcp.env
-EMBEDDINGS_PROVIDER=openai
-EMBEDDINGS_BASE_URL=https://api.openai.com    # 또는 LiteLLM 프록시 / Azure 게이트웨이 / TEI
+EMBEDDINGS_BASE_URL=http://localhost:8080
+EMBEDDINGS_API_KEY=
+# 엔드포인트가 쓰는 모델 이름 (예: vLLM은 BAAI/bge-m3)
+EMBEDDINGS_MODEL=bge-m3
+```
+
+**호스팅 API** — 예: OpenAI. 문서 내용이 외부로 전송됩니다.
+
+```bash
+# /etc/rag-mcp/rag-mcp.env
+EMBEDDINGS_BASE_URL=https://api.openai.com
 EMBEDDINGS_API_KEY=sk-...
 EMBEDDINGS_MODEL=text-embedding-3-small
 ```
 
-그런 다음 서버를 재시작하고 컬렉션을 다시 만드세요(수집과 질의는 항상 같은 제공자+모델을
-사용해야 합니다).
+엔드포인트나 모델을 바꾼 뒤에는 서버를 재시작하고 컬렉션을 다시 만드세요(수집과 질의는 항상
+같은 엔드포인트+모델을 사용해야 합니다).
 
 ```bash
 sudo systemctl restart rag-mcp
 sudo rag-ingest --recreate
 ```
 
+> **Ollama 제공자를 쓰던 기존 설치:** Ollama 전용 제공자(`EMBEDDINGS_PROVIDER=ollama`,
+> `OLLAMA_BASE_URL`)는 제거되었습니다. 설치 스크립트는 기존 설정 파일을 덮어쓰지 않으므로, 그
+> 두 줄을 지우고 `EMBEDDINGS_BASE_URL`을 지정하세요. Ollama를 계속 쓰려면 Ollama의 OpenAI 호환
+> 엔드포인트를 지정하면 됩니다(`EMBEDDINGS_BASE_URL=http://localhost:11434`). 같은 모델이면
+> 벡터가 같으므로 재수집은 필요 없지만, 확실하게 하려면 `--recreate`로 다시 수집하세요.
+
 ## 한국어 문서와 임베딩 모델
 
-기본 임베딩 모델은 한국어를 포함한 다국어 모델 **`bge-m3`**입니다. 한국어 문서와 질의를 별도
-설정 없이 바로 쓸 수 있습니다.
+기본 임베딩 모델 이름은 한국어를 포함한 다국어 모델 **`bge-m3`**입니다. 엔드포인트에서 bge-m3를
+서빙하면 한국어 문서와 질의를 별도 설정 없이 바로 쓸 수 있습니다. 호스팅 API를 쓴다면 OpenAI
+`text-embedding-3-small`/`-large`도 다국어를 지원합니다.
 
-영어 문서만 쓰고 더 가벼운 모델을 원하면 `nomic-embed-text`로 바꿀 수 있습니다.
+영어 문서만 쓰고 더 가벼운 모델을 원하면 엔드포인트에서 `nomic-embed-text` 같은 모델을 서빙하고
+이름을 바꾸면 됩니다(nomic 계열은 작업 접두사가 자동으로 붙습니다).
 
 ```bash
-ollama pull nomic-embed-text
-
 # /etc/rag-mcp/rag-mcp.env
 EMBEDDINGS_MODEL=nomic-embed-text
 ```
@@ -274,7 +297,7 @@ sudo systemctl restart rag-mcp
 sudo rag-ingest --recreate
 ```
 
-OpenAI 호환 서버(TEI 등)로 쓰는 방법, 다국어 리랭커, BM25의 한국어 한계 등 자세한 내용은
+TEI로 bge-m3를 띄우는 예, 다국어 리랭커, BM25의 한국어 한계 등 자세한 내용은
 [docs/DESIGN.md의 "한국어 / 다국어 문서"](docs/DESIGN.md#한국어--다국어-문서)를 참고하세요.
 
 ## 설정

@@ -2,8 +2,9 @@
 RAG 메모리를 위한 제공자 무관 임베딩.
 
 지원:
-- Ollama            (/api/embeddings, 단일 프롬프트)
-- OpenAI 호환       (/v1/embeddings, 네이티브 배치 입력)
+- OpenAI 호환 /v1/embeddings 엔드포인트 (네이티브 배치 입력). OpenAI API, Hugging Face
+  TEI, vLLM, LocalAI, LiteLLM 프록시, Ollama의 /v1 등 이 형식을 제공하는 서버라면
+  무엇이든 쓸 수 있습니다. 엔드포인트는 EMBEDDINGS_BASE_URL로 반드시 지정해야 합니다.
 
 기능:
 - 대칭/비대칭 모델을 코드에서 처리: 비대칭 모델(예: nomic)에는 질의/문서용 작업
@@ -44,11 +45,13 @@ class EmbeddingConfig:
 
 
 def _build_config() -> EmbeddingConfig:
-    provider = os.environ.get("EMBEDDINGS_PROVIDER", "ollama").strip().lower()
+    # 지원하는 제공자는 "openai"(OpenAI 호환) 하나뿐입니다. 이전 설정의 "ollama" 등이
+    # 남아 있으면 _embed_batch에서 안내 메시지와 함께 오류를 냅니다.
+    provider = os.environ.get("EMBEDDINGS_PROVIDER", "openai").strip().lower()
     model = os.environ.get("EMBEDDINGS_MODEL", "bge-m3")
-
-    ollama_url = os.environ.get("OLLAMA_BASE_URL") or "http://localhost:11434"
-    openai_url = os.environ.get("EMBEDDINGS_BASE_URL") or "https://api.openai.com"
+    # 기본값을 두지 않습니다: 문서가 의도치 않게 외부 API로 전송되지 않도록, 어느
+    # 엔드포인트를 쓸지 운영자가 명시해야 합니다.
+    base_url = (os.environ.get("EMBEDDINGS_BASE_URL") or "").strip()
     api_key = os.environ.get("EMBEDDINGS_API_KEY")
 
     # 비대칭 모델 자동 감지 (질의/문서에 서로 다른 작업 접두사가 필요). nomic은 흔한
@@ -64,8 +67,6 @@ def _build_config() -> EmbeddingConfig:
         "EMBED_DOC_PREFIX",
         "search_document: " if is_asymmetric else "",
     )
-
-    base_url = ollama_url if provider == "ollama" else openai_url
 
     return EmbeddingConfig(
         provider=provider,
@@ -92,7 +93,7 @@ class EmbeddingError(RuntimeError):
 
 def _http_error(provider: str, exc: httpx.HTTPStatusError) -> EmbeddingError:
     """상태 코드 + 응답 본문을 보존해 잘못된 모델/엔드포인트를 진단할 수 있게
-    합니다 (예: Ollama 404 = 모델을 내려받지 않음)."""
+    합니다 (예: 404 = 잘못된 URL 또는 모델 이름, 401 = API 키 문제)."""
     body = (exc.response.text or "").strip()
     detail = f" — {body}" if body else ""
     return EmbeddingError(f"{provider} embeddings HTTP {exc.response.status_code}{detail}")
@@ -131,27 +132,6 @@ def _openai_endpoint() -> str:
 # 제공자
 # =========================================================
 
-def _embed_ollama_one(text: str) -> list[float]:
-    """Ollama의 레거시 /api/embeddings는 단일 프롬프트입니다: {"prompt": str} ->
-    {"embedding": [...]}. 목록을 받지 않으므로 배치는 반복문으로 처리합니다."""
-    try:
-        resp = httpx.post(
-            f"{CONFIG.base_url.rstrip('/')}/api/embeddings",
-            json={"model": CONFIG.model, "prompt": text},
-            timeout=HTTP_TIMEOUT,
-        )
-        resp.raise_for_status()
-    except httpx.HTTPStatusError as exc:
-        raise _http_error("ollama", exc) from exc
-    except httpx.RequestError as exc:
-        raise EmbeddingError(f"ollama connection failed: {exc}") from exc
-
-    vector = resp.json().get("embedding")
-    if not vector:
-        raise EmbeddingError(f"ollama returned no embedding for model {CONFIG.model!r}")
-    return vector
-
-
 def _embed_openai(texts: list[str]) -> list[list[float]]:
     """OpenAI 호환 /v1/embeddings는 배치 `input` 배열을 기본으로 받습니다."""
     headers = {"Authorization": f"Bearer {CONFIG.api_key}"} if CONFIG.api_key else {}
@@ -179,11 +159,19 @@ def _embed_openai(texts: list[str]) -> list[list[float]]:
 
 
 def _embed_batch(texts: list[str]) -> list[list[float]]:
-    if CONFIG.provider == "ollama":
-        return [_embed_ollama_one(t) for t in texts]
-    if CONFIG.provider == "openai":
-        return _embed_openai(texts)
-    raise EmbeddingError(f"unknown embeddings provider: {CONFIG.provider!r}")
+    if CONFIG.provider != "openai":
+        raise EmbeddingError(
+            f"unsupported EMBEDDINGS_PROVIDER={CONFIG.provider!r}: only 'openai' "
+            "(OpenAI-compatible /v1/embeddings) is supported. Ollama users can point "
+            "EMBEDDINGS_BASE_URL at Ollama's OpenAI-compatible endpoint, "
+            "e.g. http://localhost:11434/v1"
+        )
+    if not CONFIG.base_url:
+        raise EmbeddingError(
+            "EMBEDDINGS_BASE_URL is not set: configure an OpenAI-compatible "
+            "embeddings endpoint (e.g. https://api.openai.com or http://localhost:8080 for TEI)"
+        )
+    return _embed_openai(texts)
 
 
 # =========================================================
@@ -205,5 +193,5 @@ def embed_document(text: str) -> list[float]:
 
 
 def embed_documents(texts: list[str]) -> list[list[float]]:
-    """문서 배치 임베딩 (OpenAI는 HTTP 호출 한 번, Ollama는 반복 호출)."""
+    """문서 배치 임베딩 (배치당 HTTP 호출 한 번)."""
     return _embed_batch([_apply_prefix(t, "document") for t in texts])

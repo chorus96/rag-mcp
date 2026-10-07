@@ -223,14 +223,13 @@ cat <<EOF
 설치가 끝났습니다 ($MODE 모드).
 
 다음 단계:
-  1. 임베딩 모델 준비 (Ollama, 같은 서버에서 실행 중이어야 합니다):
-       ollama pull bge-m3
-  2. 필요하면 설정 수정 후 재시작:
+  1. OpenAI 호환 임베딩 엔드포인트를 설정 파일에 지정한 뒤 재시작:
+       (EMBEDDINGS_BASE_URL / EMBEDDINGS_API_KEY / EMBEDDINGS_MODEL)
        ${SUDO:+$SUDO }\${EDITOR:-vi} $ENV_FILE
        $RESTART_CMD
-  3. 문서 색인:
+  2. 문서 색인:
        ${SUDO:+$SUDO }rag-ingest
-  4. 상태 확인:
+  3. 상태 확인:
        $STATUS_CMD
        $LOG_CMD
 
