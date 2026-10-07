@@ -776,13 +776,46 @@ BM25는 질의의 단어가 문서에 얼마나 들어 있는지로 점수를 �
 - **설치와 속도:** `kiwipiepy`는 `pip`로 설치되며 모델(약 100MB)이 패키지에 들어 있어 실행 중에 내려받는 것이
   없습니다. 형태소 분석은 초당 수만 글자 수준이라 임베딩 시간에 비하면 작습니다. 대신 Kiwi를 불러오는 데 몇 초가
   걸리고 메모리를 수백 MB(측정 환경에서 약 0.5GB) 더 씁니다. 서버와 `rag-ingest`가 각각 불러옵니다. 메모리가
-  부족하면 `RAG_SPARSE_MODEL=Qdrant/bm25`나 `RAG_HYBRID=false`를 쓰세요.
-- **모델을 바꾸면 재구축하세요.** 질의와 문서가 같은 방식으로 나뉘어야 맞으므로, `RAG_SPARSE_MODEL`을 바꾼 뒤에는
-  `rag-ingest --recreate`가 필요합니다. 이전 버전(`Qdrant/bm25`가 기본이던 때)에서 업그레이드한 경우도 마찬가지입니다.
-- **`Qdrant/bm25`를 쓰려면 FastEmbed를 설치하세요.** FastEmbed(onnxruntime 포함)는 선택 의존성
-  ([`requirements-fastembed.txt`](requirements-fastembed.txt))이라 기본 설치에는 들어가지 않습니다. 설정 파일에
-  `RAG_SPARSE_MODEL=Qdrant/bm25`를 넣고 `./deploy/install.sh`를 다시 실행하면 함께 설치됩니다. 설치하지 않은 채
-  이 값을 쓰면 시작 로그에 경고가 남고 의미 검색만으로 동작합니다.
+  부족하면 다른 희소 모델을 쓰거나 키워드 검색을 끄세요([희소 모델 바꾸기](#희소-모델-바꾸기-rag_sparse_model)).
+
+#### 희소 모델 바꾸기 (`RAG_SPARSE_MODEL`)
+
+희소 모델은 설정 파일(`~/.config/rag-mcp/rag-mcp.env`)의 `RAG_SPARSE_MODEL`로 고릅니다. 질의와 문서가 같은
+방식으로 나뉘어야 키워드가 맞으므로, **어느 경우든 바꾼 뒤에는 `rag-ingest --recreate`로 재구축**해야 합니다.
+
+| 바꾸려는 것 | 설정 파일 | 적용 명령 |
+|------|------|------|
+| `Qdrant/bm25`로 (영어 위주 문서, 메모리 절약) | `RAG_SPARSE_MODEL=Qdrant/bm25` | `./deploy/install.sh` → `rag-ingest --recreate` |
+| `kiwi-bm25`로 되돌리기 (기본값) | `RAG_SPARSE_MODEL=kiwi-bm25` (또는 줄을 지우거나 주석 처리) | `systemctl --user restart rag-mcp` → `rag-ingest --recreate` |
+| 키워드 검색 끄기 (의미 검색만) | `RAG_HYBRID=false` | `systemctl --user restart rag-mcp` → `rag-ingest --recreate` |
+
+`Qdrant/bm25`로 바꾸는 예:
+
+```bash
+# 1. 설정 파일에서 희소 모델 지정 (같은 줄 끝에 주석을 달지 마세요)
+vi ~/.config/rag-mcp/rag-mcp.env
+#   RAG_SPARSE_MODEL=Qdrant/bm25
+
+# 2. 설치 스크립트를 다시 실행 — 설정을 보고 FastEmbed(선택 의존성)를 설치하고 서비스를 재시작합니다
+./deploy/install.sh
+
+# 3. 새 방식으로 색인을 다시 만듭니다
+rag-ingest --recreate
+
+# 4. 확인 — 시작 로그에 사용 중인 희소 모델과 hybrid=True 가 나옵니다
+journalctl --user -u rag-mcp | grep -E 'sparse model|hybrid='
+```
+
+- **`Qdrant/bm25`는 FastEmbed가 필요합니다.** FastEmbed(onnxruntime 포함)는 선택 의존성
+  ([`requirements-fastembed.txt`](requirements-fastembed.txt))이라 기본 설치에 들어가지 않고, 2단계의 설치 스크립트가
+  설정을 보고 함께 설치합니다. 직접 설치하려면 `~/.local/share/rag-mcp/venv/bin/pip install -r
+  ~/.local/share/rag-mcp/app/requirements-fastembed.txt`를 실행한 뒤 서버를 재시작하세요. 처음 시작할 때 모델을
+  `huggingface.co`에서 내려받으므로, 프록시가 필요하면 설정 파일에 `HTTPS_PROXY`를 넣으세요.
+- **확인 방법:** MCP 도구 `rag_health()` 응답의 `retrieval`에 `hybrid`(키워드 검색 동작 여부)와 `sparse_model`이
+  나옵니다. 모델을 불러오지 못하면 시작 로그에 `sparse model ... unavailable` 경고가 남고 `hybrid=False`(의미 검색만)로
+  동작합니다.
+- **이전 버전에서 업그레이드했다면** 설정을 바꾸지 않았더라도 한 번 `rag-ingest --recreate`를 실행하세요. 예전 기본값은
+  `Qdrant/bm25`였고 지금 기본값은 `kiwi-bm25`라서 기존 색인의 키워드가 맞지 않습니다.
 
 ### 개념 정리
 
