@@ -1,7 +1,13 @@
 # =============================================================================
 # rag-mcp.service — rag-mcp MCP 서버 (systemctl --user)
 # =============================================================================
-# 읽기 전용 검색 도구를 http://<서버 주소>:${MCP_PORT}/mcp (streamable-http)로 제공합니다.
+# 검색 도구를 http://<서버 주소>:${MCP_PORT}/mcp (streamable-http)로 제공합니다.
+# 설정 파일에서 RAG_MCP_WRITE=true 로 켜면 초안 쓰기 도구(rag_add_document, rag_delete_document)도 제공합니다.
+#
+# 문서 디렉터리 (RAG_KNOWLEDGE_DIR, 기본 ~/.local/share/rag-mcp/data/knowledge)
+#   official/   정식 문서 — 사람이 관리. 서버는 읽지도 쓰지도 않고, rag-ingest 가 색인한 내용을 검색만 합니다.
+#   draft/      초안 — 쓰기 도구를 켰을 때만 서버가 이 아래에 파일을 만들고 지웁니다(바로 색인).
+#   쓰기 도구가 꺼져 있으면 서버는 문서 디렉터리에 접근하지 않습니다. 검색은 Qdrant만 씁니다.
 #
 # 설치 위치: ~/.config/systemd/user/rag-mcp.service  (deploy/install.sh가 복사)
 # 관리:      systemctl --user status rag-mcp / journalctl --user -u rag-mcp -f
@@ -31,6 +37,9 @@ EnvironmentFile=%h/.config/rag-mcp/rag-mcp.env
 Environment=PYTHONUNBUFFERED=1
 # FastEmbed BM25 모델 캐시. 최초 실행 시 한 번 내려받고, rag-ingest와 함께 씁니다.
 Environment=FASTEMBED_CACHE_PATH=%h/.local/share/rag-mcp/data/fastembed_cache
+# 문서 디렉터리의 기본값 (rag-ingest, rag-promote와 같은 값). 설정 파일(EnvironmentFile)의 값이 항상 우선하고,
+# 설정 파일의 값이 비어 있으면 서버가 같은 기본 경로를 씁니다.
+Environment=RAG_KNOWLEDGE_DIR=%h/.local/share/rag-mcp/data/knowledge
 
 ExecStart=%h/.local/share/rag-mcp/venv/bin/python %h/.local/share/rag-mcp/app/server.py
 
