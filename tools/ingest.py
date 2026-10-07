@@ -274,6 +274,63 @@ def _discover_files(path: Path) -> list[Path]:
     )
 
 
+def ingest_file(client: QdrantClient, file: Path, root: Path, *, ensure: bool = True,
+                recreate: bool = False) -> int:
+    """파일 하나를 색인하고 저장한 청크 수를 반환합니다 (건너뛰면 0).
+
+    `root`는 문서 디렉터리입니다. source(문서 경로)와 기본 doc_type을 여기서 정하므로, 같은 파일은
+    누가 수집하든(rag-ingest, MCP 쓰기 도구) 같은 포인트 ID를 갖습니다. `ensure`가 참이면 컬렉션이
+    없을 때 만들고, `recreate`가 참이면 기존 컬렉션을 지우고 새로 만듭니다.
+    """
+    if file.suffix.lower() == ".pdf":
+        meta: dict[str, Any] = {}
+        body = _extract_pdf_text(file)
+        if not body:
+            log.warning("skipping PDF with no extractable text %s", file)
+            return 0
+    else:
+        raw = file.read_text(encoding="utf-8")
+        meta, body = _parse_front_matter(raw)
+        if not body:
+            log.warning("skipping empty file %s", file)
+            return 0
+
+    doc_type = _infer_doc_type(meta, file, root)
+    source = str(file.relative_to(root)).replace(os.sep, "/")
+    title = meta.get("title") or file.stem
+    tags = meta.get("tags") or []
+
+    chunks = _chunk_document(body)
+    dense = _embed_batch(chunks)
+    sparse = vectorstore.embed_documents_sparse(chunks)
+
+    if ensure:
+        _ensure_collection(client, len(dense[0]), recreate)
+
+    # front matter의 선택적 메타데이터를 필터용 페이로드로 그대로 넘깁니다.
+    extra = {k: meta[k] for k in ("component", "severity", "cluster") if meta.get(k)}
+    points = [
+        PointStruct(
+            id=str(uuid.uuid5(_ID_NAMESPACE, f"{source}#{i}")),
+            vector=vectorstore.named_vectors(d, s),
+            payload={
+                "text": chunk,
+                "doc_type": doc_type,
+                "title": title,
+                "source": source,
+                "tags": tags,
+                "chunk": i,
+                **extra,
+            },
+        )
+        for i, (chunk, d, s) in enumerate(zip(chunks, dense, sparse))
+    ]
+    _upsert_points(client, points)
+    _delete_orphan_chunks(client, source, len(points))
+    log.info("ingested %s (%s, %d chunk(s))", source, doc_type, len(points))
+    return len(points)
+
+
 def ingest(path: Path, recreate: bool) -> None:
     files = _discover_files(path)
     if not files:
@@ -285,54 +342,12 @@ def ingest(path: Path, recreate: bool) -> None:
     total_chunks = 0
 
     for file in files:
-        if file.suffix.lower() == ".pdf":
-            meta: dict[str, Any] = {}
-            body = _extract_pdf_text(file)
-            if not body:
-                log.warning("skipping PDF with no extractable text %s", file)
-                continue
-        else:
-            raw = file.read_text(encoding="utf-8")
-            meta, body = _parse_front_matter(raw)
-            if not body:
-                log.warning("skipping empty file %s", file)
-                continue
-
-        doc_type = _infer_doc_type(meta, file, path)
-        source = str(file.relative_to(path)).replace(os.sep, "/")
-        title = meta.get("title") or file.stem
-        tags = meta.get("tags") or []
-
-        chunks = _chunk_document(body)
-        dense = _embed_batch(chunks)
-        sparse = vectorstore.embed_documents_sparse(chunks)
-
-        if not collection_ready:
-            _ensure_collection(client, len(dense[0]), recreate)
+        # 컬렉션 준비(필요하면 재생성)는 실제로 저장할 첫 파일에서 한 번만 합니다.
+        n = ingest_file(client, file, path, ensure=not collection_ready,
+                        recreate=recreate and not collection_ready)
+        if n:
             collection_ready = True
-
-        # front matter의 선택적 메타데이터를 필터용 페이로드로 그대로 넘깁니다.
-        extra = {k: meta[k] for k in ("component", "severity", "cluster") if meta.get(k)}
-        points = [
-            PointStruct(
-                id=str(uuid.uuid5(_ID_NAMESPACE, f"{source}#{i}")),
-                vector=vectorstore.named_vectors(d, s),
-                payload={
-                    "text": chunk,
-                    "doc_type": doc_type,
-                    "title": title,
-                    "source": source,
-                    "tags": tags,
-                    "chunk": i,
-                    **extra,
-                },
-            )
-            for i, (chunk, d, s) in enumerate(zip(chunks, dense, sparse))
-        ]
-        _upsert_points(client, points)
-        _delete_orphan_chunks(client, source, len(points))
-        total_chunks += len(points)
-        log.info("ingested %s (%s, %d chunk(s))", source, doc_type, len(points))
+            total_chunks += n
 
     log.info("done: %d file(s), %d chunk(s) into '%s'", len(files), total_chunks, COLLECTION)
 

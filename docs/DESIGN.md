@@ -13,7 +13,7 @@ rag-mcp는 런북, 과거 장애, RCA(근본 원인 분석) 문서를 **Qdrant**
 
 | 원칙 | 내용 |
 |------|------|
-| **읽기 전용 LLM 인터페이스** | MCP 도구는 검색만 합니다. 지식 베이스 기록은 수집 명령과 내부 API로만 이루어지며, 모델에게는 쓰기 도구가 절대 제공되지 않습니다. |
+| **기본은 읽기 전용** | 기본 설정에서 MCP 도구는 검색만 합니다. 지식 베이스 기록은 수집 명령과 내부 API로 이루어집니다. 모델이 문서를 추가하는 쓰기 도구(`rag_add_document`)는 운영자가 `RAG_MCP_WRITE=true`로 켤 때만 등록됩니다. |
 | **벤더 중립** | 채팅 LLM은 연결하는 MCP 클라이언트가 정합니다. 임베딩은 OpenAI 호환 `/v1/embeddings`라면 무엇이든 씁니다. |
 | **수집과 질의의 일관성** | 수집과 질의가 같은 임베딩 코드와 설정을 공유하도록 만들어, 벡터가 어긋날 여지를 없앴습니다. |
 | **실패해도 검색은 유지** | 리랭킹, BM25, 오래된 청크 정리 같은 부가 기능은 실패하면 조용히 건너뛰고, 기본 검색은 계속 동작합니다(최선형, best-effort). |
@@ -28,6 +28,7 @@ rag-mcp는 런북, 과거 장애, RCA(근본 원인 분석) 문서를 **Qdrant**
 | [`vectorstore.py`](../tools/vectorstore.py) | Qdrant 컬렉션 스키마, BM25 희소 벡터(FastEmbed), 하이브리드 질의 |
 | [`reranker.py`](../tools/reranker.py) | Cohere/Jina 호환 크로스 인코더 리랭킹 (선택 사항) |
 | [`capture.py`](../tools/capture.py) | 내부 쓰기 API의 실제 로직: 장애 기록, 반복 장애 확인, 피드백, 통계 |
+| [`documents.py`](../tools/documents.py) | MCP 쓰기 도구의 실제 로직: 문서를 파일로 저장하고 바로 색인 (선택 기능) |
 | [`plugins/rag-mcp`](../plugins/rag-mcp) | Claude Code 플러그인: MCP 서버 연결 설정과 검색 도구 사용 안내 스킬 (서버 코드는 포함하지 않음) |
 
 `ingest.py`, `capture.py`, `server.py`는 모두 `vectorstore.py`와 `embeddings.py`를 거칩니다. 그래서
@@ -119,6 +120,7 @@ ID가 문서 경로(또는 장애 fingerprint)와 청크 번호에서 결정되�
 | `search_runbooks(query, cluster?, component?, limit?)` | "처리 절차가 뭐지?" — `doc_type=runbook`으로 고정 |
 | `rag_collections()` | 컬렉션 목록과 포인트 수 (지식 베이스가 채워졌는지 확인) |
 | `rag_health()` | Qdrant와 임베딩 엔드포인트 접근 가능 여부, 리랭커·하이브리드 설정 |
+| `rag_add_document(title, content, doc_type?, tags?, component?, cluster?, overwrite?)` | (선택) 문서 추가 — `RAG_MCP_WRITE=true`일 때만 등록. [7장](#mcp-쓰기-도구-rag_add_document) 참고 |
 
 `limit`은 1부터 `RAG_MAX_LIMIT`(기본 20) 사이로 제한되며, 생략하면 `RAG_DEFAULT_LIMIT`(기본 5)입니다.
 
@@ -229,6 +231,31 @@ rag-ingest --recreate           # 컬렉션을 지우고 전체 재구축
 - **`similar`는 밀집 검색만 씁니다.** `min_score`로 코사인 유사도 임계값을 판단하는데, 하이브리드의 RRF
   점수는 척도가 달라 임계값이 의미를 잃기 때문입니다.
 - 임베딩과 Qdrant를 서버가 직접 다루므로, 기록과 질의가 구조적으로 같은 방식으로 임베딩됩니다.
+
+### MCP 쓰기 도구 (`rag_add_document`)
+
+내부 쓰기 API와 달리 **LLM이 직접 호출하는** 쓰기 도구입니다. 사용자가 대화 중에 "이 내용을 지식 베이스에
+추가해 줘"라고 하면 모델이 문서를 저장할 수 있습니다. 편리한 만큼 지식 베이스가 잘못된 내용으로 오염될
+수 있으므로 **기본으로 꺼져 있고**, 운영자가 설정 파일에 `RAG_MCP_WRITE=true`를 넣어야 켜집니다.
+
+| 항목 | 동작 |
+|------|------|
+| 등록 | `RAG_MCP_WRITE=true`일 때만 서버 시작 시 도구를 등록. 꺼져 있으면 도구 목록에도 없음 |
+| 저장 위치 | 문서 디렉터리(`RAG_KNOWLEDGE_DIR`) 아래 `<doc_type>s/<제목>.md` (예: `incidents/longhorn-볼륨-멈춤.md`) |
+| 파일 내용 | 인자로 받은 `title`, `type`, `tags`, `component`, `cluster`를 front matter로 쓰고 그 아래 본문 |
+| 색인 | 저장 직후 `ingest.ingest_file`로 색인 — `rag-ingest`와 같은 코드라 청크 ID·페이로드가 같음 |
+| 덮어쓰기 | 같은 경로에 파일이 있으면 `overwrite=true`일 때만 바꿈 (청크 수가 줄면 남은 청크도 정리) |
+| 크기 제한 | 본문 `RAG_MAX_DOC_CHARS`자(기본 200000)까지 |
+
+설계상 선택과 그 이유:
+
+- **파일로 먼저 저장합니다.** 지식 베이스의 원본은 문서 디렉터리입니다. 파일로 남겨야 `rag-ingest --recreate`로
+  재구축해도 추가한 문서가 사라지지 않고, 사람이 직접 확인·수정·삭제할 수 있습니다.
+- **경로는 서버가 정합니다.** 호출자는 제목과 문서 유형만 넘기고, 파일 이름은 제목에서 만든 안전한 이름(글자·숫자·`-`)
+  입니다. `doc_type`도 소문자·숫자·`-`·`_`만 허용하므로 문서 디렉터리 밖에 쓸 수 없습니다.
+- **색인에 실패해도 파일은 남깁니다.** 응답에 `saved: true`와 오류를 함께 돌려주므로, 원인을 고친 뒤
+  `rag-ingest`로 다시 색인하면 됩니다.
+- **삭제 도구는 없습니다.** 잘못 추가한 문서는 파일을 지운 뒤 `rag-ingest --recreate`로 정리합니다.
 
 ## 8. 임베딩
 
@@ -401,6 +428,9 @@ curl -s http://localhost:6333/collections/rag_kb | grep -o '"size":[0-9]*'
 | `RERANK_TIMEOUT` | `30` | 리랭커 HTTP 타임아웃 (초) |
 | **내부 API** | | |
 | `RAG_INTERNAL_TOKEN` | _(비어 있음)_ | 내부 쓰기 API 보호 토큰. 비워 두면 열림 (개발용) |
+| **MCP 쓰기 도구** | | |
+| `RAG_MCP_WRITE` | `false` | `true`면 MCP 쓰기 도구 `rag_add_document`를 등록 (LLM이 문서를 추가할 수 있음) |
+| `RAG_MAX_DOC_CHARS` | `200000` | `rag_add_document`로 추가할 수 있는 본문의 최대 글자 수 |
 
 주석이 달린 예시는 [`.env.example`](../.env.example)에 있습니다. 위 표는 모두 **서버**가 읽는 변수입니다.
 클라이언트(Claude Code)가 읽는 `RAG_MCP_URL`은
@@ -412,5 +442,6 @@ curl -s http://localhost:6333/collections/rag_kb | grep -o '"size":[0-9]*'
 - BM25 키워드 검색은 한국어 형태소를 고려하지 않습니다.
 - 스캔(이미지) PDF는 OCR을 하지 않으므로 수집되지 않습니다.
 - 하이브리드 검색의 `score`는 RRF 결합 점수라서, 코사인 유사도처럼 임계값을 정하는 데 쓸 수 없습니다.
+- MCP 쓰기 도구에는 삭제 기능이 없습니다. 잘못 추가한 문서는 파일을 지우고 `--recreate`로 정리해야 합니다.
 - 같은 서버에서는 rag-mcp를 하나만 실행할 수 있습니다. Qdrant 포트(6333, 6334)가 systemd 유닛에 고정되어
   있기 때문입니다.

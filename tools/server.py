@@ -7,11 +7,13 @@
 구성
   - 공통 검색 경로 `_search`: 질의 임베딩 → 하이브리드 검색 → (선택) 리랭킹 → 응답 구성
   - MCP 도구: rag_search, search_incidents, search_runbooks, rag_collections, rag_health
+  - (선택) MCP 쓰기 도구: rag_add_document — RAG_MCP_WRITE=true 일 때만 등록 (실제 로직은 documents.py)
   - 내부 쓰기 API: /internal/knowledge/{capture,similar,feedback,stats} (실제 로직은 capture.py)
 
 설계 원칙
-  - 읽기 전용: MCP 도구는 검색만 합니다. 지식 베이스 기록은 rag-ingest(ingest.py)와 내부 API로만
-    이루어지며, 모델에게 쓰기 도구는 제공하지 않습니다.
+  - 기본은 읽기 전용: MCP 도구는 검색만 합니다. 지식 베이스 기록은 rag-ingest(ingest.py)와 내부 API로
+    이루어집니다. 모델이 문서를 추가하는 rag_add_document는 운영자가 RAG_MCP_WRITE=true로 켤 때만
+    등록되며, 꺼져 있으면 도구 목록에도 나타나지 않습니다.
   - 벤더 중립: 채팅 LLM은 연결한 MCP 클라이언트가 정하고, 임베딩은 embeddings.py를 거쳐 OpenAI 호환
     엔드포인트를 씁니다.
 
@@ -36,6 +38,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 
 import capture
+import documents
 import embeddings
 import reranker
 import vectorstore
@@ -352,6 +355,37 @@ def rag_health() -> dict[str, Any]:
     return health
 
 
+# --- MCP 쓰기 도구 (선택 — RAG_MCP_WRITE=true 일 때만 LLM에 노출) -------------------
+# 꺼져 있으면 함수 자체를 등록하지 않으므로, 모델은 이 도구가 있는지도 모릅니다.
+if documents.WRITE_ENABLED:
+    @mcp.tool()
+    def rag_add_document(
+        title: str,
+        content: str,
+        doc_type: str = "note",
+        tags: list[str] | None = None,
+        component: str | None = None,
+        cluster: str | None = None,
+        overwrite: bool = False,
+    ) -> dict[str, Any]:
+        """지식 베이스에 마크다운 문서를 추가하고 바로 검색할 수 있게 색인합니다.
+
+        사용자가 문서 추가(저장)를 명시적으로 요청했을 때만 사용하세요. 대화 내용을 임의로 저장하지
+        마세요. 문서는 서버의 문서 디렉터리에 `<doc_type>s/<제목>.md` 파일로 저장되고, 응답의
+        `source`가 그 경로입니다. 같은 경로에 문서가 있으면 overwrite=true 일 때만 바꿉니다.
+
+        Args:
+            title: 문서 제목. 파일 이름도 여기서 만들어집니다.
+            content: 마크다운 본문 (front matter 없이 본문만).
+            doc_type: 문서 유형 — 'incident', 'runbook', 'rca', 'note' 등 (소문자). 기본값 'note'.
+            tags: 선택 — 태그 목록 (예: ['longhorn', 'storage']).
+            component: 선택 — 컴포넌트 이름 (검색 하드 필터에 쓰임, 예: 'longhorn').
+            cluster: 선택 — 클러스터 이름 (검색 소프트 필터에 쓰임, 예: 'prod-01').
+            overwrite: 같은 경로의 기존 문서를 바꿀지 여부. 기본값 false.
+        """
+        return documents.add_document(title, content, doc_type, tags, component, cluster, overwrite)
+
+
 # --- 내부 쓰기 API (MCP 도구 아님 — LLM에는 보이지 않음) ----------------------
 # 지식 "플라이휠": 신뢰할 수 있는 에이전트 프로세스가 조사를 마친 뒤 여기서 RCA를
 # 기록하고 사람의 피드백을 남기며, /similar로 반복 장애 사전 확인을 합니다. 이것들은
@@ -416,11 +450,12 @@ def main() -> None:
     rr = reranker.describe()
     log.info(
         "starting rag-mcp on %s:%s (qdrant=%s, collection=%s, embed=%s:%s@%s, "
-        "hybrid=%s, rerank=%s)",
+        "hybrid=%s, rerank=%s, write_tool=%s)",
         MCP_HOST, MCP_PORT, QDRANT_URL, COLLECTION,
         emb["provider"], emb["model"], emb["base_url"],
         vectorstore.sparse_available(),  # 시작 시 BM25를 로드 (빠른 실패)
         f"{rr['provider']}:{rr['model']}" if rr["enabled"] else "off",
+        "on" if documents.WRITE_ENABLED else "off",
     )
     mcp.run(transport="streamable-http")
 
