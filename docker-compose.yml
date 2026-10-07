@@ -68,8 +68,11 @@ services:
       RERANK_BASE_URL: ${RERANK_BASE_URL:-}
       RERANK_API_KEY: ${RERANK_API_KEY:-}
       RERANK_CANDIDATES: ${RERANK_CANDIDATES:-30}
+      RERANK_TIMEOUT: ${RERANK_TIMEOUT:-30}
       RAG_DEFAULT_LIMIT: ${RAG_DEFAULT_LIMIT:-5}
       RAG_MAX_LIMIT: ${RAG_MAX_LIMIT:-20}
+      RAG_SNIPPET_CHARS: ${RAG_SNIPPET_CHARS:-1200}
+      RAG_TIMEOUT_SECONDS: ${RAG_TIMEOUT_SECONDS:-60}
       MCP_HOST: 0.0.0.0
       MCP_PORT: "8084"
       # Knowledge flywheel: the internal /internal/knowledge/* write API (RCA
@@ -127,6 +130,7 @@ services:
       CHUNK_OVERLAP: ${CHUNK_OVERLAP:-100}
       EMBED_BATCH_SIZE: ${EMBED_BATCH_SIZE:-32}
       QDRANT_UPSERT_BATCH: ${QDRANT_UPSERT_BATCH:-64}
+      RAG_TIMEOUT_SECONDS: ${RAG_TIMEOUT_SECONDS:-60}
     entrypoint: ["python", "/app/ingest.py", "--path", "/knowledge"]
     restart: "no"
 

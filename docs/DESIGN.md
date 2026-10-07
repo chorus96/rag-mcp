@@ -251,7 +251,7 @@ docker compose up -d --build
 | `CHUNK_SIZE` / `CHUNK_OVERLAP` | `1500` / `100` | 수집 시 청킹 |
 | `EMBED_BATCH_SIZE` | `32` | 임베딩 요청당 청크 수. `ollama` 제공자에는 효과 없음 (단일 프롬프트 API) |
 | `QDRANT_UPSERT_BATCH` | `64` | 수집 중 Qdrant 업서트 요청당 포인트 수 |
-| `RAG_TIMEOUT_SECONDS` | `30` (서버의 Qdrant 연결) / `60` (임베딩 요청, 수집, 기록) | HTTP 타임아웃 (초) |
+| `RAG_TIMEOUT_SECONDS` | `30` (서버의 Qdrant 연결) / `60` (임베딩 요청, 수집, 기록) | HTTP 타임아웃 (초). docker compose에서는 두 서비스 모두 `60` |
 | `RAG_HYBRID` | `true` | 하이브리드 검색(밀집 + BM25) 켜기/끄기. 바꾸면 `--recreate` 필요 |
 | `RAG_SPARSE_MODEL` | `Qdrant/bm25` | FastEmbed 희소(BM25) 모델 |
 | `RAG_DEFAULT_LIMIT` / `RAG_MAX_LIMIT` | `5` / `20` | 검색 결과 개수 상한 |
