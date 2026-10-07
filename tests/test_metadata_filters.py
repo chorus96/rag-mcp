@@ -126,3 +126,16 @@ def test_search_runbooks_shortcut_scopes_component(monkeypatch):
     conds = _conditions(rec.calls[0][0])
     assert conds["doc_type"] == "runbook"
     assert conds["component"] == "longhorn"
+
+
+def test_collection_default_matches_ingest():
+    # 설정 파일에 QDRANT_COLLECTION 이 없어도 서버와 수집이 같은 컬렉션을 써야 합니다.
+    import os
+    import subprocess
+    tools_dir = Path(__file__).resolve().parent.parent / "tools"
+    env = {k: v for k, v in os.environ.items() if k != "QDRANT_COLLECTION"}
+    out = subprocess.run(
+        [sys.executable, "-c", "import server, ingest; print(server.COLLECTION, ingest.COLLECTION)"],
+        cwd=tools_dir, capture_output=True, text=True, check=True, env={**env, "RAG_HYBRID": "false"},
+    ).stdout.split()
+    assert out == ["rag_kb", "rag_kb"]

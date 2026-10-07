@@ -18,7 +18,7 @@ bash .claude/skills/repo-check/scripts/check.sh
 | 구역 | 확인하는 것 |
 |------|------|
 | 1. 파이썬 | `tools/*.py` 문법, `tests/` 테스트 (테스트 패키지가 없으면 `.venv/`에 자동 설치) |
-| 2. 배포 스크립트 | `install.sh`·`uninstall.sh`·`rag-ingest` 문법, `install.sh`의 복사 목록과 `tools/*.py` 일치, `rag-ingest` 자리 표시자(`@...@`)를 `install.sh`가 모두 채우는지 |
+| 2. 배포 스크립트 | `install.sh`·`uninstall.sh`·`rag-ingest`·`rag-promote` 문법, `install.sh`의 복사 목록과 `tools/*.py` 일치, 두 명령 템플릿의 자리 표시자(`@...@`)를 `install.sh`가 모두 채우는지 |
 | 3. 환경 변수 | 코드가 읽는 변수가 `.env.example`과 `docs/DESIGN.md`에 모두 있는지, `.env.example`에 같은 줄 끝 주석이 없는지(systemd 규칙), `RAG_KNOWLEDGE_DIR=` 줄이 정확히 1개인지 |
 | 4. 플러그인 | 마켓플레이스·플러그인 JSON 형식, `claude plugin validate --strict`, 플러그인을 고쳤는데 `version`을 올리지 않았는지 |
 | 5. 문서 링크 | README, DESIGN.md, 플러그인 스킬의 상대 경로 링크와 `#섹션` 링크가 실제로 있는지 |

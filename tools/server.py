@@ -55,7 +55,7 @@ log = logging.getLogger("rag-mcp")
 
 QDRANT_URL = os.environ.get("QDRANT_URL", "http://localhost:6333")
 QDRANT_API_KEY = os.environ.get("QDRANT_API_KEY") or None
-COLLECTION = os.environ.get("QDRANT_COLLECTION")
+COLLECTION = os.environ.get("QDRANT_COLLECTION", "rag_kb")  # ingest.py와 같은 기본값
 
 HTTP_TIMEOUT = float(os.environ.get("RAG_TIMEOUT_SECONDS", "30"))
 DEFAULT_LIMIT = int(os.environ.get("RAG_DEFAULT_LIMIT", "5"))
@@ -227,6 +227,8 @@ def rag_search(
 
     문제를 진단하는 동안 관련 문서를 가져올 때 호출하세요 — 컴포넌트의 런북, 같은 증상을
     다룬 RCA나 운영 문서 등. 키워드가 아니라 의미로 검색하므로 증상을 서술하세요.
+    결과의 `source`가 'official/'로 시작하면 정식 문서, 'draft/'로 시작하면 아직 사람이 검토하지 않은
+    초안입니다. 초안을 근거로 답할 때는 검토 전이라는 점을 밝히세요.
 
     Args:
         query: 찾고 있는 내용 (자연어). 예:
