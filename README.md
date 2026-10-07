@@ -84,7 +84,7 @@
   └──────────────────────┘
 ```
 
-- **쓰기 경로:** `rag-ingest`가 `knowledge/` 아래 문서를 읽어 청크로 나누고, 임베딩 엔드포인트로
+- **쓰기 경로:** `rag-ingest`가 문서 디렉터리(`official/`, `draft/`)의 문서를 읽어 청크로 나누고, 임베딩 엔드포인트로
   벡터를 만들어 Qdrant에 저장합니다. BM25 희소 벡터는 rag-mcp가 직접(FastEmbed) 계산합니다.
 - **읽기 경로:** MCP 클라이언트가 검색 도구를 호출하면, rag-mcp가 **같은 임베딩 엔드포인트**로 질의를
   벡터로 바꾸고 Qdrant에서 하이브리드 검색한 뒤 (선택적으로 리랭킹해) 결과를 돌려줍니다.
@@ -161,7 +161,7 @@ Claude Code라면 [플러그인](#claude-code-플러그인-권장)으로 연결�
 | `~/.local/share/rag-mcp/app`, `~/.local/share/rag-mcp/venv` | 애플리케이션 코드와 Python 가상환경 |
 | `~/.local/share/rag-mcp/qdrant/qdrant` | Qdrant 바이너리 (기본 `v1.12.4`, `127.0.0.1`에만 바인드) |
 | `~/.config/rag-mcp/rag-mcp.env` | 설정 파일 ([.env.example](.env.example) 복사본, 권한 600) |
-| `~/.local/share/rag-mcp/data/knowledge` | 색인할 문서 (샘플 문서가 복사됨) |
+| `~/.local/share/rag-mcp/data/knowledge` | [문서 디렉터리](#문서-디렉터리): `official/`(정식 문서, 샘플 포함), `draft/`(모델이 만든 초안) |
 | `~/.local/share/rag-mcp/data/qdrant` | Qdrant 데이터 |
 | `~/.config/systemd/user/{qdrant,rag-mcp}.service` | systemd 사용자 서비스 |
 | `~/.local/bin/rag-ingest` | 문서 수집 명령 |
@@ -268,25 +268,52 @@ RAG_MCP_URL=http://10.0.0.5:8084/mcp claude
   `cluster_narrowed: false`로 알려 줍니다.
 - `doc_type`과 `component`는 **하드 필터**입니다. 결과가 없으면 그대로 비어 있습니다.
 
-## 문서 추가하기
+## 문서 디렉터리
 
-문서 디렉터리(기본값 `~/.local/share/rag-mcp/data/knowledge`, 설정 파일의 `RAG_KNOWLEDGE_DIR`)는 두 폴더로
-나뉩니다.
+지식 베이스의 원본은 **문서 디렉터리**입니다. 기본 위치는 `~/.local/share/rag-mcp/data/knowledge`이고, 설정 파일의
+`RAG_KNOWLEDGE_DIR`로 바꿀 수 있습니다. Qdrant에 있는 색인은 이 디렉터리에서 만든 사본이므로, 언제든
+`rag-ingest --recreate`로 다시 만들 수 있습니다.
 
-| 폴더 | 내용 |
-|------|------|
-| `official/` | 사람이 관리하는 정식 문서 |
-| `draft/` | 모델이 MCP 쓰기 도구로 만든 초안 (사람이 검토한 뒤 `rag-promote`로 `official/`에 올림) |
+### 폴더 구조
 
-정식 문서는 `official/`에 마크다운이나 PDF를 넣고 수집 명령을 실행합니다. 서버 재시작은 필요 없습니다.
+```text
+knowledge/
+├── official/                  정식 문서 — 사람이 관리
+│   ├── longhorn-volume-attach.md
+│   └── runbooks/              (선택) 하위 폴더로 나눠도 됨
+│       └── ...
+└── draft/                     초안 — 모델이 MCP 쓰기 도구로 만듦
+    └── longhorn-볼륨-복구.md
+```
+
+| 폴더 | 쓰는 주체 | 들어오는 방법 | 검색 |
+|------|------|------|------|
+| `official/` | 사람 | 파일을 넣고 `rag-ingest`, 또는 초안을 `rag-promote`로 승격 | `rag-ingest` 후 |
+| `draft/` | 모델 (쓰기 도구를 켰을 때만) | `rag_add_document` 도구 | 저장 즉시 |
+
+- 두 폴더 모두 검색 대상입니다. 검색 결과의 `source`가 `draft/`로 시작하면 아직 검토하지 않은 초안입니다.
+- 모델은 `draft/`만 다룰 수 있고, `official/`은 사람만 바꿀 수 있습니다.
+- 문서의 흐름은 **모델이 `draft/`에 작성 → 사람이 검토 → `rag-promote`로 `official/`에 승격**입니다.
+- 설치 스크립트가 두 폴더를 만들고, 샘플 문서를 `official/`에 넣어 둡니다.
+
+### 정식 문서 추가하기
+
+`official/`에 마크다운(`.md`)이나 PDF(`.pdf`)를 넣고 수집 명령을 실행합니다. 서버 재시작은 필요 없습니다.
 
 ```bash
 cp my-runbook.md ~/.local/share/rag-mcp/data/knowledge/official/
 rag-ingest
 ```
 
-문서 유형(`runbook`, `rca` 등)은 front matter의 `type`으로 정합니다. `type`이 없으면 `official/` 아래 하위 폴더
-이름이 유형이 되고(`official/runbooks/*` → `runbook`), 하위 폴더도 없으면 `note`입니다.
+수집은 멱등적이라 다시 실행해도 중복이 생기지 않고, 내용이 줄어든 문서의 남은 청크는 자동으로
+지워집니다. 정기적으로 실행하려면 cron이나 CI에 등록하세요.
+
+> **알려진 제한:** 파일을 삭제하거나 이름을 바꿔도 기존 청크는 남습니다. 그런 경우에는
+> `rag-ingest --recreate`로 전체를 다시 만드세요.
+
+### 문서 형식
+
+마크다운은 선택적으로 YAML front matter를 쓸 수 있습니다.
 
 ```markdown
 ---
@@ -299,15 +326,15 @@ cluster: prod-eu
 # 본문...
 ```
 
-`type`, `component`, `cluster`는 검색 필터가 되지만 형식이 정해지지 않은 레이블입니다. 환경, 고객,
-제품, 팀 등 도메인에 맞게 쓰거나 생략해도 됩니다. PDF는 페이지 단위로 텍스트를 추출하며, 제목은
-파일 이름에서 가져옵니다.
-
-수집은 멱등적이라 다시 실행해도 중복이 생기지 않고, 내용이 줄어든 문서의 남은 청크는 자동으로
-지워집니다. 정기적으로 실행하려면 cron이나 CI에 등록하세요.
-
-> **알려진 제한:** 파일을 삭제하거나 이름을 바꿔도 기존 청크는 남습니다. 그런 경우에는
-> `rag-ingest --recreate`로 전체를 다시 만드세요.
+- **`type` (문서 유형):** `runbook`, `rca`, `note` 등. `search_runbooks`와 `rag_search`의 `doc_type` 필터가 이 값을
+  씁니다. 생략하면 `official/`·`draft/` 아래 하위 폴더 이름에서 끝의 `s`를 뗀 값이 되고
+  (`official/runbooks/*` → `runbook`), 하위 폴더 없이 바로 둔 문서는 `note`가 됩니다. **`official/` 바로 아래
+  두는 문서에는 `type`을 적는 것을 권장합니다.**
+- **`title`:** 생략하면 파일 이름을 씁니다.
+- **`component`, `cluster`:** 검색 필터가 되지만 형식이 정해지지 않은 레이블입니다. 환경, 고객, 제품, 팀 등
+  도메인에 맞게 쓰거나 생략해도 됩니다.
+- **PDF:** 페이지 단위로 텍스트를 추출합니다. front matter가 없으므로 유형은 하위 폴더 이름, 제목은 파일
+  이름에서 가져옵니다. 텍스트를 추출할 수 없는 스캔 PDF는 건너뜁니다.
 
 ### 대화로 문서 추가·삭제하기 (MCP 쓰기 도구)
 
