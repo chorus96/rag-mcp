@@ -183,6 +183,29 @@ EMBEDDINGS_MODEL=text-embedding-3-small
 docker compose run --rm rag-ingest --recreate
 ```
 
+## 한국어 문서를 쓰는 경우
+
+기본 임베딩 모델 `nomic-embed-text`는 영어 위주라 한국어 검색 정확도가 떨어질 수 있습니다.
+한국어 문서가 많다면 다국어 모델 **`bge-m3`**를 권장합니다 — 코드 변경 없이 설정만 바꾸면 됩니다.
+
+```bash
+ollama pull bge-m3
+
+# .env
+EMBEDDINGS_PROVIDER=ollama
+EMBEDDINGS_MODEL=bge-m3
+```
+
+모델을 바꾼 뒤에는 서버를 재시작하고 컬렉션을 재구축하세요.
+
+```bash
+docker compose up -d rag-mcp
+docker compose run --rm rag-ingest --recreate
+```
+
+OpenAI 호환 서버(TEI 등)로 쓰는 방법, 다국어 리랭커, BM25의 한국어 한계 등 자세한 내용은
+[docs/DESIGN.md의 "한국어 / 다국어 문서"](docs/DESIGN.md#한국어--다국어-문서)를 참고하세요.
+
 ## 설정
 
 모든 설정은 환경 변수로 이루어집니다 — 주석이 달린 전체 목록은 [.env.example](.env.example)을,
