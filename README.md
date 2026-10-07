@@ -397,6 +397,7 @@ LLM에 **노출되지 않으며**, `RAG_INTERNAL_TOKEN`으로 보호합니다. �
 | `.claude-plugin/marketplace.json` | Claude Code 플러그인 마켓플레이스 정의 |
 | `plugins/rag-mcp/` | Claude Code 플러그인 (MCP 서버 설정, `rag-knowledge` 스킬) |
 | `docs/DESIGN.md` | 설계 문서 (검색 파이프라인, 전체 환경 변수 표) |
+| `.claude/skills/repo-check/` | 저장소 점검 스킬 (Claude Code에서 `/repo-check`, 직접 실행: `bash .claude/skills/repo-check/scripts/check.sh`) |
 | `tests/` | 테스트 |
 
 ## 개발
