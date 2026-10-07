@@ -3,7 +3,7 @@ RAG 메모리를 위한 제공자 무관 임베딩.
 
 지원:
 - OpenAI 호환 /v1/embeddings 엔드포인트 (네이티브 배치 입력). OpenAI API, Hugging Face
-  TEI, vLLM, LocalAI, LiteLLM 프록시, Ollama의 /v1 등 이 형식을 제공하는 서버라면
+  TEI, vLLM, LocalAI, LiteLLM 프록시 등 이 형식을 제공하는 서버라면
   무엇이든 쓸 수 있습니다. 엔드포인트는 EMBEDDINGS_BASE_URL로 반드시 지정해야 합니다.
 
 기능:
@@ -45,8 +45,8 @@ class EmbeddingConfig:
 
 
 def _build_config() -> EmbeddingConfig:
-    # 지원하는 제공자는 "openai"(OpenAI 호환) 하나뿐입니다. 이전 설정의 "ollama" 등이
-    # 남아 있으면 _embed_batch에서 안내 메시지와 함께 오류를 냅니다.
+    # 지원하는 제공자는 "openai"(OpenAI 호환) 하나뿐입니다. 다른 값이 설정되어
+    # 있으면 _embed_batch에서 안내 메시지와 함께 오류를 냅니다.
     provider = os.environ.get("EMBEDDINGS_PROVIDER", "openai").strip().lower()
     model = os.environ.get("EMBEDDINGS_MODEL", "bge-m3")
     # 기본값을 두지 않습니다: 문서가 의도치 않게 외부 API로 전송되지 않도록, 어느
@@ -162,9 +162,8 @@ def _embed_batch(texts: list[str]) -> list[list[float]]:
     if CONFIG.provider != "openai":
         raise EmbeddingError(
             f"unsupported EMBEDDINGS_PROVIDER={CONFIG.provider!r}: only 'openai' "
-            "(OpenAI-compatible /v1/embeddings) is supported. Ollama users can point "
-            "EMBEDDINGS_BASE_URL at Ollama's OpenAI-compatible endpoint, "
-            "e.g. http://localhost:11434/v1"
+            "(OpenAI-compatible /v1/embeddings) is supported; remove EMBEDDINGS_PROVIDER "
+            "and set EMBEDDINGS_BASE_URL"
         )
     if not CONFIG.base_url:
         raise EmbeddingError(

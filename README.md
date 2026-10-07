@@ -269,12 +269,6 @@ sudo systemctl restart rag-mcp
 sudo rag-ingest --recreate
 ```
 
-> **Ollama 제공자를 쓰던 기존 설치:** Ollama 전용 제공자(`EMBEDDINGS_PROVIDER=ollama`,
-> `OLLAMA_BASE_URL`)는 제거되었습니다. 설치 스크립트는 기존 설정 파일을 덮어쓰지 않으므로, 그
-> 두 줄을 지우고 `EMBEDDINGS_BASE_URL`을 지정하세요. Ollama를 계속 쓰려면 Ollama의 OpenAI 호환
-> 엔드포인트를 지정하면 됩니다(`EMBEDDINGS_BASE_URL=http://localhost:11434`). 같은 모델이면
-> 벡터가 같으므로 재수집은 필요 없지만, 확실하게 하려면 `--recreate`로 다시 수집하세요.
-
 ## 한국어 문서와 임베딩 모델
 
 기본 임베딩 모델 이름은 한국어를 포함한 다국어 모델 **`bge-m3`**입니다. 엔드포인트에서 bge-m3를
