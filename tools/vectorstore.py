@@ -11,7 +11,8 @@
            질의 쪽은 단어 존재 여부만 보내면 됩니다. 단어를 나누는 방식은 RAG_SPARSE_MODEL로 정합니다.
              kiwi-bm25 (기본): 한국어 형태소 분석기 Kiwi로 나눔 (kiwi_bm25.py). 조사·어미를 떼어 "볼륨이"와
                                "볼륨을"이 같은 단어 "볼륨"이 됩니다. pip 패키지만으로 동작합니다.
-             Qdrant/bm25:      FastEmbed의 영어 기준 BM25. 최초 실행 시 huggingface.co에서 내려받습니다.
+             Qdrant/bm25:      FastEmbed의 영어 기준 BM25. FastEmbed는 선택 의존성(requirements-fastembed.txt)이고,
+                               최초 실행 시 huggingface.co에서 모델을 내려받습니다.
   밀집 벡터는 의미를 잡지만 에러 문자열(`CrashLoopBackOff`), 리소스 ID(`c-xxxxx`), 컴포넌트
   이름(`Longhorn`) 같은 정확한 토큰을 놓치기 쉽습니다. BM25가 이를 보완하고, 질의할 때 두 결과를
   Reciprocal Rank Fusion(RRF)으로 결합합니다.
@@ -73,7 +74,13 @@ class _FastEmbedSparse:
     """FastEmbed 희소 모델(예: Qdrant/bm25)을 KiwiBM25와 같은 모양으로 감쌉니다."""
 
     def __init__(self, model_name: str) -> None:
-        from fastembed import SparseTextEmbedding
+        try:
+            from fastembed import SparseTextEmbedding
+        except ImportError as exc:  # 선택 의존성 (requirements-fastembed.txt)
+            raise RuntimeError(
+                f"{model_name} needs FastEmbed, which is optional: "
+                "pip install -r requirements-fastembed.txt (or re-run deploy/install.sh)"
+            ) from exc
 
         self._model = SparseTextEmbedding(model_name=model_name)
 

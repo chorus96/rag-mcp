@@ -4,7 +4,8 @@
   - 명명된 벡터: 밀집 벡터만, 또는 밀집 + 희소 벡터를 올바른 이름으로 담음
   - 질의 경로: 희소 벡터가 있으면 prefetch 두 개 + RRF 결합(하이브리드),
     없거나 hybrid=False 이면 밀집 검색만 함 (hybrid=False 이면 희소 벡터를 계산조차 안 함)
-  - 대체 동작: BM25 모델을 불러올 수 없으면 희소 관련 함수가 None 을 돌려줌
+  - 대체 동작: BM25 모델을 불러올 수 없으면 희소 관련 함수가 None 을 돌려줌. FastEmbed(선택 의존성)가 없는데
+    Qdrant/bm25 를 고르면 설치 안내를 남기고 밀집 전용으로 동작함
 
 방법
   - 희소 벡터 계산과 Qdrant 클라이언트를 가짜로 바꿔, FastEmbed나 Qdrant 없이 실행합니다.
@@ -94,3 +95,14 @@ def test_sparse_helpers_degrade_without_model(monkeypatch):
     assert vectorstore.sparse_available() is False
     assert vectorstore.embed_documents_sparse(["a", "b"]) == [None, None]
     assert vectorstore.embed_query_sparse("q") is None
+
+
+def test_fastembed_model_without_fastembed_falls_back_to_dense(monkeypatch, caplog):
+    # FastEmbed는 선택 의존성입니다. 없는데 Qdrant/bm25 를 고르면 설치 안내를 남기고 밀집 전용으로 동작합니다.
+    monkeypatch.setitem(sys.modules, "fastembed", None)  # import fastembed -> ImportError
+    monkeypatch.setattr(vectorstore, "BM25_MODEL", "Qdrant/bm25")
+    monkeypatch.setattr(vectorstore, "_HYBRID_REQUESTED", True)
+    monkeypatch.setattr(vectorstore, "_bm25", None)
+    monkeypatch.setattr(vectorstore, "_bm25_loaded", False)
+    assert vectorstore.sparse_available() is False
+    assert "requirements-fastembed.txt" in caplog.text

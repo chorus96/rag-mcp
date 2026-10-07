@@ -765,7 +765,7 @@ BM25는 질의의 단어가 문서에 얼마나 들어 있는지로 점수를 �
 | 희소 모델 (`RAG_SPARSE_MODEL`) | 단어 나누기 | "볼륨이 멈췄어요" |
 |------|------|------|
 | `kiwi-bm25` (기본) | 한국어 형태소 분석기 [Kiwi](https://github.com/bab2min/kiwipiepy)로 내용어만 남기고 조사·어미를 버림. 영문·숫자는 원문 그대로(소문자) | `볼륨`, `멈추` |
-| `Qdrant/bm25` | FastEmbed의 영어 기준 BM25. 공백·기호로 나누고 영어 어간 추출 | `볼륨이`, `멈췄어요` |
+| `Qdrant/bm25` | FastEmbed의 영어 기준 BM25. 공백·기호로 나누고 영어 어간 추출. FastEmbed는 선택 설치 | `볼륨이`, `멈췄어요` |
 
 - **남기는 형태소:** 일반·고유 명사, 수사, 동사·형용사 어간, 어근, 한자. 조사·어미·접두사는 버립니다
   ("재부팅한" → `부팅`).
@@ -779,6 +779,10 @@ BM25는 질의의 단어가 문서에 얼마나 들어 있는지로 점수를 �
   부족하면 `RAG_SPARSE_MODEL=Qdrant/bm25`나 `RAG_HYBRID=false`를 쓰세요.
 - **모델을 바꾸면 재구축하세요.** 질의와 문서가 같은 방식으로 나뉘어야 맞으므로, `RAG_SPARSE_MODEL`을 바꾼 뒤에는
   `rag-ingest --recreate`가 필요합니다. 이전 버전(`Qdrant/bm25`가 기본이던 때)에서 업그레이드한 경우도 마찬가지입니다.
+- **`Qdrant/bm25`를 쓰려면 FastEmbed를 설치하세요.** FastEmbed(onnxruntime 포함)는 선택 의존성
+  ([`requirements-fastembed.txt`](requirements-fastembed.txt))이라 기본 설치에는 들어가지 않습니다. 설정 파일에
+  `RAG_SPARSE_MODEL=Qdrant/bm25`를 넣고 `./deploy/install.sh`를 다시 실행하면 함께 설치됩니다. 설치하지 않은 채
+  이 값을 쓰면 시작 로그에 경고가 남고 의미 검색만으로 동작합니다.
 
 ### 개념 정리
 
@@ -916,7 +920,7 @@ curl -s http://localhost:6333/collections/rag_kb | grep -o '"size":[0-9]*'
 | `QDRANT_UPSERT_BATCH` | `64` | Qdrant 업서트 요청당 포인트 수 |
 | **검색** | | |
 | `RAG_HYBRID` | `true` | 하이브리드 검색(밀집 + BM25). 바꾸면 `--recreate` 필요 |
-| `RAG_SPARSE_MODEL` | `kiwi-bm25` | BM25 희소 모델 — `kiwi-bm25`(한국어 형태소 분석) 또는 `Qdrant/bm25`(FastEmbed, 영어 기준). 바꾸면 `--recreate` 필요 |
+| `RAG_SPARSE_MODEL` | `kiwi-bm25` | BM25 희소 모델 — `kiwi-bm25`(한국어 형태소 분석) 또는 `Qdrant/bm25`(FastEmbed, 영어 기준, 선택 설치). 바꾸면 `--recreate` 필요 |
 | `RAG_DEFAULT_LIMIT` / `RAG_MAX_LIMIT` | `5` / `20` | 검색 결과 기본 개수 / 최대 개수 |
 | `RAG_SNIPPET_CHARS` | `1200` | 결과마다 반환하는 텍스트의 최대 글자 수 (넘으면 `truncated: true`) |
 | **리랭킹** | | |
@@ -955,7 +959,7 @@ curl -s http://localhost:6333/collections/rag_kb | grep -o '"size":[0-9]*'
 | [`tools/vectorstore.py`](tools/vectorstore.py) | Qdrant 컬렉션 스키마, BM25 희소 벡터, 하이브리드 질의 |
 | [`tools/kiwi_bm25.py`](tools/kiwi_bm25.py) | 한국어 형태소 분석(Kiwi) 기반 BM25 희소 벡터 (기본 희소 모델 `kiwi-bm25`) |
 | [`tools/reranker.py`](tools/reranker.py) | Cohere/Jina 호환 크로스 인코더 리랭킹 (선택 사항) |
-| `requirements.txt` | Python 의존성 |
+| `requirements.txt`, `requirements-fastembed.txt` | Python 의존성, 선택 의존성(FastEmbed — `RAG_SPARSE_MODEL=Qdrant/bm25`일 때만) |
 | `deploy/` | 설치·제거 스크립트, systemd 유닛, `rag-ingest`·`rag-promote` 명령 템플릿 |
 | `knowledge/official/` | 샘플 문서 |
 | `.claude-plugin/marketplace.json` | Claude Code 플러그인 마켓플레이스 정의 |
