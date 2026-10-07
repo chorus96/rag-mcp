@@ -42,7 +42,7 @@ def test_discover_files_picks_md_and_pdf_only(tmp_path):
 
 def test_discover_files_only_official_and_draft(tmp_path, caplog):
     for rel in ("official/a.md", "official/runbooks/b.md", "draft/c.md",
-                "runbooks/old.md", "top.md", "other/x.pdf"):
+                "notes/old.md", "top.md", "other/x.pdf"):
         (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
         (tmp_path / rel).write_text("x", encoding="utf-8")
 
