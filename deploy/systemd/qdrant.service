@@ -1,0 +1,37 @@
+# Qdrant 벡터 DB — rag-mcp의 지식 베이스 저장소.
+# deploy/install.sh가 /etc/systemd/system/ 에 설치합니다.
+[Unit]
+Description=Qdrant vector database (rag-mcp)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=rag-mcp
+Group=rag-mcp
+WorkingDirectory=/var/lib/rag-mcp/qdrant
+# QDRANT_API_KEY 등 공통 설정을 읽습니다.
+EnvironmentFile=/etc/rag-mcp/rag-mcp.env
+# 로컬에서만 접속하도록 127.0.0.1에 바인드합니다. 다른 서버에서 Qdrant에 직접
+# 접속해야 한다면 0.0.0.0으로 바꾸고 QDRANT_API_KEY를 반드시 설정하세요.
+Environment=QDRANT__SERVICE__HOST=127.0.0.1
+Environment=QDRANT__SERVICE__HTTP_PORT=6333
+Environment=QDRANT__SERVICE__GRPC_PORT=6334
+Environment=QDRANT__STORAGE__STORAGE_PATH=/var/lib/rag-mcp/qdrant/storage
+Environment=QDRANT__STORAGE__SNAPSHOTS_PATH=/var/lib/rag-mcp/qdrant/snapshots
+Environment=QDRANT__TELEMETRY_DISABLED=true
+# rag-mcp.env의 QDRANT_API_KEY를 Qdrant가 읽는 변수 이름으로 넘깁니다. Qdrant는 빈 값도
+# 키로 취급해 모든 요청을 거부하므로, 값이 있을 때만 설정합니다 (비어 있으면 인증 없음).
+ExecStart=/bin/sh -c 'if [ -n "$QDRANT_API_KEY" ]; then export QDRANT__SERVICE__API_KEY="$QDRANT_API_KEY"; fi; exec /opt/rag-mcp/qdrant/qdrant'
+Restart=on-failure
+RestartSec=5
+LimitNOFILE=65536
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/rag-mcp/qdrant
+
+[Install]
+WantedBy=multi-user.target

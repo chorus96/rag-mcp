@@ -87,7 +87,7 @@ MCP 서버로 노출하여, 에이전트가 운영 중인 클러스터를 디버
 >
 > ⚠️ **하이브리드를 켜고 끄면 컬렉션 스키마가 바뀝니다**(명명된 벡터 vs. 이름 없는 벡터).
 > 전환하려면 한 번 재구축해야 합니다:
-> `docker compose run --rm rag-ingest --recreate`.
+> `sudo rag-ingest --recreate`.
 
 ## 도구
 
@@ -129,9 +129,11 @@ API**를 제공합니다. 이것들은 일반 HTTP 라우트(`@mcp.custom_route`
 
 ## 사전 요구 사항
 
-- 실행 중인 Qdrant ([`docker-compose.yml`](../docker-compose.yml)의 `qdrant` 서비스).
+- systemd를 쓰는 Linux 서버, Python 3.10 이상(venv 모듈 포함), `curl`.
+- 실행 중인 Qdrant — [`deploy/install.sh`](../deploy/install.sh)가 바이너리를 설치하고
+  `qdrant.service`로 `127.0.0.1:6333`에서 실행합니다.
 - 임베딩 제공자:
-  - 컨테이너에서 접근 가능하고 모델을 내려받은 **Ollama** (기본값, 오프라인):
+  - 같은 서버에서 실행 중이고 모델을 내려받은 **Ollama** (기본값, 오프라인):
     ```bash
     ollama pull bge-m3
     ```
@@ -160,39 +162,34 @@ PDF에는 front matter가 없습니다. `type`은 상위 폴더에서 추론하�
 파일을 넣기만 해도 됩니다. 그런 다음 수집합니다.
 
 ```bash
-# 권장: 일회성 Compose 작업을 사용하세요. 필요한 Python 의존성이 갖춰져 있고
-# rag-mcp와 정확히 같은 임베딩 설정을 사용합니다.
-docker compose run --rm rag-ingest
+# 설치 스크립트가 넣어 둔 수집 명령. 서버와 같은 설정 파일(/etc/rag-mcp/rag-mcp.env)을
+# 읽으므로, rag-mcp와 정확히 같은 임베딩 설정을 사용합니다.
+sudo rag-ingest
 
 # 임베딩 제공자나 모델을 바꾼 뒤 전체 재구축:
-docker compose run --rm rag-ingest --recreate
+sudo rag-ingest --recreate
 ```
 
-Compose 스택에서 `rag-ingest`는 `./knowledge`를 `/knowledge`에 읽기 전용으로 바인드 마운트하므로,
-문서를 추가하고 작업을 실행하기만 하면 됩니다 — **재빌드 불필요**:
+문서 디렉터리(기본값 `/var/lib/rag-mcp/knowledge`, 설정 파일의 `RAG_KNOWLEDGE_DIR`)에 파일을
+넣고 명령을 실행하기만 하면 됩니다 — 서버 재시작은 필요 없습니다.
 
 ```bash
-cp my-runbook.md knowledge/runbooks/
-docker compose run --rm rag-ingest
+sudo cp my-runbook.md /var/lib/rag-mcp/knowledge/runbooks/
+sudo rag-ingest
 ```
 
 작업의 요약 줄(`done: N file(s), M chunk(s)`)이 예상과 맞는지 항상 확인하세요. 새 문서가 개수에
 포함되지 않았다면 건너뛴 것입니다 — 그 위의 로그 줄에 이유가 나옵니다(지원하지 않는 확장자, 빈
-파일, 또는 추출할 텍스트가 없는 PDF).
+파일, 또는 추출할 텍스트가 없는 PDF). `rag-ingest`는 `rag-mcp` 사용자로 실행되므로 문서 파일을
+그 사용자가 읽을 수 있어야 합니다.
 
-이 Compose 스택 밖에서 실행할 때를 위해 이미지는 빌드 시점에 `knowledge/`도 포함합니다
-(`Dockerfile`의 `COPY knowledge /knowledge`). 위의 바인드 마운트가 없으면, 새로 추가한 문서는
-**`rag-ingest`** 이미지 자체를 다시 빌드할 때까지 보이지 않습니다 — `rag-mcp`만 다시 빌드해서는
-소용이 없고, 작업은 그 파일을 조용히 건너뛴 채 성공했다고 보고합니다. 이미지를 직접 실행한다면 둘
-다 다시 빌드하세요.
+정기적으로 수집하려면 cron이나 systemd 타이머에 등록하세요. 예 (매시 정각, root crontab):
 
-```bash
-docker compose build rag-mcp rag-ingest
-docker compose run --rm rag-ingest
+```cron
+0 * * * * /usr/local/bin/rag-ingest >> /var/log/rag-ingest.log 2>&1
 ```
 
-호스트에서만 작업한다면 먼저 의존성을 설치하고, 스크립트가 노출된 Qdrant 엔드포인트를 가리키게
-하세요.
+설치 없이 개발용으로 직접 실행한다면 의존성을 설치하고 Qdrant 엔드포인트를 가리키게 하세요.
 
 ```bash
 python3 -m pip install -r requirements.txt
@@ -228,30 +225,62 @@ QDRANT_URL=http://localhost:6333 python3 ingest.py --path knowledge
 ## 실행
 
 ```bash
-cp .env.example .env    # 필요에 따라 수정
-docker compose up -d --build
+sudo ./deploy/install.sh
 ```
 
-이제 MCP 엔드포인트를 `http://localhost:${RAG_MCP_PORT:-8084}/mcp`(streamable-http)에서 사용할
-수 있습니다. MCP 클라이언트에 연결하는 방법은 최상위 [README](../README.md)를 참고하세요.
+[`deploy/install.sh`](../deploy/install.sh)는 다음을 설치하고 서비스를 시작합니다.
+
+| 구성 요소 | 위치 |
+|------|------|
+| 애플리케이션 / Python 가상환경 | `/opt/rag-mcp/app`, `/opt/rag-mcp/venv` |
+| Qdrant 바이너리 | `/opt/rag-mcp/qdrant/qdrant` (버전은 `QDRANT_VERSION`으로 지정, 기본 `v1.12.4`) |
+| 설정 파일 | `/etc/rag-mcp/rag-mcp.env` (없을 때만 `.env.example`에서 생성, 권한 `640 root:rag-mcp`) |
+| 데이터 | `/var/lib/rag-mcp/{knowledge,qdrant,fastembed_cache}` |
+| systemd 서비스 | `qdrant.service`, `rag-mcp.service` ([`deploy/systemd/`](../deploy/systemd)) |
+| 수집 명령 | `/usr/local/bin/rag-ingest` |
+
+모든 프로세스는 시스템 사용자 `rag-mcp`로 실행되며, systemd 유닛은 `ProtectSystem=strict` 등으로
+쓰기 가능한 경로를 데이터 디렉터리로 제한합니다. Qdrant는 `127.0.0.1`에만 바인드되므로 외부에서
+직접 접근할 수 없습니다.
+
+이제 MCP 엔드포인트를 `http://<서버 주소>:${MCP_PORT:-8084}/mcp`(streamable-http)에서 사용할 수
+있습니다. MCP 클라이언트에 연결하는 방법은 최상위 [README](../README.md)를 참고하세요.
+
+운영 명령:
+
+```bash
+systemctl status qdrant rag-mcp          # 상태
+journalctl -u rag-mcp -f                 # 로그
+sudo systemctl restart rag-mcp           # 설정 변경 적용
+sudo ./deploy/install.sh                 # 업그레이드 (설정·데이터 유지)
+sudo ./deploy/uninstall.sh [--purge]     # 제거 (--purge: 설정·데이터까지 삭제)
+```
+
+> **설정 파일 형식 주의:** systemd의 `EnvironmentFile`은 `KEY=value  # 주석`처럼 같은 줄 끝의
+> 주석을 값의 일부로 읽습니다. 주석은 항상 별도 줄에 쓰세요.
+
+> **최초 시작과 네트워크:** FastEmbed가 BM25 모델을 `huggingface.co`에서 한 번 내려받아
+> `/var/lib/rag-mcp/fastembed_cache`에 저장합니다. 프록시가 필요하면 설정 파일에 `HTTPS_PROXY`를
+> 넣으세요. 내려받지 못하면 하이브리드 검색 없이 밀집 전용으로 동작합니다(로그에
+> `FastEmbed unavailable` 경고).
 
 ## 설정 (환경 변수)
 
 | 변수 | 기본값 | 비고 |
 |-----|---------|-------|
-| `QDRANT_URL` | `http://qdrant:6333` | Qdrant REST 엔드포인트 |
+| `QDRANT_URL` | `http://localhost:6333` | Qdrant REST 엔드포인트 |
 | `QDRANT_COLLECTION` | `rag_kb` | 컬렉션 이름 |
 | `QDRANT_API_KEY` | _(미설정)_ | Qdrant 인증을 켠 경우 |
 | `EMBEDDINGS_PROVIDER` | `ollama` | `ollama` 또는 `openai` (OpenAI 호환) |
 | `EMBEDDINGS_MODEL` | `bge-m3` | 임베딩 모델 (다국어) |
-| `OLLAMA_BASE_URL` | `http://host.docker.internal:11434` | `ollama` 제공자 호스트 |
+| `OLLAMA_BASE_URL` | `http://localhost:11434` | `ollama` 제공자 호스트 |
 | `EMBEDDINGS_BASE_URL` | `https://api.openai.com` | `openai` 제공자 기본 URL (예: LiteLLM 프록시) |
 | `EMBEDDINGS_API_KEY` | _(미설정)_ | `openai` 제공자 키 |
 | `EMBED_QUERY_PREFIX` / `EMBED_DOC_PREFIX` | 자동 (모델에 따라 설정: nomic → `search_query: `/`search_document: `, 대칭 모델 → 빈 값) | 자동 감지가 놓치는 비대칭 모델 계열에만 재정의 (e5/bge → `query: `/`passage: `) |
 | `CHUNK_SIZE` / `CHUNK_OVERLAP` | `1500` / `100` | 수집 시 청킹 |
 | `EMBED_BATCH_SIZE` | `32` | 임베딩 요청당 청크 수. `ollama` 제공자에는 효과 없음 (단일 프롬프트 API) |
 | `QDRANT_UPSERT_BATCH` | `64` | 수집 중 Qdrant 업서트 요청당 포인트 수 |
-| `RAG_TIMEOUT_SECONDS` | `30` (서버의 Qdrant 연결) / `60` (임베딩 요청, 수집, 기록) | HTTP 타임아웃 (초). docker compose에서는 두 서비스 모두 `60` |
+| `RAG_TIMEOUT_SECONDS` | `30` (서버의 Qdrant 연결) / `60` (임베딩 요청, 수집, 기록) | HTTP 타임아웃 (초). 설정하면 모두 이 값을 사용 |
 | `RAG_HYBRID` | `true` | 하이브리드 검색(밀집 + BM25) 켜기/끄기. 바꾸면 `--recreate` 필요 |
 | `RAG_SPARSE_MODEL` | `Qdrant/bm25` | FastEmbed 희소(BM25) 모델 |
 | `RAG_DEFAULT_LIMIT` / `RAG_MAX_LIMIT` | `5` / `20` | 검색 결과 개수 상한 |
@@ -264,6 +293,7 @@ docker compose up -d --build
 | `RERANK_TIMEOUT` | `30` | 리랭커 HTTP 타임아웃 (초) |
 | `MCP_PORT` | `8084` | 서버 포트 |
 | `MCP_HOST` | `0.0.0.0` | 서버 바인드 주소 |
+| `RAG_KNOWLEDGE_DIR` | `/var/lib/rag-mcp/knowledge` | `rag-ingest` 명령이 수집할 문서 디렉터리 |
 | `RAG_INTERNAL_TOKEN` | _(비어 있음)_ | 내부 쓰기 API(`/internal/knowledge/*`) 보호 토큰. 비워 두면 열림 (개발용) |
 
 ### 호스팅 / OpenAI 호환 임베딩 제공자 사용하기
@@ -297,7 +327,7 @@ ollama pull bge-m3
 ```
 
 ```bash
-# .env
+# /etc/rag-mcp/rag-mcp.env
 EMBEDDINGS_PROVIDER=ollama
 EMBEDDINGS_MODEL=bge-m3
 ```
@@ -307,7 +337,7 @@ EMBEDDINGS_MODEL=bge-m3
 GPU 서버에서 Hugging Face TEI(Text Embeddings Inference)로 `BAAI/bge-m3`를 서빙하는 경우:
 
 ```bash
-# .env
+# /etc/rag-mcp/rag-mcp.env
 EMBEDDINGS_PROVIDER=openai
 EMBEDDINGS_BASE_URL=http://<tei-host>:8080   # /v1 은 자동으로 붙습니다
 EMBEDDINGS_API_KEY=dummy                     # 인증이 없으면 아무 값
@@ -320,8 +350,8 @@ EMBEDDINGS_MODEL=BAAI/bge-m3
 `nomic-embed-text`로 만든 기존 컬렉션도 마찬가지입니다.
 
 ```bash
-docker compose up -d rag-mcp                  # 새 모델로 질의하도록 재시작
-docker compose run --rm rag-ingest --recreate # 컬렉션 재생성 + 재수집
+sudo systemctl restart rag-mcp               # 새 모델로 질의하도록 재시작
+sudo rag-ingest --recreate                   # 컬렉션 재생성 + 재수집
 
 # 컬렉션 차원 확인 → "size":1024 이면 성공
 curl -s http://localhost:6333/collections/rag_kb | grep -o '"size":[0-9]*'

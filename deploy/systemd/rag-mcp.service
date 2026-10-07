@@ -1,0 +1,28 @@
+# rag-mcp MCP 서버 — 읽기 전용 검색 도구를 http://<host>:${MCP_PORT}/mcp 로 제공합니다.
+# deploy/install.sh가 /etc/systemd/system/ 에 설치합니다.
+[Unit]
+Description=rag-mcp RAG memory MCP server
+After=network-online.target qdrant.service
+Wants=network-online.target qdrant.service
+
+[Service]
+Type=simple
+User=rag-mcp
+Group=rag-mcp
+WorkingDirectory=/opt/rag-mcp/app
+EnvironmentFile=/etc/rag-mcp/rag-mcp.env
+Environment=PYTHONUNBUFFERED=1
+# FastEmbed BM25 모델 캐시 (최초 실행 시 한 번 내려받습니다).
+Environment=FASTEMBED_CACHE_PATH=/var/lib/rag-mcp/fastembed_cache
+ExecStart=/opt/rag-mcp/venv/bin/python /opt/rag-mcp/app/server.py
+Restart=on-failure
+RestartSec=5
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/rag-mcp/fastembed_cache
+
+[Install]
+WantedBy=multi-user.target

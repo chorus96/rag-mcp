@@ -41,7 +41,7 @@ from ingest import _chunk  # 배치 수집과 똑같은 청킹을 재사용 (DRY
 
 log = logging.getLogger("rag-capture")
 
-QDRANT_URL = os.environ.get("QDRANT_URL", "http://qdrant:6333")
+QDRANT_URL = os.environ.get("QDRANT_URL", "http://localhost:6333")
 QDRANT_API_KEY = os.environ.get("QDRANT_API_KEY") or None
 COLLECTION = os.environ.get("QDRANT_COLLECTION")
 HTTP_TIMEOUT = float(os.environ.get("RAG_TIMEOUT_SECONDS", "60"))

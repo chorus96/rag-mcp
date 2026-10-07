@@ -72,28 +72,53 @@ Claude Code, LibreChat Agents, 프록시를 통한 Open WebUI, 직접 만든 도
   └──────────────────────┘
 ```
 
-## 빠른 시작
+## 빠른 시작 (Linux 서버 설치)
 
-사전 요구 사항: Docker(+ Compose v2), 그리고 기본 오프라인 임베딩 경로를 쓰려면 호스트에
-[Ollama](https://ollama.com)가 필요합니다.
+사전 요구 사항: systemd를 쓰는 Linux 서버(Ubuntu, Debian, RHEL 계열 등), Python 3.10 이상과
+venv 모듈(Debian/Ubuntu: `apt install python3-venv`), `curl`, 그리고 기본 오프라인 임베딩 경로를
+쓰려면 같은 서버에 [Ollama](https://ollama.com)가 필요합니다.
 
 ```bash
-ollama pull bge-m3               # 최초 1회 (기본 다국어 임베딩 모델)
+curl -fsSL https://ollama.com/install.sh | sh   # Ollama가 없다면
+ollama pull bge-m3                              # 최초 1회 (기본 다국어 임베딩 모델)
 
 git clone https://github.com/mmelmesary/rag-mcp.git && cd rag-mcp
-cp .env.example .env             # 기본값 그대로 바로 동작합니다
+sudo ./deploy/install.sh        # Qdrant + rag-mcp 설치, systemd 서비스로 시작
 
-docker compose up -d --build     # Qdrant + rag-mcp 시작
-
-docker compose run --rm rag-ingest   # ./knowledge 의 샘플 문서 색인
+sudo rag-ingest                 # 샘플 문서 색인
 ```
+
+`install.sh`가 설치하는 것:
+
+| 경로 | 내용 |
+|------|------|
+| `/opt/rag-mcp/app`, `/opt/rag-mcp/venv` | 애플리케이션 코드와 Python 가상환경 |
+| `/opt/rag-mcp/qdrant/qdrant` | Qdrant 바이너리 (기본 `v1.12.4`, `127.0.0.1:6333`에만 바인드) |
+| `/etc/rag-mcp/rag-mcp.env` | 설정 파일 ([.env.example](.env.example) 복사본) |
+| `/var/lib/rag-mcp/knowledge` | 색인할 문서 (샘플 문서가 복사됨) |
+| `/var/lib/rag-mcp/qdrant` | Qdrant 데이터 |
+| `qdrant.service`, `rag-mcp.service` | systemd 서비스 (부팅 시 자동 시작) |
+| `/usr/local/bin/rag-ingest` | 문서 수집 명령 |
+
+모든 서비스는 시스템 사용자 `rag-mcp` 권한으로 실행됩니다. 스크립트를 다시 실행하면 업그레이드로
+동작합니다 — 코드와 의존성을 갱신하고 서비스를 재시작하며, 설정 파일과 데이터는 건드리지 않습니다.
 
 확인:
 
 ```bash
+systemctl status qdrant rag-mcp
 curl -s http://localhost:8084/mcp            # MCP 엔드포인트 (핸드셰이크 없이 400 응답 = 정상 동작)
 curl -s http://localhost:6333/collections    # rag_kb 컬렉션이 포인트와 함께 존재
+journalctl -u rag-mcp -f                     # 서버 로그
 ```
+
+설정을 바꾼 뒤에는 `sudo systemctl restart rag-mcp`로 적용합니다. 제거는
+`sudo ./deploy/uninstall.sh`(데이터 유지) 또는 `sudo ./deploy/uninstall.sh --purge`(모두 삭제)입니다.
+
+> 최초 시작 시 FastEmbed가 BM25 모델을 `huggingface.co`에서 한 번 내려받아
+> `/var/lib/rag-mcp/fastembed_cache`에 저장합니다. 서버가 인터넷에 접속할 수 없거나 프록시가
+> 필요하면 설정 파일에 `HTTPS_PROXY`를 넣으세요. 내려받지 못하면 키워드(BM25) 검색 없이 의미
+> 검색만으로 동작합니다.
 
 ## MCP 클라이언트에 연결하기
 
@@ -118,10 +143,13 @@ curl -s http://localhost:6333/collections    # rag_kb 컬렉션이 포인트와 
 mcpServers:
   rag:
     type: streamable-http
-    url: http://rag-mcp-server:8084/mcp   # compose 네트워크로 연결된 경우 컨테이너 이름 사용
+    url: http://<rag-mcp 서버 주소>:8084/mcp
 ```
 
 그 밖의 MCP 클라이언트: 위 URL로 HTTP/streamable-http 서버를 등록하면 됩니다.
+
+다른 서버에서 접속한다면 방화벽에서 8084 포트를 열고, 내부 쓰기 API를 보호하도록 설정 파일에
+`RAG_INTERNAL_TOKEN`을 설정하세요.
 
 ### 모델에 노출되는 도구
 
@@ -138,8 +166,9 @@ mcpServers:
 
 ## 내 문서 추가하기
 
-`knowledge/` 아래에 마크다운이나 PDF를 넣으세요(하위 폴더 이름이 기본 `doc_type`이 됩니다.
-예: `knowledge/incidents/*` → `incident`). 마크다운은 선택적으로 YAML front matter를 지원합니다.
+`/var/lib/rag-mcp/knowledge/` 아래에 마크다운이나 PDF를 넣으세요(하위 폴더 이름이 기본 `doc_type`이
+됩니다. 예: `knowledge/incidents/*` → `incident`). 디렉터리는 설정 파일의 `RAG_KNOWLEDGE_DIR`로
+바꿀 수 있습니다. 마크다운은 선택적으로 YAML front matter를 지원합니다.
 
 ```markdown
 ---
@@ -156,31 +185,34 @@ front matter는 전적으로 자유롭게 정할 수 있습니다. `type`, `comp
 필드가 되지만 형식이 정해지지 않은 레이블일 뿐이므로, 도메인에 맞는 어떤 분류(환경, 고객, 제품,
 팀 등)에든 사용하거나 아예 생략하고 순수 시맨틱 검색만 사용해도 됩니다.
 
-그런 다음 다시 색인하세요 — 재빌드는 필요 없습니다(작업이 `./knowledge`를 바인드 마운트합니다).
+그런 다음 다시 색인하세요. 서버 재시작은 필요 없습니다.
 
 ```bash
-docker compose run --rm rag-ingest
+sudo cp my-runbook.md /var/lib/rag-mcp/knowledge/runbooks/
+sudo rag-ingest
 ```
 
 수집은 멱등적입니다(청크 ID는 `(source, chunk index)`에서 파생됩니다). 내용이 줄어든 문서는
 더 이상 쓰이지 않는 뒷부분 청크가 삭제됩니다. 문서가 바뀔 때마다 CI/cron에서 실행하세요.
 알려진 제한 사항: 파일을 삭제하거나 이름을 바꿔도 기존 청크는 제거되지 않습니다 — 삭제/이름 변경
-후에는 `docker compose run --rm rag-ingest --recreate`를 사용하세요.
+후에는 `sudo rag-ingest --recreate`를 사용하세요.
 
 ## 호스팅 임베딩 제공자로 전환하기
 
 ```bash
-# .env
+# /etc/rag-mcp/rag-mcp.env
 EMBEDDINGS_PROVIDER=openai
 EMBEDDINGS_BASE_URL=https://api.openai.com    # 또는 LiteLLM 프록시 / Azure 게이트웨이 / TEI
 EMBEDDINGS_API_KEY=sk-...
 EMBEDDINGS_MODEL=text-embedding-3-small
 ```
 
-그런 다음 컬렉션을 다시 만드세요(수집과 질의는 항상 같은 제공자+모델을 사용해야 합니다).
+그런 다음 서버를 재시작하고 컬렉션을 다시 만드세요(수집과 질의는 항상 같은 제공자+모델을
+사용해야 합니다).
 
 ```bash
-docker compose run --rm rag-ingest --recreate
+sudo systemctl restart rag-mcp
+sudo rag-ingest --recreate
 ```
 
 ## 한국어 문서와 임베딩 모델
@@ -193,7 +225,7 @@ docker compose run --rm rag-ingest --recreate
 ```bash
 ollama pull nomic-embed-text
 
-# .env
+# /etc/rag-mcp/rag-mcp.env
 EMBEDDINGS_MODEL=nomic-embed-text
 ```
 
@@ -201,8 +233,8 @@ EMBEDDINGS_MODEL=nomic-embed-text
 만든 기존 컬렉션을 bge-m3로 옮길 때도 마찬가지입니다.
 
 ```bash
-docker compose up -d rag-mcp
-docker compose run --rm rag-ingest --recreate
+sudo systemctl restart rag-mcp
+sudo rag-ingest --recreate
 ```
 
 OpenAI 호환 서버(TEI 등)로 쓰는 방법, 다국어 리랭커, BM25의 한국어 한계 등 자세한 내용은
@@ -226,8 +258,9 @@ OpenAI 호환 서버(TEI 등)로 쓰는 방법, 다국어 리랭커, BM25의 한
 ```bash
 python3 -m pip install -r requirements.txt pytest
 python3 -m pytest tests/
+cp .env.example .env && set -a && . ./.env && set +a   # 설정 불러오기 (선택)
 python3 server.py                       # 로컬 :6333 의 Qdrant에 연결해 실행
-QDRANT_URL=http://localhost:6333 python3 ingest.py --path knowledge
+python3 ingest.py --path knowledge
 ```
 
 ## 라이선스

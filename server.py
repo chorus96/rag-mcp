@@ -44,7 +44,7 @@ logging.basicConfig(
 )
 log = logging.getLogger("rag-mcp")
 
-QDRANT_URL = os.environ.get("QDRANT_URL", "http://qdrant:6333")
+QDRANT_URL = os.environ.get("QDRANT_URL", "http://localhost:6333")
 QDRANT_API_KEY = os.environ.get("QDRANT_API_KEY") or None
 COLLECTION = os.environ.get("QDRANT_COLLECTION")
 
