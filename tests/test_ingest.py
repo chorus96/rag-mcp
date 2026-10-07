@@ -1,7 +1,9 @@
 """tools/ingest.py 테스트 — 문서 수집.
 
 확인하는 것
-  - 파일 탐색: .md / .pdf 만 찾고 나머지 확장자는 무시
+  - 파일 탐색: 문서 디렉터리 아래(official/ 등)에서 .md / .pdf 만 찾고 나머지 확장자는 무시
+  - 문서 유형 추론: front matter 의 type 우선, official/·draft/ 는 단계 폴더라 건너뛰고 그 아래 하위 폴더
+    이름(끝의 s 제거), 없으면 note. official/·draft/ 밖의 이전 구조(runbooks/ 등)도 같은 규칙
   - PDF 추출: 페이지마다 `# [Page N]` 섹션을 만들어 청킹 후에도 페이지 맥락이 남음,
     빈 페이지·이미지 전용 PDF는 건너뜀
   - 임베딩 배치: EMBED_BATCH_SIZE 단위로 요청하고, 벡터 순서가 청크 순서와 같음
@@ -10,6 +12,7 @@
 
 방법
   - pypdf, 임베딩, Qdrant 클라이언트를 모두 가짜 객체로 바꿔 실제 PDF나 서버 없이 실행합니다.
+  - 파일이 필요한 테스트는 pytest 임시 폴더를 문서 디렉터리로 쓰고, source 예시는 official/... 경로를 씁니다.
 """
 
 import sys
@@ -186,12 +189,12 @@ def test_upsert_points_single_request_when_under_batch_size(monkeypatch):
 def test_delete_orphan_chunks_targets_only_the_tail():
     client = _FakeClient(orphans=7)
 
-    ingest._delete_orphan_chunks(client, "runbooks/longhorn.md", kept=20)
+    ingest._delete_orphan_chunks(client, "official/longhorn.md", kept=20)
 
     assert len(client.deletes) == 1
     conditions = client.deletes[0].filter.must
     assert conditions[0].key == "source"
-    assert conditions[0].match.value == "runbooks/longhorn.md"
+    assert conditions[0].match.value == "official/longhorn.md"
     # 현재 개수 이상의 청크만 대상 — 남아 있는 0..19번은 건드리지 않음.
     assert conditions[1].key == "chunk"
     assert conditions[1].range.gte == 20
@@ -200,7 +203,7 @@ def test_delete_orphan_chunks_targets_only_the_tail():
 def test_delete_orphan_chunks_noop_when_nothing_stale():
     client = _FakeClient(orphans=0)
 
-    ingest._delete_orphan_chunks(client, "runbooks/longhorn.md", kept=20)
+    ingest._delete_orphan_chunks(client, "official/longhorn.md", kept=20)
 
     assert client.deletes == []  # 삭제 요청 자체가 없음
 
@@ -209,7 +212,7 @@ def test_delete_orphan_chunks_survives_qdrant_error(caplog):
     """정리는 최선형(best-effort)입니다: 오래된 검색 결과 때문에 수집을 중단할 가치는 없습니다."""
     client = _FakeClient(count_raises=RuntimeError("qdrant down"))
 
-    ingest._delete_orphan_chunks(client, "runbooks/longhorn.md", kept=3)
+    ingest._delete_orphan_chunks(client, "official/longhorn.md", kept=3)
 
     assert client.deletes == []
     assert "stale-chunk cleanup failed" in caplog.text

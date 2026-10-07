@@ -1,20 +1,26 @@
 """tools/documents.py, tools/server.py 테스트 — MCP 쓰기 도구 (문서 추가·삭제)와 초안 승격.
 
+문서 디렉터리 (테스트에서는 pytest 임시 폴더가 KNOWLEDGE_DIR)
+    <tmp>/
+    ├── official/     정식 문서 — 쓰기 도구가 건드리면 안 되는 곳. 승격 테스트의 목적지
+    └── draft/        초안 — 쓰기 도구가 다루는 유일한 곳
+  source 는 모두 이 폴더 기준 상대 경로(draft/a.md, official/a.md)로 확인합니다.
+
 확인하는 것
-  - 파일 저장: draft/ 아래 제목으로 만든 파일 이름에 front matter + 본문으로 저장
+  - 파일 저장: draft/<제목>.md 에 front matter + 본문으로 저장. 문서 유형은 폴더가 아니라 front matter에만 씀
   - 저장한 파일을 ingest_file 로 색인하고, source 가 rag-ingest 와 같은 형식(상대 경로)임
   - 입력 검증: 빈 제목·본문, 너무 긴 본문, 잘못된 doc_type 은 저장하지 않음
   - 덮어쓰기: 같은 경로에 문서가 있으면 overwrite=True 일 때만 바꿈
   - 경로 안전: 제목에 경로 문자가 있어도 문서 디렉터리 밖에 쓰지 않음
   - 색인 실패: 파일은 남기고 오류를 돌려줌
   - 삭제: 파일과 청크를 함께 지우고, 파일 없이 남은 청크도 정리. draft/ 밖·문서가 아닌 파일은 거부
-  - draft/ 제한: MCP로는 draft/ 밖(사람이 관리하는 정식 문서)을 만들거나 지울 수 없음
-  - 초안 승격(rag-promote): draft/<경로> → official/<경로> 로 옮겨 색인하고 초안을 정리, 기존 문서는 --overwrite 로만
-    바꿈, 색인 실패 시 되돌림, MCP 도구로는 노출되지 않음
+  - draft/ 제한: MCP로는 draft/ 밖(official/ 의 정식 문서 등)을 만들거나 지울 수 없음
+  - 초안 승격(rag-promote): draft/<경로> → official/<경로> 로 옮겨 색인하고 초안을 정리, official/ 의 기존 문서는
+    --overwrite 로만 바꿈, 색인 실패 시 official/ 을 되돌림, 목록에는 draft/ 문서만 나옴, MCP 도구로는 노출되지 않음
   - 도구 등록: RAG_MCP_WRITE 가 꺼져 있으면 쓰기 도구(추가·삭제)가 MCP 도구 목록에 없음
 
 방법
-  - 문서 디렉터리는 pytest 임시 폴더로 바꾸고, ingest.ingest_file 은 가짜 함수로 바꿔
+  - KNOWLEDGE_DIR 을 pytest 임시 폴더로 바꾸고, ingest.ingest_file 은 가짜 함수로 바꿔
     Qdrant나 임베딩 없이 실행합니다.
 """
 
@@ -239,7 +245,7 @@ def test_delete_refuses_paths_outside_knowledge_dir(monkeypatch, tmp_path):
     outside = tmp_path / "secret.md"
     outside.write_text("x", encoding="utf-8")
     q = _FakeQdrant(points=1)
-    for bad in ("../secret.md", "runbooks/../../secret.md", str(outside)):
+    for bad in ("../secret.md", "official/../../secret.md", str(outside)):
         out = documents.delete_document(bad, client=q)
         assert out["status"] == "error", bad
     assert outside.exists() and q.deleted == []
@@ -272,7 +278,7 @@ def test_add_then_delete_roundtrip(monkeypatch, tmp_path):
 # --- draft/ 제한 ------------------------------------------------------------------
 def test_add_never_writes_outside_draft(monkeypatch, tmp_path):
     _setup(monkeypatch, tmp_path)
-    for title, doc_type in (("../../runbooks/x", "runbook"), ("x", "draft"), ("y", "rca")):
+    for title, doc_type in (("../../official/x", "runbook"), ("x", "draft"), ("y", "rca")):
         out = documents.add_document(title, "body", doc_type, client=object())
         assert out["source"].startswith("draft/"), out
         assert (tmp_path / "draft").resolve() in (tmp_path / out["source"]).resolve().parents
