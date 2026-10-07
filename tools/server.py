@@ -7,8 +7,8 @@
 구성
   - 공통 검색 경로 `_search`: 질의 임베딩 → 하이브리드 검색 → (선택) 리랭킹 → 응답 구성
   - MCP 도구: rag_search, search_incidents, search_runbooks, rag_collections, rag_health
-  - (선택) MCP 쓰기 도구: rag_add_document, rag_delete_document — RAG_MCP_WRITE=true 일 때만 등록
-    (실제 로직은 documents.py)
+  - (선택) MCP 쓰기 도구: rag_add_document, rag_delete_document — RAG_MCP_WRITE=true 일 때만 등록,
+    문서 디렉터리의 draft/ 아래만 다룸 (실제 로직은 documents.py)
   - 내부 쓰기 API: /internal/knowledge/{capture,similar,feedback,stats} (실제 로직은 capture.py)
 
 설계 원칙
@@ -372,8 +372,9 @@ if documents.WRITE_ENABLED:
         """지식 베이스에 마크다운 문서를 추가하고 바로 검색할 수 있게 색인합니다.
 
         사용자가 문서 추가(저장)를 명시적으로 요청했을 때만 사용하세요. 대화 내용을 임의로 저장하지
-        마세요. 문서는 서버의 문서 디렉터리에 `<doc_type>s/<제목>.md` 파일로 저장되고, 응답의
-        `source`가 그 경로입니다. 같은 경로에 문서가 있으면 overwrite=true 일 때만 바꿉니다.
+        마세요. 문서는 서버의 문서 디렉터리 중 `draft/<doc_type>s/<제목>.md` 에 초안으로 저장되고 바로
+        검색됩니다. 응답의 `source`가 그 경로입니다. 같은 경로에 문서가 있으면 overwrite=true 일 때만
+        바꿉니다. 사람이 관리하는 정식 문서(draft/ 밖)는 이 도구로 만들거나 바꿀 수 없습니다.
 
         Args:
             title: 문서 제목. 파일 이름도 여기서 만들어집니다.
@@ -388,14 +389,15 @@ if documents.WRITE_ENABLED:
 
     @mcp.tool()
     def rag_delete_document(source: str) -> dict[str, Any]:
-        """지식 베이스에서 문서 하나를 삭제합니다 (문서 파일과 검색용 청크를 함께 삭제).
+        """지식 베이스의 초안 문서(draft/ 아래) 하나를 삭제합니다 (문서 파일과 검색용 청크를 함께 삭제).
 
         사용자가 삭제를 명시적으로 요청하고, 삭제할 문서를 확인한 뒤에만 사용하세요. 되돌릴 수
         없습니다. 삭제할 문서는 검색 결과나 rag_add_document 응답의 `source`로 지정합니다.
+        `source`가 'draft/'로 시작하는 문서만 지울 수 있고, 정식 문서는 지울 수 없습니다.
         파일이 이미 없고 청크만 남아 있어도 청크를 정리합니다.
 
         Args:
-            source: 문서 디렉터리 기준 문서 경로 (예: 'runbooks/longhorn-볼륨-복구-절차.md').
+            source: 문서 디렉터리 기준 문서 경로 (예: 'draft/runbooks/longhorn-볼륨-복구-절차.md').
         """
         return documents.delete_document(source)
 

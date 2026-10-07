@@ -1,13 +1,14 @@
 """tools/documents.py, tools/server.py 테스트 — MCP 쓰기 도구 (문서 추가·삭제).
 
 확인하는 것
-  - 파일 저장: 문서 유형 폴더 아래 제목으로 만든 파일 이름에 front matter + 본문으로 저장
+  - 파일 저장: draft/<문서 유형 폴더> 아래 제목으로 만든 파일 이름에 front matter + 본문으로 저장
   - 저장한 파일을 ingest_file 로 색인하고, source 가 rag-ingest 와 같은 형식(상대 경로)임
   - 입력 검증: 빈 제목·본문, 너무 긴 본문, 잘못된 doc_type 은 저장하지 않음
   - 덮어쓰기: 같은 경로에 문서가 있으면 overwrite=True 일 때만 바꿈
   - 경로 안전: 제목에 경로 문자가 있어도 문서 디렉터리 밖에 쓰지 않음
   - 색인 실패: 파일은 남기고 오류를 돌려줌
-  - 삭제: 파일과 청크를 함께 지우고, 파일 없이 남은 청크도 정리. 문서 디렉터리 밖·문서가 아닌 파일은 거부
+  - 삭제: 파일과 청크를 함께 지우고, 파일 없이 남은 청크도 정리. draft/ 밖·문서가 아닌 파일은 거부
+  - draft/ 제한: MCP로는 draft/ 밖(사람이 관리하는 정식 문서)을 만들거나 지울 수 없음
   - 도구 등록: RAG_MCP_WRITE 가 꺼져 있으면 쓰기 도구(추가·삭제)가 MCP 도구 목록에 없음
 
 방법
@@ -64,7 +65,7 @@ def test_add_document_writes_file_and_ingests(monkeypatch, tmp_path):
         tags=["longhorn"], component="longhorn", cluster="prod-01", client=object(),
     )
     assert out["status"] == "ok"
-    assert out["source"] == "incidents/longhorn-볼륨-attaching-멈춤.md"
+    assert out["source"] == "draft/incidents/longhorn-볼륨-attaching-멈춤.md"
     assert out["chunks"] == 3 and out["replaced"] is False
 
     path = tmp_path / out["source"]
@@ -79,13 +80,13 @@ def test_add_document_writes_file_and_ingests(monkeypatch, tmp_path):
 def test_default_doc_type_is_note(monkeypatch, tmp_path):
     _setup(monkeypatch, tmp_path)
     out = documents.add_document("메모", "내용", client=object())
-    assert out["source"] == "notes/메모.md"
+    assert out["source"] == "draft/notes/메모.md"
 
 
 def test_doc_type_ending_in_s_keeps_folder_name(monkeypatch, tmp_path):
     _setup(monkeypatch, tmp_path)
     out = documents.add_document("a", "b", "runbooks", client=object())
-    assert out["source"] == "runbooks/a.md"
+    assert out["source"] == "draft/runbooks/a.md"
 
 
 # --- 입력 검증 ------------------------------------------------------------------
@@ -191,7 +192,7 @@ class _FakeQdrant:
         self.deleted.append(points_selector)
 
 
-def _make_doc(tmp_path, rel="runbooks/a.md"):
+def _make_doc(tmp_path, rel="draft/runbooks/a.md"):
     path = tmp_path / rel
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("---\ntitle: a\n---\nbody\n", encoding="utf-8")
@@ -202,18 +203,19 @@ def test_delete_removes_file_and_chunks(monkeypatch, tmp_path):
     monkeypatch.setattr(documents, "KNOWLEDGE_DIR", tmp_path)
     path = _make_doc(tmp_path)
     q = _FakeQdrant(points=4)
-    out = documents.delete_document("runbooks/a.md", client=q)
-    assert out == {"status": "ok", "source": "runbooks/a.md", "file_deleted": True, "chunks_deleted": 4}
+    out = documents.delete_document("draft/runbooks/a.md", client=q)
+    assert out == {"status": "ok", "source": "draft/runbooks/a.md", "file_deleted": True,
+                   "chunks_deleted": 4}
     assert not path.exists()
     cond = q.deleted[0].filter.must[0]
-    assert cond.key == "source" and cond.match.value == "runbooks/a.md"
+    assert cond.key == "source" and cond.match.value == "draft/runbooks/a.md"
 
 
 def test_delete_cleans_orphan_chunks_without_file(monkeypatch, tmp_path):
     # 파일을 지우거나 이름을 바꾼 뒤 남은 청크도 정리할 수 있어야 합니다.
     monkeypatch.setattr(documents, "KNOWLEDGE_DIR", tmp_path)
     q = _FakeQdrant(points=2)
-    out = documents.delete_document("runbooks/gone.md", client=q)
+    out = documents.delete_document("draft/runbooks/gone.md", client=q)
     assert out["status"] == "ok" and out["file_deleted"] is False and out["chunks_deleted"] == 2
     assert len(q.deleted) == 1
 
@@ -221,7 +223,7 @@ def test_delete_cleans_orphan_chunks_without_file(monkeypatch, tmp_path):
 def test_delete_not_found(monkeypatch, tmp_path):
     monkeypatch.setattr(documents, "KNOWLEDGE_DIR", tmp_path)
     q = _FakeQdrant(points=0)
-    out = documents.delete_document("runbooks/none.md", client=q)
+    out = documents.delete_document("draft/runbooks/none.md", client=q)
     assert out["status"] == "error" and "no document" in out["error"]
     assert q.deleted == []
 
@@ -241,16 +243,17 @@ def test_delete_refuses_paths_outside_knowledge_dir(monkeypatch, tmp_path):
 
 def test_delete_refuses_non_document_files(monkeypatch, tmp_path):
     monkeypatch.setattr(documents, "KNOWLEDGE_DIR", tmp_path)
-    other = tmp_path / "notes.txt"
+    other = tmp_path / "draft" / "notes.txt"
+    other.parent.mkdir(parents=True)
     other.write_text("x", encoding="utf-8")
-    out = documents.delete_document("notes.txt", client=_FakeQdrant(points=1))
+    out = documents.delete_document("draft/notes.txt", client=_FakeQdrant(points=1))
     assert out["status"] == "error" and other.exists()
 
 
 def test_delete_keeps_file_when_chunk_delete_fails(monkeypatch, tmp_path):
     monkeypatch.setattr(documents, "KNOWLEDGE_DIR", tmp_path)
     path = _make_doc(tmp_path)
-    out = documents.delete_document("runbooks/a.md",
+    out = documents.delete_document("draft/runbooks/a.md",
                                     client=_FakeQdrant(points=3, delete_raises=RuntimeError("down")))
     assert out["status"] == "error" and path.exists()
 
@@ -260,3 +263,24 @@ def test_add_then_delete_roundtrip(monkeypatch, tmp_path):
     added = documents.add_document("복구 절차", "내용", "runbook", client=object())
     out = documents.delete_document(added["source"], client=_FakeQdrant(points=3))
     assert out["status"] == "ok" and not (tmp_path / added["source"]).exists()
+
+
+# --- draft/ 제한 ------------------------------------------------------------------
+def test_add_never_writes_outside_draft(monkeypatch, tmp_path):
+    _setup(monkeypatch, tmp_path)
+    for title, doc_type in (("../../runbooks/x", "runbook"), ("x", "draft"), ("y", "incident")):
+        out = documents.add_document(title, "body", doc_type, client=object())
+        assert out["source"].startswith("draft/"), out
+        assert (tmp_path / "draft").resolve() in (tmp_path / out["source"]).resolve().parents
+
+
+def test_delete_refuses_documents_outside_draft(monkeypatch, tmp_path):
+    # 사람이 관리하는 정식 문서는 파일이 있어도, 청크가 있어도 MCP로 지울 수 없어야 합니다.
+    monkeypatch.setattr(documents, "KNOWLEDGE_DIR", tmp_path)
+    official = _make_doc(tmp_path, "runbooks/official.md")
+    q = _FakeQdrant(points=5)
+    for bad in ("runbooks/official.md", "draft/../runbooks/official.md", "draft", "draft/"):
+        out = documents.delete_document(bad, client=q)
+        assert out["status"] == "error", bad
+    assert official.exists() and q.deleted == []
+

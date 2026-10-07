@@ -2,9 +2,13 @@
 
 역할
   LLM이 MCP 도구로 지식 베이스의 문서를 추가하거나 삭제할 때의 로직입니다.
-  - add_document (rag_add_document):    문서를 문서 디렉터리에 마크다운 파일로 저장한 뒤 rag-ingest와
+  - add_document (rag_add_document):    문서를 문서 디렉터리의 draft/ 아래 마크다운 파일로 저장한 뒤 rag-ingest와
                                          같은 방식(ingest.ingest_file)으로 바로 색인
-  - delete_document (rag_delete_document): 문서 파일과 그 문서의 청크(포인트)를 함께 삭제
+  - delete_document (rag_delete_document): draft/ 아래 문서 파일과 그 문서의 청크(포인트)를 함께 삭제
+
+  MCP로는 문서 디렉터리의 draft/ 하위만 추가·삭제할 수 있습니다. 사람이 관리하는 문서(runbooks/,
+  incidents/ 등)는 모델이 바꾸거나 지울 수 없고, 모델이 만든 문서는 draft/에 모여 사람이 검토한 뒤
+  정식 폴더로 옮길 수 있습니다. draft/ 문서도 저장 즉시 검색됩니다.
 
 왜 파일로도 저장하나
   지식 베이스의 원본은 문서 디렉터리입니다. 파일로 남겨 두면 rag-ingest --recreate 로 재구축해도
@@ -13,10 +17,10 @@
 
 안전장치
   - 기본으로 꺼져 있습니다. 설정 파일에서 RAG_MCP_WRITE=true 일 때만 server.py가 도구를 등록합니다.
-  - 파일 경로는 서버가 정합니다(문서 유형 폴더 + 제목에서 만든 파일 이름). 호출자가 경로를 지정할 수
+  - 파일 경로는 서버가 정합니다(draft/ + 문서 유형 폴더 + 제목에서 만든 파일 이름). 호출자가 경로를 지정할 수
     없으므로 문서 디렉터리 밖에 쓸 수 없습니다.
   - 같은 이름의 파일이 있으면 overwrite=True 일 때만 덮어씁니다.
-  - 삭제는 문서 디렉터리 안의 .md / .pdf 문서만 대상으로 합니다. 경로를 정규화해 디렉터리 밖을
+  - 삭제는 draft/ 안의 .md / .pdf 문서만 대상으로 합니다. 경로를 정규화해 draft/ 밖을
     가리키면 거부합니다.
   - 본문 크기는 RAG_MAX_DOC_CHARS(기본 200000자)로 제한합니다.
 """
@@ -46,6 +50,9 @@ KNOWLEDGE_DIR = Path(os.path.expanduser(
 ))
 MAX_DOC_CHARS = int(os.environ.get("RAG_MAX_DOC_CHARS", "200000"))
 
+# MCP 쓰기 도구가 다룰 수 있는 하위 디렉터리 (문서 디렉터리 기준).
+DRAFT_SUBDIR = "draft"
+
 # 문서 유형은 폴더 이름이 되므로 안전한 문자만 허용합니다.
 _DOC_TYPE_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,31}$")
 
@@ -56,6 +63,11 @@ def _slug(title: str) -> str:
     s = unicodedata.normalize("NFC", title).strip().lower()
     s = re.sub(r"[^\w]+", "-", s, flags=re.UNICODE).strip("-_")
     return s[:80].rstrip("-_") or f"doc-{uuid.uuid4().hex[:8]}"
+
+
+def _draft_dir() -> Path:
+    """MCP 쓰기 도구가 다룰 수 있는 디렉터리 (문서 디렉터리/draft)."""
+    return KNOWLEDGE_DIR / DRAFT_SUBDIR
 
 
 def _folder_for(doc_type: str) -> str:
@@ -98,7 +110,8 @@ def add_document(title: str, content: str, doc_type: str = "note", tags: list[st
         return {"status": "error",
                 "error": "doc_type must be lowercase letters, digits, '-' or '_' (e.g. incident, runbook)"}
 
-    path = KNOWLEDGE_DIR / _folder_for(doc_type) / f"{_slug(title)}.md"
+    # 저장은 draft/ 아래로만 합니다. source와 색인 기준은 rag-ingest와 같게 문서 디렉터리로 둡니다.
+    path = _draft_dir() / _folder_for(doc_type) / f"{_slug(title)}.md"
     source = str(path.relative_to(KNOWLEDGE_DIR)).replace(os.sep, "/")
     existed = path.exists()
     if existed and not overwrite:
@@ -125,12 +138,15 @@ def add_document(title: str, content: str, doc_type: str = "note", tags: list[st
 
 # --- 문서 삭제 -----------------------------------------------------------------
 def _resolve_source(source: str) -> tuple[Path, str] | None:
-    """source(문서 디렉터리 기준 상대 경로)를 실제 경로로 바꿉니다. 절대 경로이거나 디렉터리 밖이면 None."""
+    """source(문서 디렉터리 기준 상대 경로)를 실제 경로로 바꿉니다.
+
+    절대 경로이거나, 정규화했을 때 draft/ 밖을 가리키면 None입니다.
+    """
     if Path(source).is_absolute():
         return None
     root = KNOWLEDGE_DIR.resolve()
     path = (root / source).resolve()
-    if root not in path.parents:
+    if _draft_dir().resolve() not in path.parents:
         return None
     return path, str(path.relative_to(root)).replace(os.sep, "/")
 
@@ -142,10 +158,12 @@ def delete_document(source: str, client: QdrantClient | None = None) -> dict[str
     """
     source = (source or "").strip()
     if not source:
-        return {"status": "error", "error": "source must be a non-empty path (e.g. runbooks/foo.md)"}
+        return {"status": "error",
+                "error": f"source must be a non-empty path (e.g. {DRAFT_SUBDIR}/runbooks/foo.md)"}
     resolved = _resolve_source(source)
     if resolved is None:
-        return {"status": "error", "error": f"source must be inside the knowledge directory: {source}"}
+        return {"status": "error",
+                "error": f"only documents under {DRAFT_SUBDIR}/ can be deleted via MCP: {source}"}
     path, source = resolved
     if path.suffix.lower() not in (".md", ".pdf"):
         return {"status": "error", "error": "only .md or .pdf documents can be deleted"}
