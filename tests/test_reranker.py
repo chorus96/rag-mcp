@@ -1,6 +1,6 @@
-"""Reranker: endpoint building, response parsing, and the best-effort contract
-(a bad key / down endpoint / malformed body must raise RerankError so the caller
-falls back to dense order — reranking never breaks a search)."""
+"""리랭커: 엔드포인트 구성, 응답 파싱, 최선형(best-effort) 계약
+(잘못된 키 / 중단된 엔드포인트 / 잘못된 형식의 응답 본문은 RerankError를 발생시켜
+호출자가 밀집 검색 순서로 되돌아가게 해야 합니다 — 리랭킹 때문에 검색이 깨지는 일은 없습니다)."""
 
 import sys
 from pathlib import Path
@@ -13,13 +13,13 @@ import reranker  # noqa: E402
 
 
 def test_disabled_by_default():
-    # Default env has RERANK_PROVIDER unset -> "none".
+    # 기본 환경에서는 RERANK_PROVIDER가 설정되지 않음 -> "none".
     assert reranker.enabled() is False
 
 
 def test_rerank_raises_when_disabled(monkeypatch):
     monkeypatch.setattr(reranker, "PROVIDER", "none")
-    monkeypatch.setattr(reranker.httpx, "post", _boom)  # must not even call out
+    monkeypatch.setattr(reranker.httpx, "post", _boom)  # 외부 호출조차 하면 안 됨
     with pytest.raises(reranker.RerankError):
         reranker.rerank("q", ["a", "b"])
 
@@ -38,7 +38,7 @@ def test_endpoint_building(monkeypatch, base, expected):
 
 def test_rerank_orders_by_relevance_and_maps_indices(monkeypatch):
     monkeypatch.setattr(reranker, "PROVIDER", "cohere")
-    # Out-of-order results: doc index 2 is most relevant, then 0, then 1.
+    # 순서가 뒤섞인 결과: 문서 인덱스 2가 가장 관련성이 높고, 그다음 0, 1 순.
     payload = {"results": [
         {"index": 0, "relevance_score": 0.4},
         {"index": 2, "relevance_score": 0.9},
@@ -46,7 +46,7 @@ def test_rerank_orders_by_relevance_and_maps_indices(monkeypatch):
     ]}
     monkeypatch.setattr(reranker.httpx, "post", _fake_post(payload))
     order = reranker.rerank("q", ["a", "b", "c"])
-    assert [i for i, _ in order] == [2, 0, 1]        # best-first
+    assert [i for i, _ in order] == [2, 0, 1]        # 가장 좋은 것부터
     assert order[0][1] == 0.9
 
 
@@ -56,13 +56,13 @@ def test_rerank_ignores_out_of_range_indices(monkeypatch):
                            {"index": 0, "relevance_score": 0.3}]}
     monkeypatch.setattr(reranker.httpx, "post", _fake_post(payload))
     order = reranker.rerank("q", ["a", "b"])
-    assert order == [(0, 0.3)]                        # index 5 dropped
+    assert order == [(0, 0.3)]                        # 인덱스 5는 버려짐
 
 
 def test_rerank_empty_docs_returns_empty(monkeypatch):
     monkeypatch.setattr(reranker, "PROVIDER", "cohere")
     monkeypatch.setattr(reranker.httpx, "post", _boom)
-    assert reranker.rerank("q", []) == []             # no call, no raise
+    assert reranker.rerank("q", []) == []             # 호출도 예외도 없음
 
 
 def test_rerank_network_error_raises(monkeypatch):
@@ -79,7 +79,7 @@ def test_rerank_malformed_body_raises(monkeypatch):
         reranker.rerank("q", ["a"])
 
 
-# ---- helpers ----------------------------------------------------------------
+# ---- 헬퍼 ----------------------------------------------------------------
 
 def _boom(*_a, **_k):
     raise AssertionError("httpx.post should not have been called")

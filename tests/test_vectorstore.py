@@ -1,8 +1,8 @@
-"""Vectorstore: named-vector construction and the hybrid/dense query routing.
+"""Vectorstore: 명명된 벡터 구성과 하이브리드/밀집 질의 라우팅.
 
-FastEmbed is not required for these — the sparse layer is mocked. Verifies that
-hybrid uses prefetch + RRF fusion, that dense-only is used when sparse is absent
-or hybrid=False, and that the sparse helpers degrade to None without a model."""
+희소 계층을 모킹하므로 FastEmbed가 필요 없습니다. 하이브리드가 prefetch + RRF
+결합을 사용하는지, 희소 벡터가 없거나 hybrid=False이면 밀집 전용을 사용하는지,
+모델이 없으면 희소 헬퍼가 None으로 대체되는지 확인합니다."""
 
 import sys
 from pathlib import Path
@@ -58,13 +58,13 @@ def test_query_hybrid_uses_prefetch_and_fusion(monkeypatch):
     client = _FakeClient()
     vectorstore.query(client, "kb", [0.1], "CrashLoopBackOff", query_filter=None, limit=7)
     call = client.calls[0]
-    assert len(call["prefetch"]) == 2                      # dense + sparse
-    assert isinstance(call["query"], FusionQuery)          # RRF fusion
+    assert len(call["prefetch"]) == 2                      # 밀집 + 희소
+    assert isinstance(call["query"], FusionQuery)          # RRF 결합
     assert call["limit"] == 7
 
 
 def test_query_hybrid_false_forces_dense(monkeypatch):
-    # hybrid=False must not even compute a sparse vector.
+    # hybrid=False이면 희소 벡터를 아예 계산하지 않아야 합니다.
     def _boom(_t):
         raise AssertionError("sparse must not be embedded when hybrid=False")
 

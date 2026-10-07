@@ -1,15 +1,15 @@
-"""Metadata filters on the search tools: `cluster` (SOFT narrow) + `component` (HARD).
+"""검색 도구의 메타데이터 필터: `cluster`(소프트 필터) + `component`(하드 필터).
 
-Covers `server._search`'s Qdrant filter construction, the soft-narrow retry that
-keeps a fleet-wide precedent visible when a same-cluster search is empty, and the
-same behavior on the recurring-detection path (`capture.find_similar`). Qdrant
-and the embedding model are mocked — nothing here touches a real store.
+`server._search`의 Qdrant 필터 구성, 같은 클러스터 검색 결과가 비었을 때 전체
+범위의 선례가 보이도록 하는 소프트 필터 재시도, 그리고 반복 장애 감지 경로
+(`capture.find_similar`)의 같은 동작을 다룹니다. Qdrant와 임베딩 모델은 모킹하므로
+실제 저장소에는 전혀 접근하지 않습니다.
 
-Soft-narrow contract (design: the "has this happened before ON THIS CLUSTER?"
-feature): a cluster filter must NEVER hide a fleet-wide precedent. If the
-cluster-scoped search comes back empty, retry without the cluster condition
-(keeping any hard filters) and report `cluster_narrowed: false` so callers can
-tell "no precedent on this cluster" from "no precedent anywhere".
+소프트 필터 계약 (설계: "이 클러스터에서 전에 이런 일이 있었나?" 기능): 클러스터
+필터가 전체 범위의 선례를 절대 가려서는 안 됩니다. 클러스터로 한정한 검색 결과가
+비어 있으면 클러스터 조건 없이(하드 필터는 유지한 채) 다시 검색하고
+`cluster_narrowed: false`를 보고해, 호출자가 "이 클러스터에는 선례 없음"과
+"어디에도 선례 없음"을 구분할 수 있게 합니다.
 """
 
 import sys
@@ -27,8 +27,8 @@ def _point(payload=None, score=0.9):
 
 
 class _QueryRecorder:
-    """Stands in for `vectorstore.query`: records each call's filter and returns
-    one configured point-list per call (empty list once exhausted)."""
+    """`vectorstore.query`를 대신합니다: 호출마다 필터를 기록하고, 미리 설정한
+    포인트 목록을 호출마다 하나씩 반환합니다 (다 쓰면 빈 목록)."""
 
     def __init__(self, results):
         self.results = list(results)
@@ -82,7 +82,7 @@ def test_cluster_scoped_results_stay_narrowed(monkeypatch):
 
 
 def test_cluster_empty_falls_back_fleet_wide(monkeypatch):
-    # Scoped call returns nothing -> retry without the cluster condition and say so.
+    # 범위를 한정한 호출이 빈 결과를 반환 -> 클러스터 조건 없이 재시도하고 그 사실을 알림.
     rec = _patch_search(monkeypatch, [[], [_point(payload={"title": "prior"})]])
     out = server._search("volume stuck", "incident", "prod-02", None, 5)
     assert len(rec.calls) == 2
@@ -94,7 +94,7 @@ def test_cluster_empty_falls_back_fleet_wide(monkeypatch):
 
 
 def test_fallback_keeps_hard_filters(monkeypatch):
-    # The retry drops ONLY the cluster narrow; doc_type/component stay.
+    # 재시도는 클러스터 조건만 뺍니다. doc_type/component는 유지됩니다.
     rec = _patch_search(monkeypatch, [[], [_point()]])
     server._search("volume stuck", "runbook", "prod-01", "longhorn", 5)
     assert len(rec.calls) == 2
@@ -102,7 +102,7 @@ def test_fallback_keeps_hard_filters(monkeypatch):
 
 
 def test_component_empty_does_not_retry(monkeypatch):
-    # Component is a HARD filter: an empty result stays empty — no fallback.
+    # component는 하드 필터입니다: 빈 결과는 그대로 비어 있음 — 대체 검색 없음.
     rec = _patch_search(monkeypatch, [[]])
     out = server._search("volume stuck", None, None, "longhorn", 5)
     assert len(rec.calls) == 1
@@ -134,7 +134,7 @@ def test_search_incidents_fleet_fallback(monkeypatch):
     assert out["cluster_narrowed"] is False
 
 
-# --- recurring-detection path (capture.find_similar) -------------------------
+# --- 반복 장애 감지 경로 (capture.find_similar) -------------------------
 
 
 def _patch_similar(monkeypatch, results):
@@ -172,8 +172,8 @@ def test_find_similar_cluster_empty_falls_back_fleet_wide(monkeypatch):
 
 
 def test_find_similar_min_score_still_filters(monkeypatch):
-    # A cluster match that clears no match because scores are below the threshold
-    # is treated like an empty same-cluster result -> fleet-wide fallback.
+    # 같은 클러스터 결과가 있어도 점수가 모두 임계값 미만이면 남는 결과가 없으므로,
+    # 같은 클러스터 결과가 빈 것으로 취급 -> 전체 범위로 대체 검색.
     rec = _patch_similar(monkeypatch, [[_point(score=0.4)], [_point(score=0.9)]])
     out = capture.find_similar("volume stuck", cluster="prod-02", min_score=0.75)
     assert len(rec.calls) == 2
