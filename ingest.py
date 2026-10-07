@@ -1,35 +1,32 @@
-"""Knowledge-base ingestion job.
+"""지식 베이스 수집 작업.
 
-Reads markdown and PDF documents (runbooks, past incidents, RCAs, reference
-material), chunks them, embeds each chunk with Ollama, and upserts into Qdrant.
-This is the deliberate, out-of-band write path for the RAG memory — the MCP
-server itself is read-only.
+마크다운과 PDF 문서(런북, 과거 장애, RCA, 참고 자료)를 읽어 청크로 나누고, 각 청크를
+임베딩 제공자(기본값 Ollama)로 임베딩한 뒤 Qdrant에 업서트합니다. RAG 메모리의
+의도적인 별도 쓰기 경로이며, MCP 서버 자체는 읽기 전용입니다.
 
-Run it whenever the knowledge base changes (locally, from CI, or as a cron job):
+지식 베이스가 바뀔 때마다 실행하세요 (로컬, CI, 또는 cron 작업에서):
 
     python ingest.py --path ./knowledge
 
-Idempotent: chunk IDs are derived from (source, chunk index), so re-running
-updates existing points instead of creating duplicates. If a document shrinks
-between runs, its leftover tail chunks are deleted rather than left behind as
-stale search hits (see `_delete_orphan_chunks`).
+멱등적: 청크 ID가 (source, chunk index)에서 파생되므로, 다시 실행하면 중복을 만들지
+않고 기존 포인트를 갱신합니다. 실행 사이에 문서가 줄어들면, 남은 뒷부분 청크를 오래된
+검색 결과로 남겨 두지 않고 삭제합니다 (`_delete_orphan_chunks` 참고).
 
-Markdown document format (front-matter is optional but recommended):
+마크다운 문서 형식 (front matter는 선택 사항이지만 권장):
 
     ---
     title: Longhorn volume stuck attaching
-    type: incident          # incident | runbook | rca | ...  (default: folder name, else "note")
+    type: incident          # incident | runbook | rca | ...  (기본값: 폴더 이름, 없으면 "note")
     tags: [longhorn, storage, node-reboot]
     ---
-    # Body markdown...
+    # 본문 마크다운...
 
-PDF documents are extracted page-by-page (each page becomes a `# [Page N]`
-section so page context survives chunking). PDFs have no front matter: `type`
-is always inferred from the containing folder name, and the title from the
-file name.
+PDF 문서는 페이지 단위로 추출합니다 (각 페이지가 `# [Page N]` 섹션이 되어 청킹 후에도
+페이지 맥락이 유지됩니다). PDF에는 front matter가 없으므로 `type`은 항상 상위 폴더
+이름에서, 제목은 파일 이름에서 추론합니다.
 
-If `type` is omitted, it is inferred from the containing folder name
-(e.g. knowledge/incidents/* -> "incident", knowledge/runbooks/* -> "runbook").
+`type`을 생략하면 상위 폴더 이름에서 추론합니다
+(예: knowledge/incidents/* -> "incident", knowledge/runbooks/* -> "runbook").
 """
 
 from __future__ import annotations
@@ -56,13 +53,13 @@ from qdrant_client.models import (
 import embeddings
 import vectorstore
 
-# Doc metadata worth indexing for cheap pre-filtering (step 3). Keyword indexes;
-# creating one that exists is a no-op handled in vectorstore.ensure_collection.
-# `source` is indexed for the stale-chunk cleanup filter, not for query filters.
+# 저렴한 사전 필터링을 위해 색인할 문서 메타데이터 (3단계). 키워드 인덱스이며,
+# 이미 있는 인덱스를 만드는 것은 vectorstore.ensure_collection에서 무시됩니다.
+# `source`는 질의 필터가 아니라 오래된 청크 정리 필터를 위해 색인합니다.
 _INDEXED_FIELDS = ("doc_type", "component", "cluster", "source")
 
-# File types the ingester understands: markdown (front-matter aware, section
-# chunking) and PDF (page-by-page text extraction). Everything else is skipped.
+# 수집기가 이해하는 파일 형식: 마크다운(front matter 인식, 섹션 청킹)과
+# PDF(페이지 단위 텍스트 추출). 나머지는 모두 건너뜁니다.
 _SUPPORTED_SUFFIXES = (".md", ".pdf")
 
 logging.basicConfig(
@@ -80,27 +77,27 @@ CHUNK_SIZE = int(os.environ.get("CHUNK_SIZE", "1500"))
 CHUNK_OVERLAP = int(os.environ.get("CHUNK_OVERLAP", "100"))
 HTTP_TIMEOUT = float(os.environ.get("RAG_TIMEOUT_SECONDS", "60"))
 
-# Batch sizes for the two per-document round trips. Both cap work per HTTP
-# request so one large document (a long runbook, a 100-page PDF) can't turn into
-# a single oversized, all-or-nothing call.
+# 문서별 두 왕복 요청의 배치 크기. 둘 다 HTTP 요청당 작업량을 제한해, 큰 문서
+# 하나(긴 런북, 100페이지 PDF)가 지나치게 크고 전부 아니면 전무인 단일 호출이 되지
+# 않게 합니다.
 #
-# EMBED_BATCH_SIZE: chunks per embeddings request. Only matters for providers
-#   with native batch input (OpenAI-compatible `/v1/embeddings`, capped at 2048
-#   inputs and a per-request token ceiling well under a big doc's chunk count).
-#   Ollama's `/api/embeddings` is single-prompt and loops internally regardless,
-#   so on the default provider this value changes nothing.
-# UPSERT_BATCH_SIZE: points per Qdrant upsert. Each point carries a dense vector,
-#   a BM25 sparse vector and the chunk text, so a few hundred chunks in one body
-#   is multiple megabytes against RAG_TIMEOUT_SECONDS.
+# EMBED_BATCH_SIZE: 임베딩 요청당 청크 수. 네이티브 배치 입력을 지원하는 제공자
+#   (OpenAI 호환 `/v1/embeddings`, 입력 2048개 상한과 요청당 토큰 상한이 있어 큰
+#   문서의 청크 수보다 훨씬 작음)에서만 의미가 있습니다. Ollama의 `/api/embeddings`는
+#   단일 프롬프트라 어차피 내부에서 반복하므로, 기본 제공자에서는 이 값이 아무것도
+#   바꾸지 않습니다.
+# UPSERT_BATCH_SIZE: Qdrant 업서트당 포인트 수. 각 포인트는 밀집 벡터, BM25 희소
+#   벡터, 청크 텍스트를 담으므로, 한 요청 본문에 청크 수백 개를 넣으면
+#   RAG_TIMEOUT_SECONDS 안에 수 메가바이트를 보내야 합니다.
 EMBED_BATCH_SIZE = max(1, int(os.environ.get("EMBED_BATCH_SIZE", "32")))
 UPSERT_BATCH_SIZE = max(1, int(os.environ.get("QDRANT_UPSERT_BATCH", "64")))
 
-# Stable namespace so re-ingesting the same file overwrites its points.
+# 같은 파일을 다시 수집하면 포인트를 덮어쓰도록 고정 네임스페이스를 씁니다.
 _ID_NAMESPACE = uuid.UUID("6f3a9c1e-9b2d-5a44-8c11-a1b2c3d4e5f6")
 
 
 def _parse_front_matter(raw: str) -> tuple[dict[str, Any], str]:
-    """Split optional YAML front matter from the body. Returns (meta, body)."""
+    """선택적 YAML front matter를 본문과 분리합니다. (meta, body)를 반환합니다."""
     if raw.startswith("---"):
         parts = raw.split("---", 2)
         if len(parts) == 3:
@@ -114,8 +111,8 @@ def _parse_front_matter(raw: str) -> tuple[dict[str, Any], str]:
 
 
 def _chunk(text: str, size: int, overlap: int) -> list[str]:
-    """Paragraph-aware char chunking with overlap. Keeps whole paragraphs
-    together when they fit; falls back to hard splits for oversized ones."""
+    """겹침이 있는 문단 인식 문자 단위 청킹. 크기에 맞으면 문단을 통째로 유지하고,
+    너무 큰 문단은 강제로 나눕니다."""
     paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
     chunks: list[str] = []
     current = ""
@@ -130,7 +127,7 @@ def _chunk(text: str, size: int, overlap: int) -> list[str]:
             continue
         if len(current) + len(para) + 2 > size:
             chunks.append(current)
-            # carry the tail of the previous chunk for context continuity
+            # 맥락이 이어지도록 이전 청크의 끝부분을 가져옴
             current = (current[-overlap:] + "\n\n" + para) if overlap else para
         else:
             current = f"{current}\n\n{para}" if current else para
@@ -141,10 +138,10 @@ def _chunk(text: str, size: int, overlap: int) -> list[str]:
 
 
 def _chunk_document(body: str) -> list[str]:
-    """Section-aware chunking (step 3): split on markdown headings so a runbook
-    step or incident section stays intact, prepend the heading to each of its
-    chunks for standalone context, then fall back to the paragraph chunker within
-    an oversized section. Bodies with no headings behave exactly as before."""
+    """섹션 인식 청킹 (3단계): 마크다운 헤딩 기준으로 나눠 런북 단계나 장애 섹션이
+    온전히 유지되게 하고, 각 청크 앞에 헤딩을 붙여 단독으로도 맥락을 갖게 한 뒤,
+    너무 큰 섹션 안에서는 문단 청커로 대체합니다. 헤딩이 없는 본문은 이전과 똑같이
+    동작합니다."""
     sections: list[tuple[str, list[str]]] = []
     heading = ""
     buf: list[str] = []
@@ -179,11 +176,11 @@ def _infer_doc_type(meta: dict[str, Any], file: Path, root: Path) -> str:
 
 
 def _extract_pdf_text(path: Path) -> str:
-    """Extract a PDF's text as one `# [Page N]` section per non-empty page.
+    """PDF 텍스트를 비어 있지 않은 페이지마다 `# [Page N]` 섹션 하나로 추출합니다.
 
-    Page markers are markdown headings so `_chunk_document` keeps page context
-    (layout and reading order rarely survive a page break; sections do).
-    Returns "" for scanned/image-only PDFs with no extractable text.
+    페이지 표시가 마크다운 헤딩이므로 `_chunk_document`가 페이지 맥락을 유지합니다
+    (레이아웃과 읽기 순서는 페이지 경계를 넘으면 거의 유지되지 않지만, 섹션은
+    유지됩니다). 추출할 텍스트가 없는 스캔/이미지 전용 PDF는 ""를 반환합니다.
     """
     from pypdf import PdfReader
 
@@ -197,16 +194,16 @@ def _extract_pdf_text(path: Path) -> str:
 
 
 def _embed_batch(texts: list[str]) -> list[list[float]]:
-    """Dense vectors for every chunk, EMBED_BATCH_SIZE chunks per request.
+    """모든 청크의 밀집 벡터를 요청당 EMBED_BATCH_SIZE개 청크씩 만듭니다.
 
-    Goes through `embeddings.embed_documents` rather than looping `embed()` so
-    providers with native batch input spend one HTTP round trip per batch instead
-    of one per chunk. Documents are embedded with the "document" task type; the
-    provider and model are whatever embeddings.py is configured for. Ingest and
-    query MUST share that config (see embeddings.py) or retrieval breaks.
+    `embed()`를 반복 호출하지 않고 `embeddings.embed_documents`를 거치므로, 네이티브
+    배치 입력을 지원하는 제공자는 청크마다가 아니라 배치마다 HTTP 왕복 한 번만
+    씁니다. 문서는 "document" 작업 유형으로 임베딩되며, 제공자와 모델은
+    embeddings.py에 설정된 것을 따릅니다. 수집과 질의는 반드시 그 설정을 공유해야
+    하며(embeddings.py 참고), 그렇지 않으면 검색이 깨집니다.
 
-    Order is preserved: `_embed_openai` realigns its response by `index`, and
-    batches are concatenated in slice order, so vectors[i] belongs to texts[i].
+    순서가 유지됩니다: `_embed_openai`가 응답을 `index`로 다시 정렬하고, 배치는
+    잘라낸 순서대로 이어 붙이므로 vectors[i]는 texts[i]에 대응합니다.
     """
     vectors: list[list[float]] = []
     for start in range(0, len(texts), EMBED_BATCH_SIZE):
@@ -215,12 +212,12 @@ def _embed_batch(texts: list[str]) -> list[list[float]]:
 
 
 def _upsert_points(client: QdrantClient, points: list[PointStruct]) -> None:
-    """Upsert in UPSERT_BATCH_SIZE-point requests, waiting for each to be applied.
+    """UPSERT_BATCH_SIZE개 포인트씩 요청으로 업서트하며, 각 요청이 반영될 때까지 기다립니다.
 
-    `wait=True` keeps the per-file "ingested" log line honest — it means the
-    chunks are actually queryable, not just queued — and means a failure part-way
-    through a large document leaves the earlier batches committed instead of
-    losing the whole file to one rejected request.
+    `wait=True` 덕분에 파일별 "ingested" 로그가 정확해집니다 — 청크가 대기열에만
+    들어간 것이 아니라 실제로 검색 가능하다는 뜻입니다. 또한 큰 문서 처리 도중
+    실패해도 거부된 요청 하나 때문에 파일 전체를 잃지 않고 앞선 배치는 커밋된 채로
+    남습니다.
     """
     for start in range(0, len(points), UPSERT_BATCH_SIZE):
         client.upsert(
@@ -231,14 +228,14 @@ def _upsert_points(client: QdrantClient, points: list[PointStruct]) -> None:
 
 
 def _delete_orphan_chunks(client: QdrantClient, source: str, kept: int) -> None:
-    """Drop points left over from a previous, longer ingest of the same source.
+    """같은 source를 이전에 더 길게 수집했을 때 남은 포인트를 삭제합니다.
 
-    Point IDs are uuid5(f"{source}#{index}"), which makes re-ingest idempotent
-    only while a document's chunk count never falls. Edit a runbook down from 30
-    chunks to 20 — or re-export a PDF with fewer pages — and chunks 20..29 stay
-    in the collection forever, still matching searches with stale text. Runs
-    after the upsert so current chunks are already in place; best-effort, because
-    an orphan is a stale search hit, not a reason to abort the whole ingest.
+    포인트 ID는 uuid5(f"{source}#{index}")이므로, 재수집이 멱등적인 것은 문서의
+    청크 수가 줄지 않을 때뿐입니다. 런북을 30개 청크에서 20개로 줄이거나 PDF를 더
+    적은 페이지로 다시 내보내면, 20..29번 청크가 컬렉션에 영원히 남아 오래된 텍스트로
+    계속 검색에 걸립니다. 현재 청크가 이미 들어간 뒤가 되도록 업서트 다음에
+    실행합니다. 고아 청크는 오래된 검색 결과일 뿐 수집 전체를 중단할 이유는 아니므로
+    최선형으로 동작합니다.
     """
     stale = Filter(
         must=[
@@ -252,7 +249,7 @@ def _delete_orphan_chunks(client: QdrantClient, source: str, kept: int) -> None:
             return
         client.delete(collection_name=COLLECTION, points_selector=FilterSelector(filter=stale))
         log.info("removed %d stale chunk(s) from a previous ingest of %s", orphans, source)
-    except Exception as exc:  # noqa: BLE001 - cleanup is best-effort, never fatal
+    except Exception as exc:  # noqa: BLE001 - 정리는 최선형이며 치명적이지 않음
         log.warning("stale-chunk cleanup failed for %s: %s", source, exc)
 
 
@@ -260,12 +257,12 @@ def _ensure_collection(client: QdrantClient, dim: int, recreate: bool) -> None:
     if client.collection_exists(COLLECTION) and recreate:
         log.info("recreating collection %s", COLLECTION)
         client.delete_collection(COLLECTION)
-    # Named dense (+ BM25 sparse when hybrid is live) schema, shared with capture.
+    # 명명된 밀집 벡터(+ 하이브리드가 켜져 있으면 BM25 희소 벡터) 스키마, capture와 공유.
     vectorstore.ensure_collection(client, COLLECTION, dim, payload_indexes=_INDEXED_FIELDS)
 
 
 def _discover_files(path: Path) -> list[Path]:
-    """All supported (.md/.pdf) files under `path`, sorted for stable IDs."""
+    """`path` 아래의 지원되는 모든 (.md/.pdf) 파일. ID가 안정적이도록 정렬합니다."""
     return sorted(
         p for p in path.rglob("*")
         if p.is_file() and p.suffix.lower() in _SUPPORTED_SUFFIXES
@@ -309,7 +306,7 @@ def ingest(path: Path, recreate: bool) -> None:
             _ensure_collection(client, len(dense[0]), recreate)
             collection_ready = True
 
-        # Pass through optional doc metadata for pre-filtering (step 3).
+        # 사전 필터링을 위해 선택적 문서 메타데이터를 그대로 전달 (3단계).
         extra = {k: meta[k] for k in ("component", "severity", "cluster") if meta.get(k)}
         points = [
             PointStruct(

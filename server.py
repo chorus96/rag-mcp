@@ -1,20 +1,20 @@
-"""RAG-memory MCP server — read-only semantic search over a Qdrant
-knowledge base of runbooks, past incidents, and RCAs.
+"""RAG 메모리 MCP 서버 — 런북, 과거 장애, RCA(근본 원인 분석)로 이루어진 Qdrant
+지식 베이스에 대한 읽기 전용 시맨틱 검색.
 
 
-Read-only posture
------------------
-This server exposes SEARCH tools only. The knowledge base is populated by the
-out-of-band `ingest.py` job (see README.md), so the LLM-facing surface stays
-read-only.
+읽기 전용 원칙
+--------------
+이 서버는 검색(SEARCH) 도구만 노출합니다. 지식 베이스는 별도 경로의 `ingest.py`
+작업이 채우므로(README.md 참고), LLM에 노출되는 인터페이스는 읽기 전용으로
+유지됩니다.
 
-Vendor-neutral by design
-------------------------
-Nothing here is bound to a specific LLM, UI, or embedding vendor. The chat LLM
-is chosen by whatever MCP client connects (LibreChat, Open WebUI via mcpo, a
-custom UI/CLI, ...). Embeddings go through the pluggable provider in
-`embeddings.py` (Ollama / any OpenAI-compatible endpoint), so the same server
-works offline with Ollama or against a hosted provider without code changes.
+벤더 중립 설계
+--------------
+특정 LLM, UI, 임베딩 벤더에 묶여 있지 않습니다. 채팅 LLM은 연결하는 MCP
+클라이언트(LibreChat, mcpo를 통한 Open WebUI, 직접 만든 UI/CLI 등)가 정합니다.
+임베딩은 `embeddings.py`의 교체 가능한 제공자(Ollama / OpenAI 호환 엔드포인트)를
+거치므로, 같은 서버가 코드 변경 없이 Ollama로 오프라인 동작하거나 호스팅
+제공자와 함께 동작합니다.
 """
 
 from __future__ import annotations
@@ -58,7 +58,7 @@ MCP_PORT = int(os.environ.get("MCP_PORT", "8084"))
 
 mcp = FastMCP("rag", host=MCP_HOST, port=MCP_PORT)
 
-# One long-lived client; Qdrant connections are cheap to keep open.
+# 오래 유지되는 클라이언트 하나; Qdrant 연결은 열어 두는 비용이 적습니다.
 _qdrant = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY, timeout=HTTP_TIMEOUT)
 
 
@@ -70,10 +70,10 @@ def _clamp_limit(limit: int) -> int:
 
 def _build_conditions(doc_type: str | None, component: str | None,
                       cluster: str | None) -> list[Any]:
-    """Qdrant payload conditions for the hard filters plus the (optional) cluster
-    narrow. `doc_type` and `component` are HARD: an empty result stays empty.
-    `cluster` is passed by the caller as a SOFT narrow and dropped on the fallback
-    retry (see `_search`)."""
+    """하드 필터와 (선택적) 클러스터 범위 제한을 위한 Qdrant 페이로드 조건.
+    `doc_type`과 `component`는 하드 필터입니다: 빈 결과는 그대로 비어 있습니다.
+    `cluster`는 호출자가 소프트 필터로 넘기며, 대체 재시도에서는 빠집니다
+    (`_search` 참고)."""
     conditions = []
     if doc_type:
         conditions.append(FieldCondition(key="doc_type", match=MatchValue(value=doc_type)))
@@ -86,15 +86,15 @@ def _build_conditions(doc_type: str | None, component: str | None,
 
 def _search(query: str, doc_type: str | None, cluster: str | None, component: str | None,
             limit: int) -> dict[str, Any]:
-    """Shared retrieval path used by every search tool.
+    """모든 검색 도구가 공유하는 검색 경로.
 
-    `doc_type` and `component` are hard filters. `cluster` is a SOFT narrow: if a
-    cluster-scoped search comes back empty it is retried fleet-wide (keeping the
-    hard filters), so a real precedent on another cluster is never hidden the
-    first time a symptom appears on a new cluster — the same empty-result
-    self-correction the agent prompt applies to Kubernetes/Prometheus. The
-    response reports `cluster_narrowed` so callers can tell "no precedent on this
-    cluster" from "no precedent anywhere".
+    `doc_type`과 `component`는 하드 필터입니다. `cluster`는 소프트 필터입니다:
+    클러스터로 한정한 검색 결과가 비어 있으면 (하드 필터는 유지한 채) 전체 범위로
+    다시 검색하므로, 새 클러스터에서 증상이 처음 나타났을 때도 다른 클러스터의
+    실제 선례가 가려지지 않습니다 — 에이전트 프롬프트가 Kubernetes/Prometheus에
+    적용하는 빈 결과 자기 보정과 같은 방식입니다. 응답에 `cluster_narrowed`를
+    포함해, 호출자가 "이 클러스터에는 선례 없음"과 "어디에도 선례 없음"을 구분할
+    수 있게 합니다.
     """
     query = (query or "").strip()
     if not query:
@@ -104,21 +104,21 @@ def _search(query: str, doc_type: str | None, cluster: str | None, component: st
     component = (component or "").strip() or None
 
     limit = _clamp_limit(limit)
-    # With a reranker on, fetch a wider candidate set (dense recall) and let the
-    # cross-encoder pick the final top-`limit` (precision). Off => fetch exactly limit.
+    # 리랭커가 켜져 있으면 후보를 넉넉히 가져오고(밀집 검색의 재현율), 최종 상위
+    # `limit`개는 크로스 인코더가 고르게 합니다(정밀도). 꺼져 있으면 정확히 limit개만 가져옵니다.
     fetch = max(limit, reranker.CANDIDATES) if reranker.enabled() else limit
 
     try:
         vector = embeddings.embed(query, "query")
     except embeddings.EmbeddingError as exc:
         return {"status": "error", "error": str(exc)}
-    except Exception as exc:  # noqa: BLE001 - surface any embedding failure verbatim
+    except Exception as exc:  # noqa: BLE001 - 어떤 임베딩 실패든 그대로 드러냄
         return {"status": "error", "error": f"embedding failed: {exc}"}
 
     def _run(narrow_cluster: str | None) -> list[Any]:
         conditions = _build_conditions(doc_type, component, narrow_cluster)
         query_filter = Filter(must=conditions) if conditions else None
-        # Hybrid (dense + BM25 sparse, RRF-fused) when hybrid is live, else dense.
+        # 하이브리드가 켜져 있으면 하이브리드(밀집 + BM25 희소, RRF 결합), 아니면 밀집 전용.
         return list(vectorstore.query(
             _qdrant, COLLECTION, vector, query,
             query_filter=query_filter, limit=fetch,
@@ -126,15 +126,15 @@ def _search(query: str, doc_type: str | None, cluster: str | None, component: st
 
     try:
         points = _run(cluster)
-        # None = no cluster requested; True = scoped to the cluster; False = the
-        # soft-narrow fallback to fleet-wide fired.
+        # None = 클러스터를 요청하지 않음; True = 해당 클러스터로 한정됨; False =
+        # 소프트 필터의 전체 범위 대체 검색이 실행됨.
         cluster_narrowed: bool | None = None
         if cluster is not None:
             cluster_narrowed = True
             if not points:
-                # Soft narrow: no same-cluster match — retry fleet-wide before
-                # answering "no prior occurrence" (a fleet-wide precedent must stay
-                # visible the first time a symptom appears on a new cluster).
+                # 소프트 필터: 같은 클러스터 결과가 없음 — "이전 발생 없음"이라고
+                # 답하기 전에 전체 범위로 다시 검색 (새 클러스터에서 증상이 처음
+                # 나타났을 때도 전체 범위의 선례가 보여야 함).
                 points = _run(None)
                 cluster_narrowed = False
     except UnexpectedResponse as exc:
@@ -150,8 +150,8 @@ def _search(query: str, doc_type: str | None, cluster: str | None, component: st
         return {"status": "error", "error": f"qdrant error: {exc}"}
     except Exception as exc:  # noqa: BLE001
         return {"status": "error", "error": f"qdrant search failed: {exc}"}
-    # Rerank the candidate set on FULL chunk text (not the snippet). Best-effort:
-    # any failure falls back to the dense order so a search never breaks.
+    # 후보를 (스니펫이 아닌) 청크 전체 텍스트로 리랭킹합니다. 최선형(best-effort):
+    # 어떤 실패든 밀집 검색 순서로 되돌아가므로 검색이 깨지지 않습니다.
     rerank_scores: list[float | None] = [None] * len(points)
     reranked = False
     if reranker.enabled() and len(points) > 1:
@@ -340,27 +340,27 @@ def rag_health() -> dict[str, Any]:
         health["status"] = "degraded"
         health["embeddings"] = {"reachable": False, **emb, "error": str(exc)}
 
-    # Reranking is optional and best-effort; report config only (no live probe).
+    # 리랭킹은 선택 사항이며 최선형입니다. 설정만 보고합니다 (실제 호출 확인 없음).
     health["reranker"] = reranker.describe()
-    health["retrieval"] = vectorstore.describe()  # hybrid on/off + sparse model
+    health["retrieval"] = vectorstore.describe()  # 하이브리드 켜짐/꺼짐 + 희소 모델
 
     return health
 
 
 # ---------------------------------------------------------------------------
-# Internal write API (NOT MCP tools — invisible to the LLM)
+# 내부 쓰기 API (MCP 도구 아님 — LLM에는 보이지 않음)
 # ---------------------------------------------------------------------------
-# The knowledge "flywheel": the trusted agent process captures RCAs and records
-# human feedback here after an investigation, and does the recurring-incident
-# pre-check via /similar. These are plain HTTP routes, so the read-only MCP tool
-# surface above is unchanged — the model can search but can never write.
-# Optionally gated by RAG_INTERNAL_TOKEN (set it in prod; blank = open for dev).
+# 지식 "플라이휠": 신뢰할 수 있는 에이전트 프로세스가 조사를 마친 뒤 여기서 RCA를
+# 기록하고 사람의 피드백을 남기며, /similar로 반복 장애 사전 확인을 합니다. 이것들은
+# 일반 HTTP 라우트이므로 위의 읽기 전용 MCP 도구 인터페이스는 그대로입니다 — 모델은
+# 검색만 할 수 있고 절대 쓸 수 없습니다.
+# RAG_INTERNAL_TOKEN으로 선택적으로 보호합니다 (운영에서는 설정; 비워 두면 개발용으로 열림).
 INTERNAL_TOKEN = os.environ.get("RAG_INTERNAL_TOKEN", "")
 
 
 def _authorized(request: Request) -> bool:
     if not INTERNAL_TOKEN:
-        return True  # dev: open
+        return True  # 개발용: 열림
     presented = request.headers.get("x-internal-token") or ""
     auth = request.headers.get("authorization", "")
     if not presented and auth.lower().startswith("bearer "):
@@ -377,7 +377,7 @@ async def _guarded(request: Request, fn) -> JSONResponse:
         body = {}
     try:
         return JSONResponse(fn(body))
-    except Exception as exc:  # noqa: BLE001 - never 500 the caller opaquely
+    except Exception as exc:  # noqa: BLE001 - 호출자에게 원인 없는 500을 절대 돌려주지 않음
         log.exception("internal knowledge route failed")
         return JSONResponse({"status": "error", "error": str(exc)}, status_code=500)
 
@@ -415,7 +415,7 @@ def main() -> None:
         "hybrid=%s, rerank=%s)",
         MCP_HOST, MCP_PORT, QDRANT_URL, COLLECTION,
         emb["provider"], emb["model"], emb["base_url"],
-        vectorstore.sparse_available(),  # loads BM25 at boot (fail fast)
+        vectorstore.sparse_available(),  # 시작 시 BM25를 로드 (빠른 실패)
         f"{rr['provider']}:{rr['model']}" if rr["enabled"] else "off",
     )
     mcp.run(transport="streamable-http")

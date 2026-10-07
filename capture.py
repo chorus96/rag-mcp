@@ -1,21 +1,20 @@
-"""Knowledge-capture write path for the RAG memory (the "flywheel").
+"""RAG 메모리의 지식 기록 쓰기 경로 ("플라이휠").
 
-This is the DELIBERATE, trusted write path that closes the loop: after the agent
-finishes an investigation, the resulting RCA is written back here so the next
-similar alert can be recognised as "seen before". It complements the batch
-`ingest.py` (runbooks/docs) with per-incident capture.
+순환 고리를 완성하는, 의도적이고 신뢰할 수 있는 쓰기 경로입니다: 에이전트가 조사를
+마치면 그 결과인 RCA를 여기에 다시 기록해, 다음에 비슷한 알림이 오면 "전에 본 것"으로
+알아볼 수 있게 합니다. 배치 `ingest.py`(런북/문서)를 장애 단위 기록으로 보완합니다.
 
-IMPORTANT — read-only MCP surface is preserved
-----------------------------------------------
-None of this is exposed as an ``@mcp.tool()``. The LLM only ever sees the search
-tools in ``server.py``; capture/feedback are plain HTTP routes (see
-``server.py`` ``@mcp.custom_route``) called by the trusted agent process, never
-by the model. This keeps the LLM-facing server strictly read-only — no write
-tools are ever offered to the model.
+중요 — 읽기 전용 MCP 인터페이스는 유지됩니다
+--------------------------------------------
+이 중 어느 것도 ``@mcp.tool()``로 노출되지 않습니다. LLM은 ``server.py``의 검색
+도구만 봅니다. 기록/피드백은 일반 HTTP 라우트(``server.py``의 ``@mcp.custom_route``
+참고)이며, 모델이 아니라 신뢰할 수 있는 에이전트 프로세스가 호출합니다. 덕분에 LLM에
+노출되는 서버는 엄격히 읽기 전용으로 유지됩니다 — 모델에게 쓰기 도구는 절대 제공되지
+않습니다.
 
-Embeddings + Qdrant live here (the knowledge service owns them), so capture and
-query embed identically — the hard rule from ``embeddings.py`` (ingest and query
-MUST share provider + model) is satisfied by construction.
+임베딩 + Qdrant는 여기에 있으므로(지식 서비스가 소유), 기록과 질의가 똑같이
+임베딩됩니다 — ``embeddings.py``의 엄격한 규칙(수집과 질의는 반드시 같은 제공자 +
+모델을 사용)이 구조적으로 충족됩니다.
 """
 
 from __future__ import annotations
@@ -38,7 +37,7 @@ from qdrant_client.models import (
 import embeddings
 import reranker
 import vectorstore
-from ingest import _chunk  # reuse the exact chunking used by batch ingest (DRY)
+from ingest import _chunk  # 배치 수집과 똑같은 청킹을 재사용 (DRY)
 
 log = logging.getLogger("rag-capture")
 
@@ -49,11 +48,11 @@ HTTP_TIMEOUT = float(os.environ.get("RAG_TIMEOUT_SECONDS", "60"))
 CHUNK_SIZE = int(os.environ.get("CHUNK_SIZE", "1500"))
 CHUNK_OVERLAP = int(os.environ.get("CHUNK_OVERLAP", "100"))
 
-# Same stable namespace as ingest.py so IDs are drawn from one space.
+# ingest.py와 같은 고정 네임스페이스를 써서 ID가 한 공간에서 생성되게 합니다.
 _ID_NAMESPACE = uuid.UUID("6f3a9c1e-9b2d-5a44-8c11-a1b2c3d4e5f6")
 
-# Payload keys we index so recurring-incident filters (cluster/alert/component)
-# are cheap. Creating an index that already exists is a no-op we swallow.
+# 반복 장애 필터(cluster/alert/component)를 저렴하게 하려고 색인하는 페이로드 키.
+# 이미 있는 인덱스를 만드는 것은 아무 일도 하지 않으며, 오류는 무시합니다.
 _INDEXED_FIELDS = (
     "doc_type", "fingerprint", "status", "cluster",
     "namespace", "alertname", "component",
@@ -67,9 +66,8 @@ def _now() -> str:
 
 
 def _fingerprint(doc: dict[str, Any]) -> str:
-    """Stable identity for a recurring incident. Prefer the alert fingerprint;
-    fall back to a deterministic hash of the identifying labels so manual
-    captures still de-duplicate."""
+    """반복 장애의 고정 식별자. 알림 fingerprint를 우선 사용하고, 없으면 식별
+    레이블의 결정적 해시로 대체해 수동 기록도 중복 제거되게 합니다."""
     fp = (doc.get("fingerprint") or "").strip()
     if fp:
         return fp
@@ -78,15 +76,15 @@ def _fingerprint(doc: dict[str, Any]) -> str:
 
 
 def _ensure_collection(dim: int) -> None:
-    # Named dense (+ BM25 sparse when hybrid is live) schema + keyword indexes,
-    # shared with ingest.py so write paths never drift.
+    # 명명된 밀집 벡터(+ 하이브리드가 켜져 있으면 BM25 희소 벡터) 스키마 + 키워드
+    # 인덱스. ingest.py와 공유하므로 쓰기 경로끼리 어긋나지 않습니다.
     vectorstore.ensure_collection(_client, COLLECTION, dim, payload_indexes=_INDEXED_FIELDS)
 
 
 def _searchable_text(doc: dict[str, Any]) -> str:
-    """The text we embed for retrieval — the symptom + cause + fix, so a future
-    alert with the same symptom matches. The full proposal is stored separately
-    in the payload for display."""
+    """검색용으로 임베딩하는 텍스트 — 증상 + 원인 + 해결책이므로, 나중에 같은
+    증상의 알림이 오면 매칭됩니다. 전체 제안은 표시용으로 페이로드에 따로
+    저장됩니다."""
     parts = [
         doc.get("title", ""),
         doc.get("symptom", ""),
@@ -98,8 +96,8 @@ def _searchable_text(doc: dict[str, Any]) -> str:
 
 
 def _existing_history(fingerprint: str) -> dict[str, Any]:
-    """Return {occurrence_count, first_seen} for a prior capture of this
-    fingerprint, so a recurrence increments rather than resets."""
+    """이 fingerprint의 이전 기록에 대한 {occurrence_count, first_seen}을 반환해,
+    재발 시 값이 초기화되지 않고 증가하게 합니다."""
     try:
         found, _ = _client.scroll(
             collection_name=COLLECTION,
@@ -107,7 +105,7 @@ def _existing_history(fingerprint: str) -> dict[str, Any]:
             limit=1,
             with_payload=True,
         )
-    except Exception:  # noqa: BLE001 - collection may not exist yet
+    except Exception:  # noqa: BLE001 - 컬렉션이 아직 없을 수 있음
         return {}
     if not found:
         return {}
@@ -116,10 +114,10 @@ def _existing_history(fingerprint: str) -> dict[str, Any]:
 
 
 def capture_incident(doc: dict[str, Any]) -> dict[str, Any]:
-    """Upsert one incident/RCA into the knowledge base, keyed by fingerprint.
+    """장애/RCA 하나를 fingerprint를 키로 지식 베이스에 업서트합니다.
 
-    Idempotent + recurrence-aware: re-capturing the same fingerprint replaces its
-    chunks and bumps ``occurrence_count`` / ``last_seen`` (first_seen preserved).
+    멱등적이며 재발을 인식합니다: 같은 fingerprint를 다시 기록하면 청크를 교체하고
+    ``occurrence_count`` / ``last_seen``을 갱신합니다 (first_seen은 유지).
     """
     fingerprint = _fingerprint(doc)
     body = (doc.get("body") or doc.get("proposal") or _searchable_text(doc)).strip()
@@ -127,8 +125,8 @@ def capture_incident(doc: dict[str, Any]) -> dict[str, Any]:
         return {"status": "error", "error": "nothing to capture (empty body)"}
 
     chunks = _chunk(body, CHUNK_SIZE, CHUNK_OVERLAP)
-    # First chunk carries the composed searchable text so symptom-based retrieval
-    # hits even when the body is a long free-form proposal.
+    # 첫 청크에는 조합한 검색용 텍스트를 담아, 본문이 긴 자유 형식 제안이어도
+    # 증상 기반 검색에 걸리게 합니다.
     embed_texts = [_searchable_text(doc) or chunks[0]] + chunks[1:]
     try:
         vectors = [embeddings.embed(t, "document") for t in embed_texts]
@@ -165,8 +163,8 @@ def capture_incident(doc: dict[str, Any]) -> dict[str, Any]:
         "last_seen": now,
     }
 
-    # Replace any prior chunks for this fingerprint so a shorter re-capture
-    # doesn't leave stale chunks behind.
+    # 이 fingerprint의 이전 청크를 교체해, 더 짧게 다시 기록해도 오래된 청크가
+    # 남지 않게 합니다.
     try:
         _client.delete(
             collection_name=COLLECTION,
@@ -175,8 +173,8 @@ def capture_incident(doc: dict[str, Any]) -> dict[str, Any]:
     except Exception:  # noqa: BLE001
         pass
 
-    # Sparse vectors from the SAME texts the dense vectors describe (embed_texts),
-    # so both signals point at the composed searchable content. [None...] if hybrid off.
+    # 밀집 벡터와 같은 텍스트(embed_texts)로 희소 벡터를 만들어, 두 신호가 모두
+    # 조합한 검색용 내용을 가리키게 합니다. 하이브리드가 꺼져 있으면 [None...].
     sparse = vectorstore.embed_documents_sparse(embed_texts)
     points = [
         PointStruct(
@@ -201,13 +199,13 @@ def capture_incident(doc: dict[str, Any]) -> dict[str, Any]:
 
 def find_similar(query: str, doc_type: str = "incident", limit: int = 3, min_score: float = 0.0,
                  cluster: str | None = None) -> dict[str, Any]:
-    """Semantic lookup for the recurring-incident pre-check. Returns matches at or
-    above ``min_score`` with the structured payload fields the notifier surfaces.
+    """반복 장애 사전 확인을 위한 시맨틱 조회. ``min_score`` 이상인 결과를 알림
+    발송기가 표시하는 구조화된 페이로드 필드와 함께 반환합니다.
 
-    ``cluster`` is a SOFT narrow, mirroring the search tools: when a cluster-scoped
-    lookup comes back empty it is retried fleet-wide and the response reports
-    ``cluster_narrowed: false`` — a precedent seen on another cluster must still be
-    surfaced the first time a symptom appears on a new cluster.
+    ``cluster``는 검색 도구와 마찬가지로 소프트 필터입니다: 클러스터로 한정한 조회
+    결과가 비어 있으면 전체 범위로 다시 조회하고 ``cluster_narrowed: false``를
+    보고합니다 — 새 클러스터에서 증상이 처음 나타났을 때도 다른 클러스터에서 본
+    선례가 나타나야 합니다.
     """
     query = (query or "").strip()
     if not query:
@@ -225,15 +223,15 @@ def find_similar(query: str, doc_type: str = "incident", limit: int = 3, min_sco
         if narrow_cluster:
             conditions.append(FieldCondition(key="cluster", match=MatchValue(value=narrow_cluster)))
         query_filter = Filter(must=conditions) if conditions else None
-        # Dense-only: recurring detection thresholds on cosine (min_score), which
-        # RRF fusion would not preserve. The LLM-facing search uses hybrid.
+        # 밀집 전용: 반복 장애 감지는 코사인 값(min_score)으로 임계값을 판단하는데,
+        # RRF 결합은 이 값을 유지하지 않습니다. LLM용 검색은 하이브리드를 씁니다.
         return list(vectorstore.query(
             _client, COLLECTION, vector, query,
             query_filter=query_filter, limit=max(1, limit), hybrid=False,
         ))
 
     def _hits(points: list[Any]) -> list[dict[str, Any]]:
-        # De-duplicate by fingerprint (an incident has several chunks) keeping best score.
+        # fingerprint 기준으로 중복 제거 (장애 하나에 청크가 여러 개), 최고 점수만 유지.
         best: dict[str, dict[str, Any]] = {}
         for point in points:
             if point.score < min_score:
@@ -258,8 +256,8 @@ def find_similar(query: str, doc_type: str = "incident", limit: int = 3, min_sco
 
     try:
         points = _run(cluster)
-        # None = no cluster requested; True = scoped to the cluster; False = the
-        # soft-narrow fallback to fleet-wide fired.
+        # None = 클러스터를 요청하지 않음; True = 해당 클러스터로 한정됨; False =
+        # 소프트 필터의 전체 범위 대체 검색이 실행됨.
         cluster_narrowed: bool | None = None
         hits = _hits(points)
         if cluster is not None:
@@ -270,7 +268,7 @@ def find_similar(query: str, doc_type: str = "incident", limit: int = 3, min_sco
                 hits = _hits(points)
     except UnexpectedResponse as exc:
         if exc.status_code == 404:
-            return {"status": "ok", "count": 0, "results": []}  # empty KB is not an error
+            return {"status": "ok", "count": 0, "results": []}  # 빈 KB는 오류가 아님
         return {"status": "error", "error": f"qdrant error: {exc}"}
     except Exception as exc:  # noqa: BLE001
         return {"status": "error", "error": f"qdrant search failed: {exc}"}
@@ -281,8 +279,8 @@ def find_similar(query: str, doc_type: str = "incident", limit: int = 3, min_sco
 
 def record_feedback(fingerprint: str, status: str | None = None, confidence: str | None = None,
                     note: str | None = None) -> dict[str, Any]:
-    """Attach a human decision back onto a captured incident (the feedback loop).
-    Updates every chunk sharing the fingerprint."""
+    """기록된 장애에 사람의 결정을 덧붙입니다 (피드백 루프).
+    같은 fingerprint를 가진 모든 청크를 갱신합니다."""
     fingerprint = (fingerprint or "").strip()
     if not fingerprint:
         return {"status": "error", "error": "fingerprint required"}
@@ -306,7 +304,7 @@ def record_feedback(fingerprint: str, status: str | None = None, confidence: str
 
 
 def stats() -> dict[str, Any]:
-    """Knowledge-base counts for an admin dashboard or UI."""
+    """관리자 대시보드나 UI용 지식 베이스 개수."""
     try:
         total = _client.count(COLLECTION, exact=True).count
     except Exception:  # noqa: BLE001
@@ -320,7 +318,7 @@ def stats() -> dict[str, Any]:
                     must=[FieldCondition(key="doc_type", match=MatchValue(value=doc_type))]
                 ),
             ).count
-        except Exception:  # noqa: BLE001 - a per-type count is best-effort
+        except Exception:  # noqa: BLE001 - 유형별 개수는 최선형
             return None
 
     return {

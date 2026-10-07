@@ -1,34 +1,34 @@
-"""Provider-agnostic cross-encoder reranking for the RAG memory (retrieval step 2).
+"""RAG 메모리를 위한 제공자 무관 크로스 인코더 리랭킹 (검색 2단계).
 
-Dense vector search is good at recall but weak at ordering: the best chunk is
-often in the top-30 but not the top-5. A reranker scores each (query, chunk) pair
-with a cross-encoder and reorders, which is the single biggest precision win for
-the least effort — it is query-time only and needs NO re-ingest.
+밀집 벡터 검색은 재현율은 좋지만 순서가 약합니다: 가장 좋은 청크가 상위 30개 안에는
+자주 있지만 상위 5개 안에는 없을 때가 많습니다. 리랭커는 크로스 인코더로 각
+(query, chunk) 쌍에 점수를 매겨 순서를 다시 정하며, 가장 적은 노력으로 가장 큰 정밀도
+향상을 얻는 방법입니다 — 질의 시점에만 동작하므로 다시 수집할 필요가 없습니다.
 
-Posture
--------
-- OFF by default (`RERANK_PROVIDER=none`) so the stack behaves exactly as before
-  until an operator opts in — set it in .env, no code change.
-- BEST-EFFORT: any failure (bad key, endpoint down, malformed response) raises
-  RerankError and the caller falls back to the original dense order. Reranking
-  must never break a search.
+원칙
+----
+- 기본으로 꺼져 있습니다(`RERANK_PROVIDER=none`). 운영자가 켜기 전까지 스택은 이전과
+  똑같이 동작합니다 — .env에서 설정하면 되고 코드 변경은 필요 없습니다.
+- 최선형(BEST-EFFORT): 어떤 실패든(잘못된 키, 엔드포인트 중단, 잘못된 형식의 응답)
+  RerankError를 발생시키고 호출자는 원래의 밀집 검색 순서로 되돌아갑니다. 리랭킹
+  때문에 검색이 깨져서는 절대 안 됩니다.
 
-Providers
----------
-  none    — disabled (default).
-  cohere  — Cohere/Jina-compatible rerank API: POST {base}/rerank with
+제공자
+------
+  none    — 비활성 (기본값).
+  cohere  — Cohere/Jina 호환 rerank API: POST {base}/rerank 에
             {model, query, documents} -> {results:[{index, relevance_score}]}.
-            Covers Cohere (default base) and Jina (set RERANK_BASE_URL +
-            RERANK_MODEL). One standard shape, like the openai embeddings path.
+            Cohere(기본 base)와 Jina(RERANK_BASE_URL + RERANK_MODEL 설정)를
+            지원합니다. openai 임베딩 경로처럼 표준 형식 하나입니다.
 
-Env
----
-  RERANK_PROVIDER    none | cohere            (default none)
+환경 변수
+---------
+  RERANK_PROVIDER    none | cohere            (기본값 none)
   RERANK_MODEL       rerank-english-v3.0      (Cohere) / jina-reranker-v2-... (Jina)
-  RERANK_BASE_URL    https://api.cohere.com   (or https://api.jina.ai/v1)
-  RERANK_API_KEY     provider API key
-  RERANK_CANDIDATES  how many dense hits to fetch before reranking (default 30)
-  RERANK_TIMEOUT     HTTP timeout seconds (default 30)
+  RERANK_BASE_URL    https://api.cohere.com   (또는 https://api.jina.ai/v1)
+  RERANK_API_KEY     제공자 API 키
+  RERANK_CANDIDATES  리랭킹 전에 가져올 밀집 검색 결과 수 (기본값 30)
+  RERANK_TIMEOUT     HTTP 타임아웃 초 (기본값 30)
 """
 
 from __future__ import annotations
@@ -46,7 +46,7 @@ HTTP_TIMEOUT = float(os.environ.get("RERANK_TIMEOUT", "30"))
 
 
 class RerankError(RuntimeError):
-    """Raised when reranking cannot be produced; caller falls back to dense order."""
+    """리랭킹 결과를 만들 수 없을 때 발생합니다. 호출자는 밀집 검색 순서로 되돌아갑니다."""
 
 
 def enabled() -> bool:
@@ -54,7 +54,7 @@ def enabled() -> bool:
 
 
 def describe() -> dict[str, object]:
-    """Non-secret summary of the active rerank config (for health/logs)."""
+    """현재 리랭크 설정의 요약, 비밀 값 제외 (상태 확인/로그용)."""
     return {"provider": PROVIDER, "model": MODEL, "candidates": CANDIDATES,
             "enabled": enabled()}
 
@@ -65,14 +65,14 @@ def _endpoint() -> str:
         return base
     if base.endswith(("/v1", "/v2")):
         return f"{base}/rerank"
-    return f"{base}/v2/rerank"  # Cohere default
+    return f"{base}/v2/rerank"  # Cohere 기본값
 
 
 def rerank(query: str, documents: list[str]) -> list[tuple[int, float]]:
-    """Score (query, doc) pairs and return (original_index, score) sorted best-first.
+    """(query, doc) 쌍에 점수를 매기고 (원래 인덱스, 점수)를 좋은 순서대로 반환합니다.
 
-    Raises RerankError on any failure so the caller can fall back to the input
-    order. Returns at most len(documents) items."""
+    어떤 실패든 RerankError를 발생시켜 호출자가 입력 순서로 되돌아갈 수 있게 합니다.
+    최대 len(documents)개를 반환합니다."""
     if not enabled():
         raise RerankError("reranker disabled")
     if not documents:
@@ -98,7 +98,7 @@ def rerank(query: str, documents: list[str]) -> list[tuple[int, float]]:
         ) from exc
     except httpx.RequestError as exc:
         raise RerankError(f"could not reach the rerank endpoint ({exc})") from exc
-    except Exception as exc:  # noqa: BLE001 - malformed JSON etc.
+    except Exception as exc:  # noqa: BLE001 - 잘못된 형식의 JSON 등
         raise RerankError(f"rerank response could not be parsed ({exc})") from exc
 
     if not isinstance(results, list):
