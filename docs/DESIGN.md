@@ -251,7 +251,11 @@ docker compose up -d --build
 | `CHUNK_SIZE` / `CHUNK_OVERLAP` | `1500` / `100` | 수집 시 청킹 |
 | `EMBED_BATCH_SIZE` | `32` | 임베딩 요청당 청크 수. `ollama` 제공자에는 효과 없음 (단일 프롬프트 API) |
 | `QDRANT_UPSERT_BATCH` | `64` | 수집 중 Qdrant 업서트 요청당 포인트 수 |
+| `RAG_TIMEOUT_SECONDS` | `30` (서버의 Qdrant 연결) / `60` (임베딩 요청, 수집, 기록) | HTTP 타임아웃 (초) |
+| `RAG_HYBRID` | `true` | 하이브리드 검색(밀집 + BM25) 켜기/끄기. 바꾸면 `--recreate` 필요 |
+| `RAG_SPARSE_MODEL` | `Qdrant/bm25` | FastEmbed 희소(BM25) 모델 |
 | `RAG_DEFAULT_LIMIT` / `RAG_MAX_LIMIT` | `5` / `20` | 검색 결과 개수 상한 |
+| `RAG_SNIPPET_CHARS` | `1200` | 검색 결과마다 반환하는 텍스트의 최대 글자 수 (넘으면 `truncated: true`) |
 | `RERANK_PROVIDER` | `none` | 리랭커 제공자: `none`(비활성) 또는 `cohere`(Cohere/Jina 호환 `/rerank`) |
 | `RERANK_MODEL` | `rerank-multilingual-v3.0` | 리랭커 모델 (Cohere 다국어). Jina는 `jina-reranker-v2-base-multilingual` |
 | `RERANK_BASE_URL` | `https://api.cohere.com` | 리랭커 API 기본 URL (Jina는 `https://api.jina.ai/v1`) |
@@ -259,6 +263,8 @@ docker compose up -d --build
 | `RERANK_CANDIDATES` | `30` | 리랭킹 전에 가져오는 후보 수 |
 | `RERANK_TIMEOUT` | `30` | 리랭커 HTTP 타임아웃 (초) |
 | `MCP_PORT` | `8084` | 서버 포트 |
+| `MCP_HOST` | `0.0.0.0` | 서버 바인드 주소 |
+| `RAG_INTERNAL_TOKEN` | _(비어 있음)_ | 내부 쓰기 API(`/internal/knowledge/*`) 보호 토큰. 비워 두면 열림 (개발용) |
 
 ### 호스팅 / OpenAI 호환 임베딩 제공자 사용하기
 
