@@ -83,10 +83,10 @@ code_vars=$(grep -ohE 'os\.environ\.get\("[A-Z_]+' tools/*.py | sed 's/.*"//' | 
 missing_env=""; missing_doc=""
 for v in $code_vars; do
     grep -qE "^#? ?$v=" .env.example || missing_env="$missing_env $v"
-    grep -q "\`$v\`" docs/DESIGN.md || missing_doc="$missing_doc $v"
+    grep -q "\`$v\`" README.md || missing_doc="$missing_doc $v"
 done
 [ -z "$missing_env" ] && pass ".env.example 에 코드의 환경 변수가 모두 있음" || fail ".env.example 에 없는 변수:$missing_env"
-[ -z "$missing_doc" ] && pass "docs/DESIGN.md 에 코드의 환경 변수가 모두 있음" || fail "docs/DESIGN.md 에 없는 변수:$missing_doc"
+[ -z "$missing_doc" ] && pass "README.md 설정 표에 코드의 환경 변수가 모두 있음" || fail "README.md 설정 표에 없는 변수:$missing_doc"
 
 inline=$(grep -nE '^[A-Z_]+=.*#' .env.example || true)
 [ -z "$inline" ] && pass ".env.example 에 같은 줄 끝 주석 없음 (systemd 규칙)" || fail ".env.example 같은 줄 끝 주석: $inline"
@@ -130,7 +130,7 @@ def slug(h):
     return s.replace(" ", "-")
 def heads(path):
     return {slug(m) for m in re.findall(r"^#+ (.+)$", open(path, encoding="utf-8").read(), re.M)}
-for doc in ["README.md", "docs/DESIGN.md", "plugins/rag-mcp/skills/rag-knowledge/SKILL.md",
+for doc in ["README.md", "plugins/rag-mcp/skills/rag-knowledge/SKILL.md",
             "plugins/rag-mcp/skills/rag-list-documents/SKILL.md",
             "plugins/rag-mcp/skills/rag-add-document/SKILL.md",
             "plugins/rag-mcp/skills/rag-delete-document/SKILL.md"]:

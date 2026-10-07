@@ -19,9 +19,9 @@ bash .claude/skills/repo-check/scripts/check.sh
 |------|------|
 | 1. 파이썬 | `tools/*.py` 문법, `tests/` 테스트 (테스트 패키지가 없으면 `.venv/`에 자동 설치) |
 | 2. 배포 스크립트 | `install.sh`·`uninstall.sh`·`rag-ingest`·`rag-promote` 문법, `install.sh`의 복사 목록과 `tools/*.py` 일치, 두 명령 템플릿의 자리 표시자(`@...@`)를 `install.sh`가 모두 채우는지 |
-| 3. 환경 변수 | 코드가 읽는 변수가 `.env.example`과 `docs/DESIGN.md`에 모두 있는지, `.env.example`에 같은 줄 끝 주석이 없는지(systemd 규칙), `RAG_KNOWLEDGE_DIR=` 줄이 정확히 1개인지 |
+| 3. 환경 변수 | 코드가 읽는 변수가 `.env.example`과 README의 설정 표에 모두 있는지, `.env.example`에 같은 줄 끝 주석이 없는지(systemd 규칙), `RAG_KNOWLEDGE_DIR=` 줄이 정확히 1개인지 |
 | 4. 플러그인 | 마켓플레이스·플러그인 JSON 형식, `claude plugin validate --strict`, 플러그인을 고쳤는데 `version`을 올리지 않았는지 |
-| 5. 문서 링크 | README, DESIGN.md, 플러그인 스킬의 상대 경로 링크와 `#섹션` 링크가 실제로 있는지 |
+| 5. 문서 링크 | README, 플러그인 스킬의 상대 경로 링크와 `#섹션` 링크가 실제로 있는지 |
 | 6. 흔적 / 비밀 값 | 제거한 Docker·Ollama의 흔적, 최상위 `.py` 파일, 키처럼 보이는 문자열, 커밋된 `.env` |
 
 ## 2. 결과 처리
@@ -47,16 +47,15 @@ bash .claude/skills/repo-check/scripts/check.sh
     맞게 고쳤는지 확인하세요.
   - 모델에게 노출되는 쓰기 도구는 `rag_add_document`, `rag_delete_document`뿐이고, `RAG_MCP_WRITE`가 꺼져
     있으면(기본값) 둘 다 등록되지 않는지 확인하세요. 쓰기 도구가 문서 디렉터리의 `draft/` 밖을 건드리지 않는지도 보세요. 그 밖의 쓰기는 `rag-ingest`와 사람 전용 명령 `rag-promote`로만 합니다.
-  - 새 환경 변수를 추가했다면 `.env.example`과 `docs/DESIGN.md`의 환경 변수 표에 함께 넣었는지 확인하세요.
+  - 새 환경 변수를 추가했다면 `.env.example`과 README의 설정 표에 함께 넣었는지 확인하세요.
 - **설치 구조를 고쳤다면** (`deploy/`)
   - `install.sh`와 `uninstall.sh`의 경로가 서로 같은지, systemd 유닛(`deploy/systemd/`)의 `%h` 경로와도
     맞는지
   - root 없이 설치·제거되는지 (시스템 경로나 `sudo`를 새로 쓰지 않았는지)
   - 기존 설치를 업그레이드할 때 설정 파일과 데이터를 덮어쓰지 않는지
-- **설정 기본값을 바꿨다면** — 코드의 기본값, `.env.example`, `docs/DESIGN.md` 표, README의 요약표가
-  모두 같은 값인지
-- **문서를 고쳤다면** — README(설치·사용법)와 DESIGN.md(동작 원리·이유)의 역할 구분이 유지되는지,
-  같은 설명이 두 곳에 중복되지 않는지
+- **설정 기본값을 바꿨다면** — 코드의 기본값, `.env.example`, README의 설정 표와 본문에 적힌 값이 모두 같은지
+- **문서를 고쳤다면** — README 한 곳에 설치·사용법과 동작 원리·설계 이유가 모두 있습니다. 같은 설명이 README의
+  여러 섹션이나 플러그인 스킬·`.env.example`과 어긋나지 않는지 확인하세요
 - **임베딩 모델이나 하이브리드 설정을 바꿨다면** — 문서에 `rag-ingest --recreate`(재구축) 안내가 있는지
 
 ## 4. 보고
