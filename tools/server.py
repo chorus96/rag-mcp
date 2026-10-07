@@ -1,7 +1,7 @@
 """tools/server.py — rag-mcp MCP 서버.
 
 역할
-  런북, RCA(근본 원인 분석) 등 운영 문서로 이루어진 지식 베이스에 대한 검색 도구를
+  마크다운·PDF 문서로 이루어진 지식 베이스에 대한 검색 도구를
   MCP(streamable-http)로 제공합니다.
 
 구성
@@ -223,7 +223,7 @@ def rag_search(
     component: str | None = None,
     limit: int = DEFAULT_LIMIT,
 ) -> dict[str, Any]:
-    """지식 베이스(런북, RCA 등 운영 문서) 전체에 대한 시맨틱 검색.
+    """지식 베이스 전체에 대한 시맨틱 검색.
 
     문제를 진단하는 동안 관련 문서를 가져올 때 호출하세요 — 컴포넌트의 런북, 같은 증상을
     다룬 RCA나 운영 문서 등. 키워드가 아니라 의미로 검색하므로 증상을 서술하세요.

@@ -4,13 +4,13 @@
     "name": "chorus96"
   },
   "metadata": {
-    "description": "조직의 지식 베이스(런북, RCA 등 운영 문서)를 검색하는 rag-mcp 플러그인 마켓플레이스"
+    "description": "조직의 지식 베이스(마크다운·PDF 문서)를 검색하는 rag-mcp 플러그인 마켓플레이스"
   },
   "plugins": [
     {
       "name": "rag-mcp",
       "source": "./plugins/rag-mcp",
-      "description": "rag-mcp 서버에 연결해 런북, RCA 같은 운영 문서(정식 문서 official/, 초안 draft/)를 검색하는 MCP 도구와 사용 안내 스킬",
+      "description": "rag-mcp 서버에 연결해 마크다운·PDF 문서(정식 문서 official/, 초안 draft/)를 검색하는 MCP 도구와 사용 안내 스킬",
       "category": "knowledge",
       "homepage": "https://github.com/chorus96/rag-mcp"
     }

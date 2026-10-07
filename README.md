@@ -46,8 +46,7 @@
                        WRITE PATH — populate the KB
   ┌───────────────────────────┐
   │       knowledge/**        │   your markdown & PDF docs,
-  │  runbooks · RCAs ·        │   optional YAML front matter
-  │  wikis · post-mortems     │
+  │    official/ · draft/     │   optional YAML front matter
   └─────────────┬─────────────┘
                 │
                 ▼

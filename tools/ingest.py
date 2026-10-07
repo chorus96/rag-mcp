@@ -1,7 +1,7 @@
 """tools/ingest.py — 문서 수집.
 
 역할
-  마크다운과 PDF 문서(런북, RCA, 참고 자료 등)를 읽어 청크로 나누고, OpenAI 호환 임베딩
+  마크다운과 PDF 문서를 읽어 청크로 나누고, OpenAI 호환 임베딩
   엔드포인트로 임베딩한 뒤 Qdrant에 업서트합니다. 사람이 관리하는 정식 문서(official/)를 지식 베이스에
   넣는 정해진 경로입니다. MCP 쓰기 도구(documents.py)와 rag-promote(promote.py)도 파일 하나를 색인할 때
   이 모듈의 ingest_file 을 그대로 씁니다.
