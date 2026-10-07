@@ -2,7 +2,7 @@
 
 **AI 어시스턴트용 RAG 메모리 서버**입니다. 런북, 장애 보고서, RCA(근본 원인 분석), 위키 내보내기 같은
 마크다운·PDF 문서를 색인해 두고, [Model Context Protocol](https://modelcontextprotocol.io)(MCP)로
-검색 도구를 제공합니다. Claude Code, Claude Desktop, LibreChat 등 MCP를 지원하는 클라이언트라면
+검색 도구를 제공합니다. Claude Code, Claude Desktop 등 MCP를 지원하는 클라이언트라면
 어디서든 "전에 이런 장애가 있었나?", "이 작업의 처리 절차는?" 같은 질문에 여러분의 문서를 근거로
 답하게 할 수 있습니다.
 
@@ -81,7 +81,7 @@
   ┌──┴───────────────────┐  │
   │      MCP clients     │  ▼
   │  Claude Code ·       │  trusted automation
-  │  LibreChat ·         │  (agent / CI capturing
+  │  Claude Desktop ·    │  (agent / CI capturing
   │  your own agents     │  incidents + human feedback)
   └──────────────────────┘
 ```
@@ -250,17 +250,9 @@ claude plugin install rag-mcp@rag-mcp --config server_url=http://<서버>:8084/m
 }
 ```
 
-### LibreChat
+### 그 밖의 MCP 클라이언트
 
-```yaml
-# librechat.yaml
-mcpServers:
-  rag:
-    type: streamable-http
-    url: http://<rag-mcp 서버 주소>:8084/mcp
-```
-
-그 밖의 MCP 클라이언트도 같은 URL을 HTTP(streamable-http) 서버로 등록하면 됩니다.
+`http://<rag-mcp 서버 주소>:8084/mcp`를 HTTP(streamable-http) MCP 서버로 등록하면 됩니다.
 
 ## 검색 도구
 
