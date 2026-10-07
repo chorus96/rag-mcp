@@ -27,7 +27,7 @@ rm -f /tmp/repo-check-compile.$$
 # 테스트에 필요한 패키지(pytest + requirements.txt)가 없으면 저장소의 .venv/ 에 설치해서 씁니다.
 # 시스템 Python에 직접 설치하지 않는 이유: 배포판에 따라 pip 설치가 막혀 있고(PEP 668),
 # 시스템 패키지를 건드리지 않기 위해서입니다. .venv/ 는 .gitignore 대상입니다.
-TEST_DEPS='import pytest, mcp, qdrant_client, httpx, yaml, pypdf'
+TEST_DEPS='import pytest, mcp, qdrant_client, httpx, yaml, pypdf, kiwipiepy, mmh3'
 PY=python3
 if ! "$PY" -c "$TEST_DEPS" 2>/dev/null; then
     PY=.venv/bin/python

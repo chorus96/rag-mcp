@@ -6,7 +6,13 @@ PyYAML>=6.0
 # PDF ingestion support (tools/ingest.py) — text extraction for .pdf knowledge docs.
 pypdf>=4.0
 
-# Local BM25 sparse vectors for hybrid search (retrieval step 1). Runs offline,
-# no API key. Optional at runtime: if it fails to import, rag-mcp falls back to
-# dense-only (see tools/vectorstore.py). Pulls onnxruntime.
+# Korean morphological analyzer for the default BM25 sparse model (kiwi-bm25,
+# tools/kiwi_bm25.py). Pure pip install, bundles its model (~100MB), runs offline.
+kiwipiepy>=0.20
+# Token hashing for kiwi-bm25 (same hash as FastEmbed BM25).
+mmh3>=4.0
+
+# Alternative sparse model RAG_SPARSE_MODEL=Qdrant/bm25 (English-oriented BM25,
+# downloaded from huggingface.co on first use). Pulls onnxruntime. If a sparse
+# model fails to load, rag-mcp falls back to dense-only (see tools/vectorstore.py).
 fastembed>=0.3,<0.8
