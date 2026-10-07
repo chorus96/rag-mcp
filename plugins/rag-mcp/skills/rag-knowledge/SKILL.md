@@ -26,8 +26,8 @@ description: 조직의 지식 베이스(런북, RCA 등 운영 문서)를 rag MC
 | `rag_collections()` | 결과가 계속 비어 있을 때 — 지식 베이스가 채워졌는지 확인 |
 | `rag_health()` | 도구 호출이 실패할 때 — Qdrant와 임베딩 엔드포인트 상태 확인 |
 | `rag_list_documents(folder?, subdir?, limit?)` | "어떤 문서가 있지?", "검토할 초안은?" — 정식 문서(`official/`) 또는 초안(`draft/`) 파일 목록. 자세한 사용법은 `rag-list-documents` 스킬 |
-| `rag_add_document(title, content, doc_type?, ...)` | (켜져 있을 때만) 사용자가 문서 추가를 요청했을 때 — 아래 "문서 추가·삭제" 참고 |
-| `rag_delete_document(source)` | (켜져 있을 때만) 사용자가 초안(`draft/`) 문서 삭제를 요청했을 때 — 아래 "문서 추가·삭제" 참고 |
+| `rag_add_document(title, content, doc_type?, ...)` | (켜져 있을 때만) 사용자가 문서 추가를 요청했을 때 — 자세한 사용법은 `rag-add-document` 스킬 |
+| `rag_delete_document(source)` | (켜져 있을 때만) 사용자가 초안(`draft/`) 문서 삭제를 요청했을 때 — 자세한 사용법은 `rag-delete-document` 스킬 |
 
 `limit`의 기본값은 5, 최대 20입니다.
 
@@ -109,25 +109,12 @@ description: 조직의 지식 베이스(런북, RCA 등 운영 문서)를 rag MC
   검토하게 할 수는 있습니다(사용자가 원할 때만).
 - 초안을 정식 문서로 올리는 것(승격)은 서버 관리자가 `rag-promote <source>` 명령으로 합니다.
 
-### 추가 (`rag_add_document`)
+### 자세한 사용법
 
-- **사용자가 명시적으로 요청했을 때만** 추가하세요. 대화 내용을 임의로 저장하지 마세요.
-- 저장하기 전에 제목, 문서 유형(`runbook`, `rca`, `note` 등), 본문 요약을 사용자에게 보여 주고
-  확인을 받으세요.
-- 본문은 나중에 검색될 수 있게 정리된 마크다운으로 쓰세요. 증상, 원인, 조치처럼 섹션을 나누면 검색이 잘 됩니다.
-  에러 문자열과 리소스 이름은 원문 그대로 넣으세요.
-- 같은 제목의 문서가 있다는 오류가 나면, 덮어쓸지 다른 제목으로 저장할지 사용자에게 묻고 `overwrite=true`는
-  사용자가 동의했을 때만 쓰세요.
-- 저장 후에는 응답의 `source`(예: `draft/longhorn-볼륨-복구.md`)를 알려 주고, 초안으로 저장되었으며 서버
-  관리자가 검토한 뒤 `rag-promote <source>` 명령으로 `official/`에 올릴 수 있다고 안내하세요.
+- 추가: `rag-add-document` 스킬 — 요청 확인, 중복 확인, 본문 작성 요령, 저장 전 사용자 확인, 오류 대응
+- 삭제: `rag-delete-document` 스킬 — 대상 찾기(`rag_list_documents(folder="draft")`), 삭제 전 확인, 결과 해석
 
-### 삭제 (`rag_delete_document`)
-
-- **사용자가 삭제를 명시적으로 요청했을 때만** 쓰세요. 삭제는 되돌릴 수 없습니다.
-- 먼저 검색해서 삭제할 문서의 `source`와 `title`을 찾아 사용자에게 보여 주고, **이 문서가 맞는지 확인받은
-  뒤에** 삭제하세요. `source`가 `draft/`로 시작하지 않으면 지울 수 없습니다. 비슷한 문서가 여러 개면 어느 것을 지울지 물어보세요.
-- 한 번에 하나씩 지우세요. 여러 문서를 지워 달라는 요청이면 목록을 보여 주고 확인을 받으세요.
-- 삭제 후에는 응답의 `file_deleted`, `chunks_deleted`를 사용자에게 알려 주세요.
+두 도구 모두 **사용자가 명시적으로 요청했을 때만**, **저장·삭제 전에 사용자의 확인을 받은 뒤에** 쓰세요.
 
 ## 하지 말아야 할 것
 

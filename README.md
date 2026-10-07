@@ -200,8 +200,14 @@ Claude Code라면 [플러그인](#claude-code-플러그인-권장)으로 연결�
 ### Claude Code 플러그인 (권장)
 
 이 저장소는 Claude Code 플러그인 마켓플레이스입니다. `rag-mcp` 플러그인을 설치하면 MCP 서버 연결과
-함께, 언제 어떤 검색 도구를 쓸지 알려 주는 스킬(`rag-knowledge`)과 정식 문서·초안 목록을 보여 주는 스킬(`rag-list-documents`)이
-추가됩니다.
+함께, 다음 스킬이 추가됩니다.
+
+| 스킬 | 내용 |
+|------|------|
+| `rag-knowledge` | 언제 어떤 검색 도구를 쓸지 안내 |
+| `rag-list-documents` | 정식 문서·초안 목록 보기 (`rag_list_documents`) |
+| `rag-add-document` | 초안 문서 추가 (`rag_add_document`, 쓰기 도구를 켰을 때) |
+| `rag-delete-document` | 초안 문서 삭제 (`rag_delete_document`, 쓰기 도구를 켰을 때) |
 
 ```text
 /plugin marketplace add chorus96/rag-mcp
@@ -496,7 +502,7 @@ EMBEDDINGS_MODEL=text-embedding-3-small
 | `deploy/` | 설치·제거 스크립트, systemd 유닛, `rag-ingest`·`rag-promote` 명령 |
 | `knowledge/official/` | 샘플 문서 |
 | `.claude-plugin/marketplace.json` | Claude Code 플러그인 마켓플레이스 정의 |
-| `plugins/rag-mcp/` | Claude Code 플러그인 (MCP 서버 설정, `rag-knowledge`·`rag-list-documents` 스킬) |
+| `plugins/rag-mcp/` | Claude Code 플러그인 (MCP 서버 설정, `rag-knowledge`·`rag-list-documents`·`rag-add-document`·`rag-delete-document` 스킬) |
 | `docs/DESIGN.md` | 설계 문서 (검색 파이프라인, 전체 환경 변수 표) |
 | `.claude/skills/repo-check/` | 저장소 점검 스킬 (Claude Code에서 `/repo-check`, 직접 실행: `bash .claude/skills/repo-check/scripts/check.sh`) |
 | `tests/` | 테스트 |

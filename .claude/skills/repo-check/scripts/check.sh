@@ -131,7 +131,9 @@ def slug(h):
 def heads(path):
     return {slug(m) for m in re.findall(r"^#+ (.+)$", open(path, encoding="utf-8").read(), re.M)}
 for doc in ["README.md", "docs/DESIGN.md", "plugins/rag-mcp/skills/rag-knowledge/SKILL.md",
-            "plugins/rag-mcp/skills/rag-list-documents/SKILL.md"]:
+            "plugins/rag-mcp/skills/rag-list-documents/SKILL.md",
+            "plugins/rag-mcp/skills/rag-add-document/SKILL.md",
+            "plugins/rag-mcp/skills/rag-delete-document/SKILL.md"]:
     text = open(doc, encoding="utf-8").read()
     text = re.sub(r"```.*?```", "", text, flags=re.S)  # 코드 블록 안은 무시
     base = os.path.dirname(doc)

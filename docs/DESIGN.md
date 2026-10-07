@@ -29,7 +29,7 @@ rag-mcp는 런북, RCA(근본 원인 분석) 같은 운영 문서를 **Qdrant**�
 | [`reranker.py`](../tools/reranker.py) | Cohere/Jina 호환 크로스 인코더 리랭킹 (선택 사항) |
 | [`documents.py`](../tools/documents.py) | 초안(`draft/`) 문서 로직: MCP 쓰기 도구의 추가·삭제, `rag-promote`의 목록·승격 |
 | [`promote.py`](../tools/promote.py) | 초안 승격 명령 `rag-promote` (사람 전용, MCP 도구 아님) |
-| [`plugins/rag-mcp`](../plugins/rag-mcp) | Claude Code 플러그인: MCP 서버 연결 설정과 스킬(`rag-knowledge`: 검색 도구 사용 안내, `rag-list-documents`: 정식 문서·초안 목록) (서버 코드는 포함하지 않음) |
+| [`plugins/rag-mcp`](../plugins/rag-mcp) | Claude Code 플러그인: MCP 서버 연결 설정과 스킬(`rag-knowledge`: 검색 도구 사용 안내, `rag-list-documents`: 정식 문서·초안 목록, `rag-add-document`·`rag-delete-document`: 초안 추가·삭제) (서버 코드는 포함하지 않음) |
 
 `ingest.py`, `documents.py`, `server.py`는 모두 `vectorstore.py`와 `embeddings.py`를 거칩니다. 그래서
 쓰기 경로와 읽기 경로 사이에서 컬렉션 스키마, 벡터 이름, 임베딩 설정이 어긋나지 않습니다.
