@@ -74,7 +74,7 @@ description: 조직의 지식 베이스(런북, 과거 장애 기록, RCA)를 ra
 | `collection ... not found` 오류 | 지식 베이스가 아직 만들어지지 않았습니다. 서버 관리자에게 `rag-ingest` 실행을 안내하세요. |
 | 결과가 항상 비어 있음 | `rag_collections()`로 포인트 수를 확인하세요. 0이면 문서가 수집되지 않은 것입니다. |
 | 임베딩 관련 오류 (`EMBEDDINGS_BASE_URL is not set`, 연결 실패, HTTP 401/404 등) | `rag_health()`로 확인한 뒤, 서버의 임베딩 엔드포인트 설정 문제임을 사용자에게 알리세요. |
-| 도구 자체가 보이지 않거나 연결 실패 | 플러그인의 `server_url` 설정과 rag-mcp 서버 실행 여부를 확인하도록 안내하세요 (`/plugin configure rag-mcp@rag-mcp`, `/mcp`). |
+| 도구 자체가 보이지 않거나 연결 실패 | 서버 주소(환경 변수 `RAG_MCP_URL`이 있으면 그 값, 없으면 플러그인의 `server_url` 설정)와 rag-mcp 서버 실행 여부를 확인하도록 안내하세요 (`/plugin configure rag-mcp@rag-mcp`, `/mcp`). |
 
 ## 하지 말아야 할 것
 

@@ -215,6 +215,18 @@ claude plugin install rag-mcp@rag-mcp --config server_url=http://<서버>:8084/m
 ```
 
 설정한 뒤 Claude Code를 재시작하고 `/mcp`에서 `plugin:rag-mcp:rag`가 연결됐는지 확인하세요.
+
+**환경 변수로 주소 지정:** 환경 변수 `RAG_MCP_URL`이 있으면 `server_url` 설정보다 우선합니다. 설정을
+바꾸지 않고 셸이나 서버마다 다른 주소를 쓸 때 편합니다.
+
+```bash
+RAG_MCP_URL=http://10.0.0.5:8084/mcp claude
+```
+
+| 우선순위 | 주소를 정하는 곳 |
+|------|------|
+| 1 | 환경 변수 `RAG_MCP_URL` |
+| 2 | 플러그인 설정 `server_url` (`/plugin configure`) |
 플러그인은 서버에 연결만 하므로, rag-mcp 서버는 [빠른 시작](#빠른-시작)대로 따로 설치해 두어야 합니다.
 
 ### Claude Code 직접 설정

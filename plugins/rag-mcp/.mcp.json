@@ -2,7 +2,7 @@
   "mcpServers": {
     "rag": {
       "type": "http",
-      "url": "${user_config.server_url}"
+      "url": "${RAG_MCP_URL:-${user_config.server_url}}"
     }
   }
 }
