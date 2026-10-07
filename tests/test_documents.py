@@ -18,6 +18,8 @@
   - 초안 승격(rag-promote): draft/<경로> → official/<경로> 로 옮겨 색인하고 초안을 정리, official/ 의 기존 문서는
     --overwrite 로만 바꿈, 색인 실패 시 official/ 을 되돌림, 목록에는 draft/ 문서만 나옴, MCP 도구로는 노출되지 않음
   - 도구 등록: RAG_MCP_WRITE 가 꺼져 있으면 쓰기 도구(추가·삭제)가 MCP 도구 목록에 없음
+  - 정식 문서 목록(rag_list_documents): official/ 의 .md/.pdf 만 source 순으로, 제목·유형·색인된 청크 수와 함께
+    돌려줌. subdir·limit 처리, official/ 밖 거부, Qdrant 실패 시에도 목록은 돌려줌(chunks=None), 항상 등록됨
 
 방법
   - KNOWLEDGE_DIR 을 pytest 임시 폴더로 바꾸고, ingest.ingest_file 은 가짜 함수로 바꿔
@@ -375,3 +377,86 @@ def test_promote_is_not_an_mcp_tool():
         env={**os.environ, "RAG_MCP_WRITE": "true", "RAG_HYBRID": "false"},
     ).stdout
     assert "promote" not in out
+
+
+# --- 정식 문서 목록 (rag_list_documents) -------------------------------------------
+class _FacetQdrant:
+    """facet 호출을 기록하고 source별 청크 수를 돌려줍니다. raises가 있으면 실패합니다."""
+
+    def __init__(self, counts=None, raises=None):
+        self.counts = counts or {}
+        self.raises = raises
+        self.calls = []
+
+    def facet(self, collection, key, limit, exact, facet_filter):
+        self.calls.append((key, limit, facet_filter))
+        if self.raises:
+            raise self.raises
+        hits = [type("H", (), {"value": v, "count": n})() for v, n in self.counts.items()]
+        return type("R", (), {"hits": hits})()
+
+
+def _official(tmp_path):
+    docs = {
+        "official/a.md": "---\ntitle: 문서 A\ntype: runbook\n---\nbody\n",
+        "official/rcas/b.md": "---\ntitle: 문서 B\n---\nbody\n",
+        "official/c.pdf": "%PDF-1.4",
+        "official/notes.txt": "x",
+        "draft/d.md": "---\ntitle: 초안 D\n---\nbody\n",
+    }
+    for rel, text in docs.items():
+        (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / rel).write_text(text, encoding="utf-8")
+
+
+def test_list_official_lists_documents_with_index_state(monkeypatch, tmp_path):
+    monkeypatch.setattr(documents, "KNOWLEDGE_DIR", tmp_path)
+    _official(tmp_path)
+    q = _FacetQdrant(counts={"official/a.md": 4})
+    out = documents.list_official(client=q)
+    assert out["status"] == "ok" and out["folder"] == "official/"
+    assert out["total"] == 3 and out["truncated"] is False
+    # .md/.pdf 만, source 순. draft/ 와 다른 확장자는 없음.
+    rows = [(d["source"], d["title"], d["doc_type"], d["chunks"]) for d in out["documents"]]
+    assert rows == [
+        ("official/a.md", "문서 A", "runbook", 4),
+        ("official/c.pdf", "c", "note", 0),        # 색인 전 → 0
+        ("official/rcas/b.md", "문서 B", "rca", 0),  # type 없음 → 하위 폴더 이름
+    ]
+    assert all(d["size_bytes"] > 0 and d["modified"].endswith("+00:00") for d in out["documents"])
+    # 청크 수는 목록에 나온 source 만 대상으로 한 번에 셉니다.
+    key, limit, flt = q.calls[0]
+    assert key == "source" and limit == 3 and len(q.calls) == 1
+    assert sorted(flt.must[0].match.any) == ["official/a.md", "official/c.pdf", "official/rcas/b.md"]
+
+
+def test_list_official_subdir_and_limit(monkeypatch, tmp_path):
+    monkeypatch.setattr(documents, "KNOWLEDGE_DIR", tmp_path)
+    _official(tmp_path)
+    out = documents.list_official("rcas", client=_FacetQdrant())
+    assert out["folder"] == "official/rcas/" and [d["source"] for d in out["documents"]] == ["official/rcas/b.md"]
+
+    out = documents.list_official(limit=1, client=_FacetQdrant())
+    assert out["total"] == 3 and out["returned"] == 1 and out["truncated"] is True
+
+
+def test_list_official_rejects_paths_outside_official(monkeypatch, tmp_path):
+    monkeypatch.setattr(documents, "KNOWLEDGE_DIR", tmp_path)
+    _official(tmp_path)
+    for bad in ("../draft", "rcas/../../draft", "missing"):
+        out = documents.list_official(bad, client=_FacetQdrant())
+        assert out["status"] == "error", bad
+
+
+def test_list_official_without_qdrant_still_lists(monkeypatch, tmp_path):
+    # Qdrant에 묻지 못해도 목록은 돌려주고, 색인 상태는 알 수 없음(None)으로 표시합니다.
+    monkeypatch.setattr(documents, "KNOWLEDGE_DIR", tmp_path)
+    _official(tmp_path)
+    out = documents.list_official(client=_FacetQdrant(raises=RuntimeError("qdrant down")))
+    assert out["status"] == "ok" and out["total"] == 3
+    assert all(d["chunks"] is None for d in out["documents"])
+
+
+def test_list_documents_tool_registered_by_default():
+    # 읽기 전용 도구이므로 쓰기 도구를 켜지 않아도 등록됩니다.
+    assert "rag_list_documents" in _tool_names()

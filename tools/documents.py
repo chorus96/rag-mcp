@@ -5,6 +5,7 @@
   - add_document (rag_add_document):    문서를 문서 디렉터리의 draft/ 아래 마크다운 파일로 저장한 뒤 rag-ingest와
                                          같은 방식(ingest.ingest_file)으로 바로 색인
   - delete_document (rag_delete_document): draft/ 아래 문서 파일과 그 문서의 청크(포인트)를 함께 삭제
+  - list_official (rag_list_documents):  정식 문서(official/) 파일 목록. 읽기 전용이라 항상 등록됩니다.
   - list_drafts / promote_document:         초안 목록과, 검토한 초안을 정식 폴더(official/)로 옮기는 승격.
                                              사람이 쓰는 rag-promote 명령(promote.py)만 호출하며 MCP 도구가
                                              아닙니다 (모델은 정식 폴더에 쓸 수 없음)
@@ -42,12 +43,13 @@ import re
 import shutil
 import unicodedata
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 import yaml
 from qdrant_client import QdrantClient
-from qdrant_client.models import FieldCondition, Filter, FilterSelector, MatchValue
+from qdrant_client.models import FieldCondition, Filter, FilterSelector, MatchAny, MatchValue
 
 import ingest
 
@@ -215,6 +217,69 @@ def delete_document(source: str, client: QdrantClient | None = None) -> dict[str
 
     log.info("deleted document %s (file=%s, %d chunk(s))", source, file_exists, points)
     return {"status": "ok", "source": source, "file_deleted": file_exists, "chunks_deleted": points}
+
+
+# --- 정식 문서 목록 (MCP 읽기 도구 rag_list_documents) ------------------------------------
+MAX_LIST = 500
+
+
+def _indexed_chunks(client: QdrantClient, sources: list[str]) -> dict[str, int] | None:
+    """source별 색인된 청크 수 (Qdrant facet, 요청 한 번). 셀 수 없으면 None."""
+    if not sources:
+        return {}
+    try:
+        res = client.facet(ingest.COLLECTION, key="source", limit=len(sources), exact=True,
+                           facet_filter=Filter(must=[FieldCondition(key="source", match=MatchAny(any=sources))]))
+        return {str(hit.value): hit.count for hit in res.hits}
+    except Exception as exc:  # noqa: BLE001 - 목록은 색인 상태 없이도 돌려줌
+        log.warning("counting indexed chunks failed: %s", exc)
+        return None
+
+
+def list_official(subdir: str | None = None, limit: int = 100,
+                  client: QdrantClient | None = None) -> dict[str, Any]:
+    """official/ 아래 문서(.md/.pdf) 목록을 source 순으로 돌려줍니다 (오류도 status로).
+
+    subdir를 주면 official/<subdir>/ 아래만 봅니다. 항목마다 source, title, doc_type, 크기, 수정 시각과
+    색인된 청크 수(chunks; 0이면 아직 rag-ingest 전)를 넣습니다. 색인 상태를 알 수 없으면 chunks 는 None입니다.
+    """
+    root = (KNOWLEDGE_DIR / OFFICIAL_SUBDIR).resolve()
+    base = root
+    subdir = (subdir or "").strip().strip("/")
+    if subdir:
+        base = (root / subdir).resolve()
+        if Path(subdir).is_absolute() or (base != root and root not in base.parents):
+            return {"status": "error", "error": f"subdir must be a folder under {OFFICIAL_SUBDIR}/: {subdir}"}
+    if not base.is_dir():
+        return {"status": "error", "error": f"folder not found: {OFFICIAL_SUBDIR}/{subdir}".rstrip("/") + "/"}
+    limit = max(1, min(int(limit or 100), MAX_LIST))
+
+    paths = sorted(p for p in base.rglob("*") if p.is_file() and p.suffix.lower() in (".md", ".pdf"))
+    kb = KNOWLEDGE_DIR.resolve()
+    docs = []
+    for path in paths[:limit]:
+        meta: dict[str, Any] = {}
+        if path.suffix.lower() == ".md":
+            try:
+                meta, _ = ingest._parse_front_matter(path.read_text(encoding="utf-8"))
+            except Exception as exc:  # noqa: BLE001 - 읽지 못한 파일도 목록에는 넣음
+                log.warning("reading %s failed: %s", path, exc)
+        stat = path.stat()
+        docs.append({
+            "source": str(path.relative_to(kb)).replace(os.sep, "/"),
+            "title": str(meta.get("title") or path.stem),
+            "doc_type": ingest._infer_doc_type(meta, path, kb),
+            "size_bytes": stat.st_size,
+            "modified": datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat(timespec="seconds"),
+        })
+
+    counts = _indexed_chunks(client or _client(), [d["source"] for d in docs])
+    for d in docs:
+        d["chunks"] = None if counts is None else counts.get(d["source"], 0)
+
+    folder = f"{OFFICIAL_SUBDIR}/{subdir}/" if subdir else f"{OFFICIAL_SUBDIR}/"
+    return {"status": "ok", "folder": folder, "total": len(paths), "returned": len(docs),
+            "truncated": len(paths) > len(docs), "documents": docs}
 
 
 # --- 초안 목록과 승격 (사람이 쓰는 rag-promote 명령 전용) --------------------------------

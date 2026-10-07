@@ -13,7 +13,7 @@ rag-mcp는 런북, RCA(근본 원인 분석) 같은 운영 문서를 **Qdrant**�
 
 | 원칙 | 내용 |
 |------|------|
-| **기본은 읽기 전용** | 기본 설정에서 MCP 도구는 검색만 합니다. 지식 베이스 기록은 수집 명령(`rag-ingest`)으로 이루어집니다. 모델이 문서를 추가·삭제하는 쓰기 도구는 운영자가 `RAG_MCP_WRITE=true`로 켤 때만 등록됩니다. |
+| **기본은 읽기 전용** | 기본 설정에서 MCP 도구는 검색과 정식 문서 목록 조회만 합니다. 지식 베이스 기록은 수집 명령(`rag-ingest`)으로 이루어집니다. 모델이 문서를 추가·삭제하는 쓰기 도구는 운영자가 `RAG_MCP_WRITE=true`로 켤 때만 등록됩니다. |
 | **벤더 중립** | 채팅 LLM은 연결하는 MCP 클라이언트가 정합니다. 임베딩은 OpenAI 호환 `/v1/embeddings`라면 무엇이든 씁니다. |
 | **수집과 질의의 일관성** | 수집과 질의가 같은 임베딩 코드와 설정을 공유하도록 만들어, 벡터가 어긋날 여지를 없앴습니다. |
 | **실패해도 검색은 유지** | 리랭킹, BM25, 오래된 청크 정리 같은 부가 기능은 실패하면 조용히 건너뛰고, 기본 검색은 계속 동작합니다(최선형, best-effort). |
@@ -22,14 +22,14 @@ rag-mcp는 런북, RCA(근본 원인 분석) 같은 운영 문서를 **Qdrant**�
 
 | 모듈 | 역할 |
 |------|------|
-| [`server.py`](../tools/server.py) | FastMCP 서버. 검색 도구 4개와 선택적 쓰기 도구 2개를 제공 |
+| [`server.py`](../tools/server.py) | FastMCP 서버. 읽기 도구 5개(검색 4개 + 정식 문서 목록)와 선택적 쓰기 도구 2개를 제공 |
 | [`ingest.py`](../tools/ingest.py) | 마크다운/PDF 문서를 읽어 청크로 나누고 임베딩해 Qdrant에 업서트 |
 | [`embeddings.py`](../tools/embeddings.py) | OpenAI 호환 임베딩 호출, 비대칭 모델 접두사 처리 |
 | [`vectorstore.py`](../tools/vectorstore.py) | Qdrant 컬렉션 스키마, BM25 희소 벡터(FastEmbed), 하이브리드 질의 |
 | [`reranker.py`](../tools/reranker.py) | Cohere/Jina 호환 크로스 인코더 리랭킹 (선택 사항) |
 | [`documents.py`](../tools/documents.py) | 초안(`draft/`) 문서 로직: MCP 쓰기 도구의 추가·삭제, `rag-promote`의 목록·승격 |
 | [`promote.py`](../tools/promote.py) | 초안 승격 명령 `rag-promote` (사람 전용, MCP 도구 아님) |
-| [`plugins/rag-mcp`](../plugins/rag-mcp) | Claude Code 플러그인: MCP 서버 연결 설정과 검색 도구 사용 안내 스킬 (서버 코드는 포함하지 않음) |
+| [`plugins/rag-mcp`](../plugins/rag-mcp) | Claude Code 플러그인: MCP 서버 연결 설정과 스킬(`rag-knowledge`: 검색 도구 사용 안내, `rag-list-documents`: 정식 문서 목록) (서버 코드는 포함하지 않음) |
 
 `ingest.py`, `documents.py`, `server.py`는 모두 `vectorstore.py`와 `embeddings.py`를 거칩니다. 그래서
 쓰기 경로와 읽기 경로 사이에서 컬렉션 스키마, 벡터 이름, 임베딩 설정이 어긋나지 않습니다.
@@ -117,6 +117,7 @@ ID가 문서 경로와 청크 번호에서 결정되므로, 같은 문서를 다
 | `search_runbooks(query, cluster?, component?, limit?)` | "처리 절차가 뭐지?" — `doc_type=runbook`으로 고정 |
 | `rag_collections()` | 컬렉션 목록과 포인트 수 (지식 베이스가 채워졌는지 확인) |
 | `rag_health()` | Qdrant와 임베딩 엔드포인트 접근 가능 여부, 리랭커·하이브리드 설정 |
+| `rag_list_documents(subdir?, limit?)` | 정식 문서(`official/`) 파일 목록. 항목마다 `source`, `title`, `doc_type`, `size_bytes`, `modified`, `chunks`(색인된 청크 수, Qdrant facet 한 번으로 셈; 0이면 색인 전, 셀 수 없으면 `null`). 기본 100개, 최대 500개, 넘으면 `truncated: true`. `subdir`는 `official/` 밖을 가리키면 거부 |
 | `rag_add_document(title, content, doc_type?, tags?, component?, cluster?, overwrite?)` | (선택) `draft/`에 문서 추가 — `RAG_MCP_WRITE=true`일 때만 등록. [7장](#mcp-쓰기-도구-rag_add_document-rag_delete_document) 참고 |
 | `rag_delete_document(source)` | (선택) `draft/` 문서 삭제 — 파일과 청크를 함께 삭제. `RAG_MCP_WRITE=true`일 때만 등록 |
 
@@ -171,6 +172,8 @@ knowledge/
 - **권한 경계는 디렉터리 하나로 판단합니다.** MCP 쓰기 도구는 경로를 정규화한 뒤 `draft/` 안인지만 확인하므로
   (`documents._resolve_source`), `official/`을 비롯한 그 밖의 경로는 모델이 만들거나 지울 수 없습니다.
 - **두 폴더 모두 검색 대상입니다.** 초안은 저장 즉시 검색되고, 검토 여부는 `source`로 구분합니다.
+- **서버가 문서 디렉터리를 읽는 것은 `rag_list_documents`뿐입니다.** 검색은 Qdrant만 씁니다. 목록 도구는
+  `official/`의 파일을 직접 훑으므로, 아직 색인하지 않은 문서도 `chunks: 0`으로 보여 줍니다.
 - **수집 대상은 `official/`과 `draft/` 아래뿐입니다.** 두 폴더 밖에 둔 문서는 `rag-ingest`가 건너뛰고 개수를 경고로
   알립니다(`ingest._discover_files`).
 

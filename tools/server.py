@@ -6,18 +6,18 @@
 
 구성
   - 공통 검색 경로 `_search`: 질의 임베딩 → 하이브리드 검색 → (선택) 리랭킹 → 응답 구성
-  - MCP 도구: rag_search, search_runbooks, rag_collections, rag_health
+  - MCP 도구: rag_search, search_runbooks, rag_collections, rag_health, rag_list_documents
   - (선택) MCP 쓰기 도구: rag_add_document, rag_delete_document — RAG_MCP_WRITE=true 일 때만 등록,
     문서 디렉터리의 draft/ 아래만 다룸 (실제 로직은 documents.py)
 
 문서 디렉터리 (RAG_KNOWLEDGE_DIR)
-  official/(사람이 관리하는 정식 문서)와 draft/(모델이 만든 초안)로 나뉩니다. 검색은 Qdrant만 쓰고 문서
-  디렉터리를 읽지 않습니다. 결과의 source(예: official/foo.md, draft/foo.md)로 정식 문서와 초안이 구분됩니다.
+  official/(사람이 관리하는 정식 문서)와 draft/(모델이 만든 초안)로 나뉩니다. 검색은 Qdrant만 쓰고, 문서
+  디렉터리는 rag_list_documents 가 official/ 파일 목록을 만들 때만 읽습니다. 결과의 source(예: official/foo.md, draft/foo.md)로 정식 문서와 초안이 구분됩니다.
   서버가 문서 디렉터리에 쓰는 것은 쓰기 도구를 켰을 때 draft/ 아래뿐이고, official/ 로의 승격은 사람이
   rag-promote(promote.py)로 합니다.
 
 설계 원칙
-  - 기본은 읽기 전용: MCP 도구는 검색만 합니다. 지식 베이스 기록은 rag-ingest(ingest.py)로
+  - 기본은 읽기 전용: MCP 도구는 검색과 목록 조회만 합니다. 지식 베이스 기록은 rag-ingest(ingest.py)로
     이루어집니다. 모델이 문서를 추가·삭제하는 쓰기 도구는 운영자가 RAG_MCP_WRITE=true로 켤 때만
     등록되며, 꺼져 있으면 도구 목록에도 나타나지 않습니다.
   - 벤더 중립: 채팅 LLM은 연결한 MCP 클라이언트가 정하고, 임베딩은 embeddings.py를 거쳐 OpenAI 호환
@@ -330,6 +330,22 @@ def rag_health() -> dict[str, Any]:
     health["retrieval"] = vectorstore.describe()  # 하이브리드 켜짐/꺼짐 + 희소 모델
 
     return health
+
+
+@mcp.tool()
+def rag_list_documents(subdir: str | None = None, limit: int = 100) -> dict[str, Any]:
+    """지식 베이스의 정식 문서(official/) 파일 목록을 보여 줍니다 (읽기 전용).
+
+    사용자가 어떤 문서가 있는지 물을 때, 또는 검색 전에 문서 구성을 파악할 때 사용하세요. 내용 검색이
+    아니라 파일 목록입니다(내용은 rag_search로 찾으세요). 초안(draft/)은 포함하지 않습니다.
+    항목마다 source(문서 경로), title, doc_type, size_bytes, modified(UTC), chunks(색인된 청크 수)를
+    돌려줍니다. chunks가 0이면 파일은 있지만 아직 색인(rag-ingest) 전이라 검색되지 않습니다.
+
+    Args:
+        subdir: 선택 — official/ 아래 하위 폴더만 보기 (예: 'runbooks'). 생략하면 official/ 전체.
+        limit: 돌려줄 최대 개수. 기본 100, 최대 500. 넘으면 truncated=true.
+    """
+    return documents.list_official(subdir, limit, client=_qdrant)
 
 
 # --- MCP 쓰기 도구 (선택 — RAG_MCP_WRITE=true 일 때만 LLM에 노출) -------------------

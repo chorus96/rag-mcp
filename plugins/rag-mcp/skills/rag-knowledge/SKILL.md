@@ -25,6 +25,7 @@ description: 조직의 지식 베이스(런북, RCA 등 운영 문서)를 rag MC
 | `rag_search(query, doc_type?, cluster?, component?, limit?)` | 유형을 가리지 않고 검색 (`doc_type`: `runbook`, `rca`, `note` 등) |
 | `rag_collections()` | 결과가 계속 비어 있을 때 — 지식 베이스가 채워졌는지 확인 |
 | `rag_health()` | 도구 호출이 실패할 때 — Qdrant와 임베딩 엔드포인트 상태 확인 |
+| `rag_list_documents(subdir?, limit?)` | "어떤 문서가 있지?" — 정식 문서(`official/`) 파일 목록. 자세한 사용법은 `rag-list-documents` 스킬 |
 | `rag_add_document(title, content, doc_type?, ...)` | (켜져 있을 때만) 사용자가 문서 추가를 요청했을 때 — 아래 "문서 추가·삭제" 참고 |
 | `rag_delete_document(source)` | (켜져 있을 때만) 사용자가 초안(`draft/`) 문서 삭제를 요청했을 때 — 아래 "문서 추가·삭제" 참고 |
 
