@@ -194,19 +194,18 @@ cluster: prod-eu      # 선택: 필터용
 ### 실행과 확인
 
 ```bash
-sudo rag-ingest                 # 문서 색인
-sudo rag-ingest --recreate      # 컬렉션을 지우고 전체 재구축
+rag-ingest                      # 문서 색인
+rag-ingest --recreate           # 컬렉션을 지우고 전체 재구축
 ```
 
 - `rag-ingest`는 서버와 같은 설정 파일을 읽으므로, 서버와 정확히 같은 임베딩 설정을 사용합니다.
 - 요약 줄 `done: N file(s), M chunk(s)`가 예상과 맞는지 확인하세요. 문서가 빠졌다면 그 위의 로그에
   이유(지원하지 않는 확장자, 빈 파일, 텍스트 없는 PDF)가 나옵니다.
-- 시스템 모드에서는 `rag-mcp` 사용자로 실행되므로, 문서 파일을 그 사용자가 읽을 수 있어야 합니다.
 - 정기적으로 수집하려면 cron이나 systemd 타이머에 등록하세요.
 
 ```cron
-# 매시 정각 (root crontab)
-0 * * * * /usr/local/bin/rag-ingest >> /var/log/rag-ingest.log 2>&1
+# 매시 정각 (설치한 사용자의 crontab: crontab -e)
+0 * * * * $HOME/.local/bin/rag-ingest >> $HOME/.local/share/rag-mcp/rag-ingest.log 2>&1
 ```
 
 ## 7. 내부 쓰기 API — 지식 플라이휠
@@ -276,7 +275,7 @@ API라면 OpenAI `text-embedding-3-small`/`-large`도 다국어를 지원합니�
 제공). 같은 서버의 8080 포트에서 띄웠다면:
 
 ```bash
-# /etc/rag-mcp/rag-mcp.env
+# ~/.config/rag-mcp/rag-mcp.env
 EMBEDDINGS_BASE_URL=http://localhost:8080
 # 인증이 없으면 비워 둠
 EMBEDDINGS_API_KEY=
@@ -289,8 +288,8 @@ vLLM, LocalAI 등 다른 OpenAI 호환 서버도 같은 방식입니다. 모델 
 ### 적용 및 확인
 
 ```bash
-sudo systemctl restart rag-mcp               # 새 모델로 질의하도록 재시작
-sudo rag-ingest --recreate                   # 컬렉션 재생성 + 재수집
+systemctl --user restart rag-mcp            # 새 모델로 질의하도록 재시작
+rag-ingest --recreate                       # 컬렉션 재생성 + 재수집
 
 # 컬렉션 차원 확인 → "size":1024 이면 성공
 curl -s http://localhost:6333/collections/rag_kb | grep -o '"size":[0-9]*'
@@ -313,29 +312,33 @@ curl -s http://localhost:6333/collections/rag_kb | grep -o '"size":[0-9]*'
 
 ## 9. 배포 구조
 
-설치 절차와 운영 명령은 [README](../README.md#설치-방식)에 있습니다. 여기서는 구조와 그 이유만 정리합니다.
+설치 절차와 운영 명령은 [README](../README.md#설치-구조와-운영)에 있습니다. 여기서는 구조와 그 이유만
+정리합니다.
 
-| 항목 | 시스템 모드 (`sudo ./deploy/install.sh`) | 사용자 모드 (`./deploy/install.sh --user`) |
-|------|------|------|
-| 실행 사용자 | 전용 시스템 사용자 `rag-mcp` | 현재 사용자 |
-| 앱 / venv / Qdrant | `/opt/rag-mcp/{app,venv,qdrant}` | `~/.local/share/rag-mcp/{app,venv,qdrant}` |
-| 설정 파일 | `/etc/rag-mcp/rag-mcp.env` (`640 root:rag-mcp`) | `~/.config/rag-mcp/rag-mcp.env` (`600`) |
-| 데이터 | `/var/lib/rag-mcp/{knowledge,qdrant,fastembed_cache}` | `~/.local/share/rag-mcp/data/...` |
-| systemd 유닛 | [`deploy/systemd/`](../deploy/systemd) → `/etc/systemd/system` | [`deploy/systemd/user/`](../deploy/systemd/user) → `~/.config/systemd/user` |
-| 수집 명령 | `/usr/local/bin/rag-ingest` | `~/.local/bin/rag-ingest` |
+| 항목 | 위치 |
+|------|------|
+| 실행 사용자 | 설치한 사용자 (root 불필요) |
+| 앱 / venv / Qdrant | `~/.local/share/rag-mcp/{app,venv,qdrant}` |
+| 설정 파일 | `~/.config/rag-mcp/rag-mcp.env` (권한 `600`) |
+| 데이터 | `~/.local/share/rag-mcp/data/{knowledge,qdrant,fastembed_cache}` |
+| systemd 유닛 | [`deploy/systemd/`](../deploy/systemd) → `~/.config/systemd/user` (경로는 `%h`) |
+| 수집 명령 | `~/.local/bin/rag-ingest` |
 
+- **사용자 권한으로만 설치합니다.** 전용 시스템 사용자나 `/opt`, `/etc` 같은 시스템 경로를 쓰지 않으므로
+  관리자 권한 없이 설치·업그레이드·제거할 수 있습니다. 설치 스크립트는 root로 실행하면 멈춥니다.
 - **Qdrant는 `127.0.0.1`에만 바인드합니다.** rag-mcp만 접속하면 되므로 외부에 열 이유가 없습니다.
 - **Qdrant API 키는 값이 있을 때만 넘깁니다.** Qdrant는 빈 키도 "키가 설정됨"으로 보고 모든 요청을
   거부하기 때문입니다.
-- **시스템 모드 유닛은 샌드박스 옵션을 씁니다**(`ProtectSystem=strict`, `ProtectHome`, `PrivateTmp`,
-  `NoNewPrivileges`). 쓸 수 있는 경로는 데이터 디렉터리뿐입니다. 사용자 모드 유닛에는 넣지 않았습니다.
-  사용자 systemd에서는 배포판에 따라 이 옵션들이 동작하지 않거나 서비스 시작을 막을 수 있기 때문입니다.
+- **systemd 샌드박스 옵션(`ProtectSystem` 등)은 쓰지 않습니다.** 사용자 systemd에서는 배포판에 따라 이
+  옵션들이 동작하지 않거나 서비스 시작을 막을 수 있습니다. 대신 데이터와 설정 디렉터리를 본인만 접근할 수
+  있게(`700`/`600`) 만듭니다.
 - **`rag-ingest`는 깨끗한 환경에서 실행합니다.** 호출한 셸의 환경 변수를 넘기지 않고 설정 파일만으로
   환경을 만들어, 서비스와 같은 조건으로 수집합니다.
 - **설치 스크립트는 업그레이드도 겸합니다.** 다시 실행하면 코드와 의존성만 갱신하고, 설정 파일과 데이터는
   건드리지 않습니다.
-- **사용자 모드는 linger가 필요합니다.** 켜져 있지 않으면 로그아웃할 때 서비스가 멈춥니다
-  (`loginctl enable-linger $USER`). `XDG_CONFIG_HOME`을 기본값이 아닌 곳으로 바꾼 환경은 지원하지 않습니다.
+- **linger가 필요합니다.** 사용자 서비스는 기본적으로 로그인해 있는 동안만 실행됩니다. 로그아웃 후에도,
+  부팅 직후에도 실행되게 하려면 `loginctl enable-linger $USER`를 켜세요. `XDG_CONFIG_HOME`을 기본값이 아닌
+  곳으로 바꾼 환경은 지원하지 않습니다.
 
 > **설정 파일 형식:** systemd의 `EnvironmentFile`은 `KEY=value  # 주석`처럼 같은 줄 끝의 주석까지 값으로
 > 읽습니다. 주석은 항상 별도 줄에 쓰세요.
@@ -361,7 +364,7 @@ curl -s http://localhost:6333/collections/rag_kb | grep -o '"size":[0-9]*'
 | `EMBEDDINGS_MODEL` | `bge-m3` | 임베딩 모델 이름 (엔드포인트가 쓰는 이름에 맞춤) |
 | `EMBED_QUERY_PREFIX` / `EMBED_DOC_PREFIX` | 자동 (nomic → `search_query: `/`search_document: `, 그 외 → 빈 값) | 자동 감지가 놓치는 비대칭 모델에만 지정 (e5 등 → `query: `/`passage: `) |
 | **수집** | | |
-| `RAG_KNOWLEDGE_DIR` | `/var/lib/rag-mcp/knowledge` | `rag-ingest`가 수집할 문서 디렉터리 |
+| `RAG_KNOWLEDGE_DIR` | `~/.local/share/rag-mcp/data/knowledge` | `rag-ingest`가 수집할 문서 디렉터리 (설치 스크립트가 실제 경로로 바꿔 넣음) |
 | `CHUNK_SIZE` / `CHUNK_OVERLAP` | `1500` / `100` | 청크 크기와 겹침 (글자 수) |
 | `EMBED_BATCH_SIZE` | `32` | 임베딩 요청당 청크 수 |
 | `QDRANT_UPSERT_BATCH` | `64` | Qdrant 업서트 요청당 포인트 수 |

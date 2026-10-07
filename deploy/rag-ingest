@@ -4,9 +4,7 @@
 # =============================================================================
 #
 # 이 파일은 템플릿입니다. deploy/install.sh가 설치하면서 아래 @...@ 자리에 경로를 채워
-# 다음 위치에 놓습니다.
-#   시스템 모드: /usr/local/bin/rag-ingest    실행: sudo rag-ingest
-#   사용자 모드: ~/.local/bin/rag-ingest      실행: rag-ingest
+# ~/.local/bin/rag-ingest 에 놓습니다.
 #
 # 사용법
 #   rag-ingest              문서 디렉터리(RAG_KNOWLEDGE_DIR)의 문서를 색인
@@ -14,7 +12,7 @@
 #                           (임베딩 모델이나 RAG_HYBRID를 바꾼 뒤, 문서를 지우거나 이름을 바꾼 뒤)
 #
 # 왜 별도 명령인가
-#   rag-mcp 서버와 같은 설정 파일을 읽고 같은 사용자로 실행하므로, 수집과 질의가 항상 같은
+#   rag-mcp 서버와 같은 설정 파일을 읽고 같은 조건으로 실행하므로, 수집과 질의가 항상 같은
 #   임베딩 엔드포인트와 모델을 씁니다. 둘이 어긋나면 검색이 아무 경고 없이 망가집니다.
 set -eu
 
@@ -23,24 +21,6 @@ ENV_FILE=@ENV_FILE@
 APP_DIR=@APP_DIR@
 VENV=@VENV@
 DATA_DIR=@DATA_DIR@
-# 수집을 실행할 사용자. 시스템 모드에서만 값이 있고(rag-mcp), 사용자 모드에서는 비어 있어
-# 현재 사용자로 실행합니다.
-RUN_USER=@RUN_USER@
-
-# --- 실행할 사용자 정하기 -------------------------------------------------------------------
-# 시스템 모드: root로 호출받아 rag-mcp 사용자로 전환합니다 (서비스와 같은 권한으로 Qdrant 데이터와
-#             캐시를 다루기 위해). HOME은 rag-mcp 사용자의 홈인 데이터 디렉터리로 둡니다.
-if [ -n "$RUN_USER" ]; then
-    if [ "$(id -u)" -ne 0 ]; then
-        echo "rag-ingest: root 권한이 필요합니다 (sudo rag-ingest ...)" >&2
-        exit 1
-    fi
-    AS_USER="runuser -u $RUN_USER --"
-    RUN_HOME=$DATA_DIR
-else
-    AS_USER=""
-    RUN_HOME=$HOME
-fi
 
 # --- 실행 ----------------------------------------------------------------------------------
 # env -i 로 호출한 셸의 환경 변수를 모두 버리고, 꼭 필요한 값과 설정 파일만으로 깨끗한 환경을
@@ -50,10 +30,9 @@ fi
 #   - RAG_KNOWLEDGE_DIR: 여기 적은 값은 기본값이고, 설정 파일에 값이 있으면 그 값이 우선합니다.
 # 안쪽 sh 에서 설정 파일을 불러온 뒤(set -a 로 모두 export), 받은 인자 뒤에 --path 를 붙여
 # ingest.py 를 실행합니다.
-# shellcheck disable=SC2086
-exec $AS_USER env -i \
+exec env -i \
     PATH=/usr/local/bin:/usr/bin:/bin \
-    HOME="$RUN_HOME" \
+    HOME="$HOME" \
     LANG="${LANG:-C.UTF-8}" \
     PYTHONUNBUFFERED=1 \
     FASTEMBED_CACHE_PATH="$DATA_DIR/fastembed_cache" \

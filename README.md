@@ -17,8 +17,7 @@
   서버(TEI, vLLM 등)로 오프라인 운영하거나 호스팅 API(OpenAI 등)를 쓸 수 있습니다.
 - **한국어 지원** — 기본 임베딩 모델은 다국어 모델 `bge-m3`, 기본 리랭커는 다국어 모델입니다.
 - **마크다운 + PDF 수집** — YAML front matter, 헤딩 기준 청킹, 멱등(idempotent) 재실행을 지원합니다.
-- **간단한 설치** — Linux + systemd 서버에 스크립트 하나로 설치합니다. root 없이 사용자 모드로도
-  설치할 수 있습니다.
+- **간단한 설치** — Linux + systemd 서버에 스크립트 하나로 설치합니다. root 권한이 필요 없습니다.
 - **Claude Code 플러그인** — 이 저장소 자체가 플러그인 마켓플레이스입니다.
 
 ## 구성 요소
@@ -106,29 +105,31 @@
 
 ### 1. 설치
 
+서비스를 실행할 **일반 사용자**로 설치합니다. root(sudo)는 필요 없습니다.
+
 ```bash
 git clone https://github.com/chorus96/rag-mcp.git && cd rag-mcp
-sudo ./deploy/install.sh        # Qdrant + rag-mcp 설치, systemd 서비스로 시작
+./deploy/install.sh             # Qdrant + rag-mcp 설치, systemd 사용자 서비스로 시작
 ```
 
-root 권한 없이 설치하려면 [사용자 모드](#사용자-모드-root-없이)를 쓰세요.
+`rag-ingest` 명령은 `~/.local/bin`에 설치됩니다. 이 경로가 PATH에 없으면 설치 스크립트가 알려 줍니다.
 
 ### 2. 임베딩 엔드포인트 지정
 
 설정 파일에서 임베딩 엔드포인트를 지정하고 서버를 재시작합니다.
 
 ```bash
-sudo vi /etc/rag-mcp/rag-mcp.env
+vi ~/.config/rag-mcp/rag-mcp.env
 #   EMBEDDINGS_BASE_URL=http://localhost:8080   (예: 같은 서버의 TEI)
 #   EMBEDDINGS_API_KEY=
 #   EMBEDDINGS_MODEL=bge-m3
-sudo systemctl restart rag-mcp
+systemctl --user restart rag-mcp
 ```
 
 ### 3. 문서 색인
 
 ```bash
-sudo rag-ingest                 # 샘플 문서 색인
+rag-ingest                      # 샘플 문서 색인
 ```
 
 요약 줄 `done: N file(s), M chunk(s)`가 나오면 성공입니다.
@@ -136,10 +137,10 @@ sudo rag-ingest                 # 샘플 문서 색인
 ### 4. 확인
 
 ```bash
-systemctl status qdrant rag-mcp
+systemctl --user status qdrant rag-mcp
 curl -s http://localhost:8084/mcp            # 핸드셰이크 없이 400 응답 = 정상 동작
 curl -s http://localhost:6333/collections    # rag_kb 컬렉션 확인
-journalctl -u rag-mcp -f                     # 서버 로그
+journalctl --user -u rag-mcp -f              # 서버 로그
 ```
 
 > 최초 시작 시 FastEmbed가 BM25 모델을 `huggingface.co`에서 한 번 내려받아 캐시에 저장합니다.
@@ -150,64 +151,45 @@ journalctl -u rag-mcp -f                     # 서버 로그
 
 Claude Code라면 [플러그인](#claude-code-플러그인-권장)으로 연결하는 것이 가장 간단합니다.
 
-## 설치 방식
+## 설치 구조와 운영
 
-설치 스크립트를 다시 실행하면 업그레이드로 동작합니다 — 코드와 의존성을 갱신하고 서비스를
-재시작하며, 설정 파일과 데이터는 건드리지 않습니다.
-
-### 시스템 모드 (기본)
-
-`sudo ./deploy/install.sh`로 설치합니다. 모든 프로세스는 전용 시스템 사용자 `rag-mcp`로 실행되고,
-부팅 시 자동으로 시작됩니다.
+설치 스크립트는 현재 사용자 홈 아래에 설치하고, 서비스는 사용자 systemd(`systemctl --user`)로
+실행합니다. 다시 실행하면 업그레이드로 동작합니다 — 코드와 의존성을 갱신하고 서비스를 재시작하며,
+설정 파일과 데이터는 건드리지 않습니다.
 
 | 경로 | 내용 |
 |------|------|
-| `/opt/rag-mcp/app`, `/opt/rag-mcp/venv` | 애플리케이션 코드와 Python 가상환경 |
-| `/opt/rag-mcp/qdrant/qdrant` | Qdrant 바이너리 (기본 `v1.12.4`, `127.0.0.1`에만 바인드) |
-| `/etc/rag-mcp/rag-mcp.env` | 설정 파일 ([.env.example](.env.example) 복사본) |
-| `/var/lib/rag-mcp/knowledge` | 색인할 문서 (샘플 문서가 복사됨) |
-| `/var/lib/rag-mcp/qdrant` | Qdrant 데이터 |
-| `qdrant.service`, `rag-mcp.service` | systemd 서비스 |
-| `/usr/local/bin/rag-ingest` | 문서 수집 명령 |
-
-### 사용자 모드 (root 없이)
-
-관리자 권한이 없거나 개인 계정에만 설치하려면 `--user`를 붙입니다. 현재 사용자 홈 아래에 설치되고,
-서비스는 사용자 systemd(`systemctl --user`)로 실행됩니다.
-
-```bash
-./deploy/install.sh --user
-rag-ingest                       # ~/.local/bin 이 PATH에 있어야 합니다
-```
-
-| 항목 | 시스템 모드 | 사용자 모드 |
-|------|------|------|
-| 앱 / venv / Qdrant | `/opt/rag-mcp` | `~/.local/share/rag-mcp` |
-| 설정 파일 | `/etc/rag-mcp/rag-mcp.env` | `~/.config/rag-mcp/rag-mcp.env` |
-| 데이터 (문서, Qdrant, 캐시) | `/var/lib/rag-mcp` | `~/.local/share/rag-mcp/data` |
-
-사용자 모드 주의 사항:
-
-- **로그아웃하면 서비스가 멈춥니다.** 계속 실행하고 부팅 시 자동으로 시작하려면
-  `loginctl enable-linger $USER`를 한 번 실행하세요(배포판에 따라 관리자 권한이 필요할 수 있습니다).
-- **ssh 등으로 직접 로그인한 세션에서 설치하세요.** `su`나 `sudo -u`로 전환한 셸에서는 사용자
-  systemd에 연결되지 않습니다. 서비스 등록 없이 파일만 설치하려면 `SKIP_START=1`을 붙이세요.
-- Python venv 모듈이 없다면 그 패키지 설치만은 관리자에게 요청해야 합니다.
-- 같은 서버에서는 한 명만 실행할 수 있습니다(포트 8084, 6333, 6334가 겹칩니다).
+| `~/.local/share/rag-mcp/app`, `~/.local/share/rag-mcp/venv` | 애플리케이션 코드와 Python 가상환경 |
+| `~/.local/share/rag-mcp/qdrant/qdrant` | Qdrant 바이너리 (기본 `v1.12.4`, `127.0.0.1`에만 바인드) |
+| `~/.config/rag-mcp/rag-mcp.env` | 설정 파일 ([.env.example](.env.example) 복사본, 권한 600) |
+| `~/.local/share/rag-mcp/data/knowledge` | 색인할 문서 (샘플 문서가 복사됨) |
+| `~/.local/share/rag-mcp/data/qdrant` | Qdrant 데이터 |
+| `~/.config/systemd/user/{qdrant,rag-mcp}.service` | systemd 사용자 서비스 |
+| `~/.local/bin/rag-ingest` | 문서 수집 명령 |
 
 ### 운영 명령
 
-| 작업 | 시스템 모드 | 사용자 모드 |
-|------|------|------|
-| 상태 | `systemctl status qdrant rag-mcp` | `systemctl --user status qdrant rag-mcp` |
-| 로그 | `journalctl -u rag-mcp -f` | `journalctl --user -u rag-mcp -f` |
-| 설정 적용 | `sudo systemctl restart rag-mcp` | `systemctl --user restart rag-mcp` |
-| 문서 수집 | `sudo rag-ingest [--recreate]` | `rag-ingest [--recreate]` |
-| 업그레이드 | `sudo ./deploy/install.sh` | `./deploy/install.sh --user` |
-| 제거 (데이터 유지) | `sudo ./deploy/uninstall.sh` | `./deploy/uninstall.sh --user` |
-| 제거 (모두 삭제) | `sudo ./deploy/uninstall.sh --purge` | `./deploy/uninstall.sh --user --purge` |
+| 작업 | 명령 |
+|------|------|
+| 상태 | `systemctl --user status qdrant rag-mcp` |
+| 로그 | `journalctl --user -u rag-mcp -f` |
+| 설정 적용 | `systemctl --user restart rag-mcp` |
+| 문서 수집 | `rag-ingest [--recreate]` |
+| 업그레이드 | `./deploy/install.sh` |
+| 제거 (설정·데이터 유지) | `./deploy/uninstall.sh` |
+| 제거 (모두 삭제) | `./deploy/uninstall.sh --purge` |
 
-이 문서의 다른 명령도 사용자 모드에서는 위 표처럼 바꿔 쓰면 됩니다.
+### 주의 사항
+
+- **로그아웃하면 서비스가 멈춥니다.** 사용자 서비스는 기본적으로 로그인해 있는 동안만 실행됩니다.
+  로그아웃 후에도 계속 실행하고 부팅 시 자동으로 시작하려면 `loginctl enable-linger $USER`를 한 번
+  실행하세요(배포판에 따라 관리자 권한이 필요할 수 있습니다).
+- **ssh 등으로 직접 로그인한 세션에서 설치하세요.** `su`나 `sudo -u`로 전환한 셸에서는 사용자
+  systemd에 연결되지 않습니다. 서비스 등록 없이 파일만 설치하려면 `SKIP_START=1 ./deploy/install.sh`를
+  쓰세요.
+- **Python venv 모듈**(Debian/Ubuntu의 `python3-venv`)이 없다면 그 패키지 설치만은 관리자에게 요청해야
+  합니다.
+- **같은 서버에서는 한 명만 실행할 수 있습니다.** 포트(8084, 6333, 6334)가 겹치기 때문입니다.
 
 ## MCP 클라이언트 연결
 
@@ -270,12 +252,12 @@ claude plugin install rag-mcp@rag-mcp --config server_url=http://<서버>:8084/m
 
 ## 문서 추가하기
 
-문서 디렉터리(기본값 `/var/lib/rag-mcp/knowledge`, 설정 파일의 `RAG_KNOWLEDGE_DIR`)에 마크다운이나
+문서 디렉터리(기본값 `~/.local/share/rag-mcp/data/knowledge`, 설정 파일의 `RAG_KNOWLEDGE_DIR`)에 마크다운이나
 PDF를 넣고 수집 명령을 실행합니다. 서버 재시작은 필요 없습니다.
 
 ```bash
-sudo cp my-runbook.md /var/lib/rag-mcp/knowledge/runbooks/
-sudo rag-ingest
+cp my-runbook.md ~/.local/share/rag-mcp/data/knowledge/runbooks/
+rag-ingest
 ```
 
 하위 폴더 이름이 기본 문서 유형이 됩니다(`knowledge/incidents/*` → `incident`,
@@ -300,7 +282,7 @@ cluster: prod-eu
 지워집니다. 정기적으로 실행하려면 cron이나 CI에 등록하세요.
 
 > **알려진 제한:** 파일을 삭제하거나 이름을 바꿔도 기존 청크는 남습니다. 그런 경우에는
-> `sudo rag-ingest --recreate`로 전체를 다시 만드세요.
+> `rag-ingest --recreate`로 전체를 다시 만드세요.
 
 ## 임베딩 엔드포인트 설정
 
@@ -311,7 +293,7 @@ cluster: prod-eu
 같은 방식입니다.
 
 ```bash
-# /etc/rag-mcp/rag-mcp.env
+# ~/.config/rag-mcp/rag-mcp.env
 EMBEDDINGS_BASE_URL=http://localhost:8080
 EMBEDDINGS_API_KEY=
 # 엔드포인트가 쓰는 모델 이름 (예: vLLM은 BAAI/bge-m3)
@@ -321,7 +303,7 @@ EMBEDDINGS_MODEL=bge-m3
 **호스팅 API** — 예: OpenAI. 문서 내용이 외부로 전송된다는 점에 주의하세요.
 
 ```bash
-# /etc/rag-mcp/rag-mcp.env
+# ~/.config/rag-mcp/rag-mcp.env
 EMBEDDINGS_BASE_URL=https://api.openai.com
 EMBEDDINGS_API_KEY=sk-...
 EMBEDDINGS_MODEL=text-embedding-3-small
@@ -331,8 +313,8 @@ EMBEDDINGS_MODEL=text-embedding-3-small
 > 서버를 재시작하고 컬렉션을 다시 만드세요.
 >
 > ```bash
-> sudo systemctl restart rag-mcp
-> sudo rag-ingest --recreate
+> systemctl --user restart rag-mcp
+> rag-ingest --recreate
 > ```
 
 ### 한국어 문서
@@ -351,7 +333,7 @@ EMBEDDINGS_MODEL=text-embedding-3-small
 
 ## 설정
 
-모든 설정은 설정 파일(시스템 모드: `/etc/rag-mcp/rag-mcp.env`)의 환경 변수로 합니다. 주석이 달린 전체
+모든 설정은 설정 파일(`~/.config/rag-mcp/rag-mcp.env`)의 환경 변수로 합니다. 주석이 달린 전체
 목록은 [.env.example](.env.example)에, 전체 환경 변수 표와 설계 설명은 [docs/DESIGN.md](docs/DESIGN.md)에
 있습니다. 자주 쓰는 항목은 다음과 같습니다.
 
@@ -362,7 +344,7 @@ EMBEDDINGS_MODEL=text-embedding-3-small
 | `EMBEDDINGS_MODEL` | `bge-m3` | 임베딩 모델 이름 |
 | `RERANK_PROVIDER` | `none` | 리랭킹 사용 여부 (`none` 또는 `cohere`) |
 | `RAG_HYBRID` | `true` | 하이브리드 검색 (바꾸면 `--recreate` 필요) |
-| `RAG_KNOWLEDGE_DIR` | `/var/lib/rag-mcp/knowledge` | 수집할 문서 디렉터리 |
+| `RAG_KNOWLEDGE_DIR` | `~/.local/share/rag-mcp/data/knowledge` | 수집할 문서 디렉터리 |
 | `MCP_PORT` | `8084` | MCP 서버 포트 |
 | `RAG_INTERNAL_TOKEN` | _(비어 있음)_ | 내부 쓰기 API 보호 토큰 |
 

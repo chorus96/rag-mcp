@@ -48,8 +48,9 @@ bash .claude/skills/repo-check/scripts/check.sh
   - 모델에게 쓰기 도구를 노출하지 않았는지 확인하세요. 쓰기는 `/internal/knowledge/*` HTTP 라우트로만 합니다.
   - 새 환경 변수를 추가했다면 `.env.example`과 `docs/DESIGN.md`의 환경 변수 표에 함께 넣었는지 확인하세요.
 - **설치 구조를 고쳤다면** (`deploy/`)
-  - 시스템 모드와 사용자 모드 양쪽에 반영했는지 (`deploy/systemd/`와 `deploy/systemd/user/`,
-    `install.sh`와 `uninstall.sh`)
+  - `install.sh`와 `uninstall.sh`의 경로가 서로 같은지, systemd 유닛(`deploy/systemd/`)의 `%h` 경로와도
+    맞는지
+  - root 없이 설치·제거되는지 (시스템 경로나 `sudo`를 새로 쓰지 않았는지)
   - 기존 설치를 업그레이드할 때 설정 파일과 데이터를 덮어쓰지 않는지
 - **설정 기본값을 바꿨다면** — 코드의 기본값, `.env.example`, `docs/DESIGN.md` 표, README의 요약표가
   모두 같은 값인지

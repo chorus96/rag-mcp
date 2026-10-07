@@ -90,7 +90,7 @@ inline=$(grep -nE '^[A-Z_]+=.*#' .env.example || true)
 [ -z "$inline" ] && pass ".env.example 에 같은 줄 끝 주석 없음 (systemd 규칙)" || fail ".env.example 같은 줄 끝 주석: $inline"
 
 n=$(grep -c '^RAG_KNOWLEDGE_DIR=' .env.example)
-[ "$n" = 1 ] && pass ".env.example 의 RAG_KNOWLEDGE_DIR= 줄이 1개 (사용자 모드 설치가 고쳐 씀)" \
+[ "$n" = 1 ] && pass ".env.example 의 RAG_KNOWLEDGE_DIR= 줄이 1개 (설치 스크립트가 실제 경로로 고쳐 씀)" \
             || fail ".env.example 의 RAG_KNOWLEDGE_DIR= 줄이 $n 개 (정확히 1개여야 함)"
 
 if (set -a; . ./.env.example) 2>/dev/null; then pass ".env.example 을 셸로 불러올 수 있음"
