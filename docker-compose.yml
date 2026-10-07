@@ -64,7 +64,7 @@ services:
       # Reranking (optional, query-time, no re-ingest). OFF by default; set
       # RERANK_PROVIDER=cohere (+ key/model) to reorder candidates for precision.
       RERANK_PROVIDER: ${RERANK_PROVIDER:-none}
-      RERANK_MODEL: ${RERANK_MODEL:-rerank-english-v3.0}
+      RERANK_MODEL: ${RERANK_MODEL:-rerank-multilingual-v3.0}
       RERANK_BASE_URL: ${RERANK_BASE_URL:-}
       RERANK_API_KEY: ${RERANK_API_KEY:-}
       RERANK_CANDIDATES: ${RERANK_CANDIDATES:-30}

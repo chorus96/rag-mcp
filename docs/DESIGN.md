@@ -325,8 +325,9 @@ curl -s http://localhost:6333/collections/rag_kb | grep -o '"size":[0-9]*'
   상당 부분 보완하지만, 결과가 이상하면 `RAG_HYBRID=false`(dense 전용)와 비교해 보세요 — 이 값을
   바꿀 때도 `--recreate`가 필요합니다. 영어 토큰(`CrashLoopBackOff`, 리소스 이름 등)은 계속 잘
   검색됩니다.
-- **리랭커도 다국어 모델을 쓰세요.** `rerank-english-v3.0`은 영어 전용입니다. Cohere
-  `rerank-multilingual-v3.0` 또는 Jina `jina-reranker-v2-base-multilingual`을 사용하세요.
+- **리랭커도 다국어 모델이 기본값입니다.** 리랭킹을 켜면(`RERANK_PROVIDER=cohere`) 기본 모델은 Cohere
+  `rerank-multilingual-v3.0`입니다. Jina를 쓴다면 `jina-reranker-v2-base-multilingual`을 지정하세요.
+  영어 전용 `rerank-english-v3.0`은 한국어 문서에 쓰지 마세요.
 - **속도.** bge-m3(약 1.2GB)는 nomic보다 커서 CPU에서는 수집이 느려질 수 있습니다. Ollama는 청크를
   하나씩 임베딩하므로 문서가 많으면 시간이 걸립니다.
 - **청크 크기.** 기본 `CHUNK_SIZE=1500`자는 bge-m3의 최대 입력 길이보다 훨씬 작아 그대로 써도

@@ -24,7 +24,7 @@
 환경 변수
 ---------
   RERANK_PROVIDER    none | cohere            (기본값 none)
-  RERANK_MODEL       rerank-english-v3.0      (Cohere) / jina-reranker-v2-... (Jina)
+  RERANK_MODEL       rerank-multilingual-v3.0 (Cohere, 다국어) / jina-reranker-v2-base-multilingual (Jina)
   RERANK_BASE_URL    https://api.cohere.com   (또는 https://api.jina.ai/v1)
   RERANK_API_KEY     제공자 API 키
   RERANK_CANDIDATES  리랭킹 전에 가져올 밀집 검색 결과 수 (기본값 30)
@@ -38,7 +38,7 @@ import os
 import httpx
 
 PROVIDER = os.environ.get("RERANK_PROVIDER", "none").strip().lower()
-MODEL = os.environ.get("RERANK_MODEL", "rerank-english-v3.0")
+MODEL = os.environ.get("RERANK_MODEL", "rerank-multilingual-v3.0")
 BASE_URL = os.environ.get("RERANK_BASE_URL") or "https://api.cohere.com"
 API_KEY = os.environ.get("RERANK_API_KEY", "")
 CANDIDATES = int(os.environ.get("RERANK_CANDIDATES", "30"))
