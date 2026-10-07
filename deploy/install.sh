@@ -15,7 +15,7 @@
 #   3. Qdrant 바이너리 설치
 #   4. 설정 파일 rag-mcp.env 생성 (이미 있으면 그대로 둠)
 #   5. 샘플 문서 복사 (문서 디렉터리가 비어 있을 때만)
-#   6. systemd 사용자 서비스(qdrant, rag-mcp) 등록·시작, 수집 명령 rag-ingest 설치
+#   6. systemd 사용자 서비스(qdrant, rag-mcp) 등록·시작, 명령 rag-ingest·rag-promote 설치
 #
 # 설치 위치
 #   앱 / venv    ~/.local/share/rag-mcp/{app,venv}
@@ -23,7 +23,7 @@
 #   설정 파일    ~/.config/rag-mcp/rag-mcp.env
 #   데이터       ~/.local/share/rag-mcp/data/{knowledge,qdrant,fastembed_cache}
 #   서비스       ~/.config/systemd/user/{qdrant,rag-mcp}.service
-#   수집 명령    ~/.local/bin/rag-ingest
+#   명령         ~/.local/bin/rag-ingest (문서 수집), ~/.local/bin/rag-promote (초안 승격)
 #
 # 업그레이드
 #   다시 실행하면 업그레이드로 동작합니다. 코드와 의존성을 갱신하고 서비스를 재시작하며,
@@ -103,7 +103,7 @@ install -d -m 755 "$DATA_DIR/knowledge"
 # --- 2. 애플리케이션 + Python 의존성 -------------------------------------------------
 # 가상환경은 처음 한 번만 만들고, 업그레이드 때는 의존성만 갱신합니다.
 log "애플리케이션 복사 → $PREFIX/app"
-install -m 644 "$SRC_DIR"/tools/{server,ingest,embeddings,capture,documents,reranker,vectorstore}.py \
+install -m 644 "$SRC_DIR"/tools/{server,ingest,embeddings,capture,documents,promote,reranker,vectorstore}.py \
     "$SRC_DIR/requirements.txt" "$PREFIX/app/"
 
 if [ ! -x "$PREFIX/venv/bin/python" ]; then
@@ -150,16 +150,18 @@ log "systemd 사용자 서비스 등록 → $UNIT_DIR"
 install -m 644 "$SRC_DIR/deploy/systemd/qdrant.service" "$UNIT_DIR/qdrant.service"
 install -m 644 "$SRC_DIR/deploy/systemd/rag-mcp.service" "$UNIT_DIR/rag-mcp.service"
 
-# rag-ingest 템플릿의 @...@ 자리에 실제 경로를 채워 넣습니다.
-# 임시 파일에 쓴 뒤 mv로 바꿔, 실행 중인 rag-ingest가 반쯤 쓰인 파일을 읽지 않게 합니다.
-log "수집 명령 설치 → $BIN_DIR/rag-ingest"
-sed -e "s|@ENV_FILE@|$ENV_FILE|" \
-    -e "s|@APP_DIR@|$PREFIX/app|" \
-    -e "s|@VENV@|$PREFIX/venv|" \
-    -e "s|@DATA_DIR@|$DATA_DIR|" \
-    "$SRC_DIR/deploy/rag-ingest" > "$BIN_DIR/rag-ingest.tmp"
-chmod 755 "$BIN_DIR/rag-ingest.tmp"
-mv "$BIN_DIR/rag-ingest.tmp" "$BIN_DIR/rag-ingest"
+# 명령 템플릿(rag-ingest, rag-promote)의 @...@ 자리에 실제 경로를 채워 넣습니다.
+# 임시 파일에 쓴 뒤 mv로 바꿔, 실행 중인 명령이 반쯤 쓰인 파일을 읽지 않게 합니다.
+for cmd in rag-ingest rag-promote; do
+    log "명령 설치 → $BIN_DIR/$cmd"
+    sed -e "s|@ENV_FILE@|$ENV_FILE|" \
+        -e "s|@APP_DIR@|$PREFIX/app|" \
+        -e "s|@VENV@|$PREFIX/venv|" \
+        -e "s|@DATA_DIR@|$DATA_DIR|" \
+        "$SRC_DIR/deploy/$cmd" > "$BIN_DIR/$cmd.tmp"
+    chmod 755 "$BIN_DIR/$cmd.tmp"
+    mv "$BIN_DIR/$cmd.tmp" "$BIN_DIR/$cmd"
+done
 
 # 서비스 등록과 시작. SKIP_START=1이면 사용자 systemd에 연결할 수 없을 수 있으므로 모두 건너뜁니다.
 # 나중에 로그인 세션에서 직접 등록하세요:

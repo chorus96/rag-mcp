@@ -1,10 +1,13 @@
-"""tools/documents.py — MCP 쓰기 도구의 로직 (문서 추가).
+"""tools/documents.py — 초안(draft/) 문서의 추가·삭제·승격 로직.
 
 역할
   LLM이 MCP 도구로 지식 베이스의 문서를 추가하거나 삭제할 때의 로직입니다.
   - add_document (rag_add_document):    문서를 문서 디렉터리의 draft/ 아래 마크다운 파일로 저장한 뒤 rag-ingest와
                                          같은 방식(ingest.ingest_file)으로 바로 색인
   - delete_document (rag_delete_document): draft/ 아래 문서 파일과 그 문서의 청크(포인트)를 함께 삭제
+  - list_drafts / promote_document:         초안 목록과, 검토한 초안을 정식 폴더로 옮기는 승격.
+                                             사람이 쓰는 rag-promote 명령(promote.py)만 호출하며 MCP 도구가
+                                             아닙니다 (모델은 정식 폴더에 쓸 수 없음)
 
   MCP로는 문서 디렉터리의 draft/ 하위만 추가·삭제할 수 있습니다. 사람이 관리하는 문서(runbooks/,
   incidents/ 등)는 모델이 바꾸거나 지울 수 없고, 모델이 만든 문서는 draft/에 모여 사람이 검토한 뒤
@@ -30,6 +33,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+import shutil
 import unicodedata
 import uuid
 from pathlib import Path
@@ -136,6 +140,28 @@ def add_document(title: str, content: str, doc_type: str = "note", tags: list[st
             "chunks": chunks, "replaced": existed}
 
 
+# --- Qdrant 도우미 ---------------------------------------------------------------
+def _client() -> QdrantClient:
+    return QdrantClient(url=ingest.QDRANT_URL, api_key=ingest.QDRANT_API_KEY, timeout=ingest.HTTP_TIMEOUT)
+
+
+def _by_source(source: str) -> Filter:
+    return Filter(must=[FieldCondition(key="source", match=MatchValue(value=source))])
+
+
+def _count_chunks(client: QdrantClient, source: str) -> int:
+    """source의 청크 수. 컬렉션이 없는 등으로 셀 수 없으면 0."""
+    try:
+        return client.count(ingest.COLLECTION, count_filter=_by_source(source), exact=True).count
+    except Exception as exc:  # noqa: BLE001 - 컬렉션이 없을 수도 있음
+        log.warning("counting chunks for %s failed: %s", source, exc)
+        return 0
+
+
+def _delete_chunks(client: QdrantClient, source: str) -> None:
+    client.delete(collection_name=ingest.COLLECTION, points_selector=FilterSelector(filter=_by_source(source)))
+
+
 # --- 문서 삭제 -----------------------------------------------------------------
 def _resolve_source(source: str) -> tuple[Path, str] | None:
     """source(문서 디렉터리 기준 상대 경로)를 실제 경로로 바꿉니다.
@@ -168,15 +194,8 @@ def delete_document(source: str, client: QdrantClient | None = None) -> dict[str
     if path.suffix.lower() not in (".md", ".pdf"):
         return {"status": "error", "error": "only .md or .pdf documents can be deleted"}
 
-    by_source = Filter(must=[FieldCondition(key="source", match=MatchValue(value=source))])
-    try:
-        if client is None:
-            client = QdrantClient(url=ingest.QDRANT_URL, api_key=ingest.QDRANT_API_KEY,
-                                  timeout=ingest.HTTP_TIMEOUT)
-        points = client.count(ingest.COLLECTION, count_filter=by_source, exact=True).count
-    except Exception as exc:  # noqa: BLE001 - 컬렉션이 없을 수도 있음
-        log.warning("counting chunks for %s failed: %s", source, exc)
-        points = 0
+    client = client or _client()
+    points = _count_chunks(client, source)
 
     file_exists = path.is_file()
     if not file_exists and not points:
@@ -184,8 +203,7 @@ def delete_document(source: str, client: QdrantClient | None = None) -> dict[str
 
     try:
         if points:
-            client.delete(collection_name=ingest.COLLECTION,
-                          points_selector=FilterSelector(filter=by_source))
+            _delete_chunks(client, source)
     except Exception as exc:  # noqa: BLE001
         return {"status": "error", "source": source,
                 "error": f"deleting chunks failed: {exc} (the file was not deleted)"}
@@ -194,3 +212,77 @@ def delete_document(source: str, client: QdrantClient | None = None) -> dict[str
 
     log.info("deleted document %s (file=%s, %d chunk(s))", source, file_exists, points)
     return {"status": "ok", "source": source, "file_deleted": file_exists, "chunks_deleted": points}
+
+
+# --- 초안 목록과 승격 (사람이 쓰는 rag-promote 명령 전용) --------------------------------
+def list_drafts() -> list[dict[str, str]]:
+    """draft/ 아래 문서 목록: [{"source", "title", "promote_to"}] (source 순)."""
+    drafts = []
+    root = _draft_dir()
+    if not root.is_dir():
+        return drafts
+    for path in sorted(p for p in root.rglob("*") if p.is_file() and p.suffix.lower() in (".md", ".pdf")):
+        source = str(path.relative_to(KNOWLEDGE_DIR)).replace(os.sep, "/")
+        title = path.stem
+        if path.suffix.lower() == ".md":
+            meta, _ = ingest._parse_front_matter(path.read_text(encoding="utf-8"))
+            title = str(meta.get("title") or title)
+        drafts.append({"source": source, "title": title,
+                       "promote_to": source[len(DRAFT_SUBDIR) + 1:]})
+    return drafts
+
+
+def promote_document(source: str, overwrite: bool = False,
+                     client: QdrantClient | None = None) -> dict[str, Any]:
+    """검토한 초안을 정식 폴더로 옮깁니다: draft/<경로> → <경로>.
+
+    순서: 정식 위치에 복사 → 색인 → 성공하면 초안의 청크와 파일을 삭제. 색인에 실패하면 정식 위치를
+    원래대로 되돌리고 초안은 그대로 둡니다. 정식 위치에 이미 문서가 있으면 overwrite=True 일 때만 바꿉니다.
+    """
+    source = (source or "").strip()
+    resolved = _resolve_source(source) if source else None
+    if resolved is None:
+        return {"status": "error", "source": source,
+                "error": f"source must be a document under {DRAFT_SUBDIR}/ (e.g. {DRAFT_SUBDIR}/runbooks/foo.md)"}
+    path, source = resolved
+    if path.suffix.lower() not in (".md", ".pdf") or not path.is_file():
+        return {"status": "error", "source": source, "error": f"no draft document found at {source}"}
+
+    target_rel = path.relative_to(_draft_dir().resolve())
+    dest = KNOWLEDGE_DIR / target_rel
+    target = str(target_rel).replace(os.sep, "/")
+    if target.split("/", 1)[0] == DRAFT_SUBDIR:
+        return {"status": "error", "source": source, "error": "cannot promote into the draft directory"}
+    existed = dest.exists()
+    if existed and not overwrite:
+        return {"status": "error", "source": source, "target": target,
+                "error": f"a document already exists at {target}; use --overwrite to replace it"}
+
+    backup = dest.read_bytes() if existed else None
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(path, dest)
+    client = client or _client()
+    try:
+        chunks = ingest.ingest_file(client, dest, KNOWLEDGE_DIR)
+    except Exception as exc:  # noqa: BLE001 - 정식 위치를 원래대로 되돌림
+        if backup is None:
+            dest.unlink()
+        else:
+            dest.write_bytes(backup)
+        return {"status": "error", "source": source, "target": target,
+                "error": f"indexing the promoted document failed: {exc} (nothing was changed)"}
+
+    draft_chunks = _count_chunks(client, source)
+    try:
+        if draft_chunks:
+            _delete_chunks(client, source)
+    except Exception as exc:  # noqa: BLE001 - 승격은 끝났고 초안 정리만 실패
+        return {"status": "error", "source": source, "target": target, "promoted": True,
+                "error": f"promoted, but removing the draft chunks failed: {exc} "
+                         f"(the draft file was kept; run rag-promote --overwrite again, or delete the draft via MCP)"}
+    path.unlink()
+
+    log.info("promoted %s -> %s (%d chunk(s), replaced=%s)", source, target, chunks, existed)
+    return {"status": "ok", "source": source, "target": target, "chunks": chunks,
+            "draft_chunks_deleted": draft_chunks, "replaced": existed}
+

@@ -11,7 +11,7 @@
 #   설치한 사용자로 실행하세요 (root 불필요).
 #
 # 지우는 것
-#   항상:      systemd 사용자 서비스(qdrant, rag-mcp), 수집 명령 rag-ingest,
+#   항상:      systemd 사용자 서비스(qdrant, rag-mcp), 명령 rag-ingest·rag-promote,
 #              애플리케이션·Python 가상환경·Qdrant 바이너리
 #   --purge:   위에 더해 설정 파일(~/.config/rag-mcp)과
 #              데이터(~/.local/share/rag-mcp/data: 문서, Qdrant 저장소, 캐시)
@@ -38,15 +38,15 @@ PREFIX=$HOME/.local/share/rag-mcp
 DATA_DIR=$PREFIX/data
 CONF_DIR=$HOME/.config/rag-mcp
 UNIT_DIR=$HOME/.config/systemd/user
-BIN=$HOME/.local/bin/rag-ingest
+BIN_DIR=$HOME/.local/bin
 SYSTEMCTL=(systemctl --user)
 
-# --- 1. 서비스와 수집 명령 ----------------------------------------------------------------
+# --- 1. 서비스와 명령 ----------------------------------------------------------------
 # 이미 지워졌거나 사용자 systemd에 연결할 수 없어도 나머지 정리는 계속합니다.
 "${SYSTEMCTL[@]}" disable --now rag-mcp.service qdrant.service 2>/dev/null || true
 rm -f "$UNIT_DIR/rag-mcp.service" "$UNIT_DIR/qdrant.service"
 "${SYSTEMCTL[@]}" daemon-reload 2>/dev/null || true
-rm -f "$BIN"
+rm -f "$BIN_DIR/rag-ingest" "$BIN_DIR/rag-promote"
 
 # --- 2. 프로그램 (애플리케이션, 가상환경, Qdrant 바이너리) -----------------------------------
 # 데이터가 $PREFIX/data 안에 있으므로 프로그램 부분만 골라 지웁니다.

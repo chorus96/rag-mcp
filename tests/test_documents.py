@@ -1,4 +1,4 @@
-"""tools/documents.py, tools/server.py 테스트 — MCP 쓰기 도구 (문서 추가·삭제).
+"""tools/documents.py, tools/server.py 테스트 — MCP 쓰기 도구 (문서 추가·삭제)와 초안 승격.
 
 확인하는 것
   - 파일 저장: draft/<문서 유형 폴더> 아래 제목으로 만든 파일 이름에 front matter + 본문으로 저장
@@ -9,6 +9,8 @@
   - 색인 실패: 파일은 남기고 오류를 돌려줌
   - 삭제: 파일과 청크를 함께 지우고, 파일 없이 남은 청크도 정리. draft/ 밖·문서가 아닌 파일은 거부
   - draft/ 제한: MCP로는 draft/ 밖(사람이 관리하는 정식 문서)을 만들거나 지울 수 없음
+  - 초안 승격(rag-promote): draft/<경로> → <경로> 로 옮겨 색인하고 초안을 정리, 기존 문서는 --overwrite 로만
+    바꿈, 색인 실패 시 되돌림, MCP 도구로는 노출되지 않음
   - 도구 등록: RAG_MCP_WRITE 가 꺼져 있으면 쓰기 도구(추가·삭제)가 MCP 도구 목록에 없음
 
 방법
@@ -284,3 +286,84 @@ def test_delete_refuses_documents_outside_draft(monkeypatch, tmp_path):
         assert out["status"] == "error", bad
     assert official.exists() and q.deleted == []
 
+
+
+# --- 초안 승격 (rag-promote) -------------------------------------------------------
+class _PromoteQdrant(_FakeQdrant):
+    """승격 테스트용: count는 정해진 수, delete는 기록."""
+
+
+def _draft(tmp_path, rel="draft/runbooks/a.md", title="초안 A"):
+    path = tmp_path / rel
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(f"---\ntitle: {title}\ntype: runbook\n---\nbody\n", encoding="utf-8")
+    return path
+
+
+def test_list_drafts(monkeypatch, tmp_path):
+    monkeypatch.setattr(documents, "KNOWLEDGE_DIR", tmp_path)
+    _draft(tmp_path)
+    _draft(tmp_path, "runbooks/official.md", "정식")  # draft/ 밖은 목록에 없어야 함
+    assert documents.list_drafts() == [
+        {"source": "draft/runbooks/a.md", "title": "초안 A", "promote_to": "runbooks/a.md"}
+    ]
+
+
+def test_promote_moves_ingests_and_cleans_draft(monkeypatch, tmp_path):
+    rec = _setup(monkeypatch, tmp_path, chunks=4)
+    draft = _draft(tmp_path)
+    q = _PromoteQdrant(points=2)
+    out = documents.promote_document("draft/runbooks/a.md", client=q)
+    assert out == {"status": "ok", "source": "draft/runbooks/a.md", "target": "runbooks/a.md",
+                   "chunks": 4, "draft_chunks_deleted": 2, "replaced": False}
+    official = tmp_path / "runbooks/a.md"
+    assert official.exists() and not draft.exists()
+    # 정식 위치를 rag-ingest 와 같은 기준(문서 디렉터리)으로 색인하고, 초안 청크를 지웁니다.
+    assert rec.calls == [(official, tmp_path)]
+    assert q.deleted[0].filter.must[0].match.value == "draft/runbooks/a.md"
+
+
+def test_promote_refuses_existing_official_without_overwrite(monkeypatch, tmp_path):
+    rec = _setup(monkeypatch, tmp_path)
+    draft = _draft(tmp_path)
+    official = _draft(tmp_path, "runbooks/a.md", "기존 정식")
+    out = documents.promote_document("draft/runbooks/a.md", client=_PromoteQdrant())
+    assert out["status"] == "error" and "--overwrite" in out["error"]
+    assert draft.exists() and "기존 정식" in official.read_text(encoding="utf-8") and rec.calls == []
+
+    out = documents.promote_document("draft/runbooks/a.md", overwrite=True, client=_PromoteQdrant())
+    assert out["status"] == "ok" and out["replaced"] is True
+    assert "초안 A" in official.read_text(encoding="utf-8") and not draft.exists()
+
+
+def test_promote_rolls_back_when_indexing_fails(monkeypatch, tmp_path):
+    _setup(monkeypatch, tmp_path, raises=RuntimeError("embeddings down"))
+    draft = _draft(tmp_path)
+    official = _draft(tmp_path, "runbooks/a.md", "기존 정식")
+    out = documents.promote_document("draft/runbooks/a.md", overwrite=True, client=_PromoteQdrant())
+    assert out["status"] == "error" and "nothing was changed" in out["error"]
+    # 초안은 그대로, 정식 문서는 원래 내용으로 되돌아가야 합니다.
+    assert draft.exists() and "기존 정식" in official.read_text(encoding="utf-8")
+
+
+def test_promote_rejects_non_draft_sources(monkeypatch, tmp_path):
+    rec = _setup(monkeypatch, tmp_path)
+    _draft(tmp_path, "runbooks/official.md")
+    for bad in ("runbooks/official.md", "draft/../runbooks/official.md", "draft/runbooks/missing.md", ""):
+        out = documents.promote_document(bad, client=_PromoteQdrant())
+        assert out["status"] == "error", bad
+    assert rec.calls == []
+
+
+def test_promote_is_not_an_mcp_tool():
+    # 승격은 사람이 쓰는 명령 전용입니다. 쓰기 도구를 켜도 MCP 도구로는 노출되지 않아야 합니다.
+    import os
+    import subprocess
+    tools_dir = Path(__file__).resolve().parent.parent / "tools"
+    code = ("import asyncio, server; "
+            "print(sorted(t.name for t in asyncio.run(server.mcp.list_tools())))")
+    out = subprocess.run(
+        [sys.executable, "-c", code], cwd=tools_dir, capture_output=True, text=True, check=True,
+        env={**os.environ, "RAG_MCP_WRITE": "true", "RAG_HYBRID": "false"},
+    ).stdout
+    assert "promote" not in out

@@ -166,6 +166,7 @@ Claude Code라면 [플러그인](#claude-code-플러그인-권장)으로 연결�
 | `~/.local/share/rag-mcp/data/qdrant` | Qdrant 데이터 |
 | `~/.config/systemd/user/{qdrant,rag-mcp}.service` | systemd 사용자 서비스 |
 | `~/.local/bin/rag-ingest` | 문서 수집 명령 |
+| `~/.local/bin/rag-promote` | 초안(`draft/`) 승격 명령 |
 
 ### 운영 명령
 
@@ -175,6 +176,7 @@ Claude Code라면 [플러그인](#claude-code-플러그인-권장)으로 연결�
 | 로그 | `journalctl --user -u rag-mcp -f` |
 | 설정 적용 | `systemctl --user restart rag-mcp` |
 | 문서 수집 | `rag-ingest [--recreate]` |
+| 초안 목록 / 승격 | `rag-promote` / `rag-promote <source> [--overwrite]` |
 | 업그레이드 | `./deploy/install.sh` |
 | 제거 (설정·데이터 유지) | `./deploy/uninstall.sh` |
 | 제거 (모두 삭제) | `./deploy/uninstall.sh --purge` |
@@ -321,8 +323,17 @@ systemctl --user restart rag-mcp
   `incidents/` 등)는 모델이 만들거나 지울 수 없습니다.
 - 문서는 `draft/<문서 유형>s/<제목>.md` 파일로 저장되고 바로 검색됩니다(예: `draft/runbooks/longhorn-볼륨-복구.md`).
   파일로 남으므로 `rag-ingest --recreate`로 재구축해도 사라지지 않습니다.
-- 초안을 검토한 뒤 정식 문서로 만들려면 파일을 정식 폴더로 옮기고 `rag-ingest`를 실행한 다음, 남은 초안 청크를
-  `rag_delete_document`("그 초안 지워 줘")나 `rag-ingest --recreate`로 정리하세요.
+- 초안을 검토한 뒤 정식 문서로 올리려면 서버에서 `rag-promote`를 쓰세요. 승격은 사람만 할 수 있습니다
+  (MCP 도구가 아님).
+
+  ```bash
+  rag-promote                                        # 초안 목록과 옮겨질 위치
+  rag-promote draft/runbooks/longhorn-볼륨-복구.md    # → runbooks/longhorn-볼륨-복구.md 로 옮기고 색인
+  rag-promote --overwrite draft/runbooks/...          # 정식 위치에 같은 이름의 문서가 있으면 바꾸기
+  ```
+
+  승격하면 `draft/<경로>`가 `<경로>`로 옮겨져 바로 색인되고, 초안 파일과 초안 청크는 지워집니다. 색인에
+  실패하면 아무것도 바뀌지 않습니다.
 - 같은 제목의 문서가 있으면 덮어쓰기를 명시해야만 바꿉니다.
 - "그 런북 지워 줘"처럼 요청하면 `rag_delete_document` 도구가 문서 파일과 검색용 청크를 함께 지웁니다.
   삭제할 문서는 검색 결과의 `source`(예: `draft/runbooks/longhorn-볼륨-복구.md`)로 지정되며, 되돌릴 수 없습니다.

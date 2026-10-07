@@ -1,0 +1,45 @@
+#!/bin/sh
+# =============================================================================
+# rag-promote — 검토한 초안(draft/) 문서를 정식 폴더로 옮기는 명령
+# =============================================================================
+#
+# 이 파일은 템플릿입니다. deploy/install.sh가 설치하면서 아래 @...@ 자리에 경로를 채워
+# ~/.local/bin/rag-promote 에 놓습니다.
+#
+# 사용법
+#   rag-promote                                     초안 목록 보기
+#   rag-promote draft/runbooks/foo.md [...]         초안을 정식 폴더(runbooks/foo.md)로 옮기고 색인
+#   rag-promote --overwrite draft/runbooks/foo.md   정식 위치에 같은 이름의 문서가 있으면 바꾸기
+#
+# 왜 별도 명령인가
+#   MCP 쓰기 도구는 모델이 쓰므로 draft/ 아래만 다룹니다. 정식 문서로 올리는 일은 사람이 검토한 뒤
+#   이 명령으로만 합니다. rag-ingest와 같은 설정 파일을 읽어 같은 임베딩 설정으로 색인합니다.
+set -eu
+
+# --- install.sh가 채우는 값 --------------------------------------------------------------
+ENV_FILE=@ENV_FILE@
+APP_DIR=@APP_DIR@
+VENV=@VENV@
+DATA_DIR=@DATA_DIR@
+
+# --- 실행 ----------------------------------------------------------------------------------
+# env -i 로 호출한 셸의 환경 변수를 모두 버리고, 꼭 필요한 값과 설정 파일만으로 깨끗한 환경을
+# 만들어 실행합니다. 서비스와 같은 조건에서 색인하기 위해서입니다.
+#   - 프록시가 필요하면 HTTPS_PROXY 등을 설정 파일에 넣으세요 (셸에서 export 한 값은 무시됩니다).
+#   - FASTEMBED_CACHE_PATH: BM25 모델 캐시를 서버와 함께 씁니다 (한 번만 내려받음).
+#   - RAG_KNOWLEDGE_DIR: 여기 적은 값은 기본값이고, 설정 파일에 값이 있으면 그 값이 우선합니다.
+# 안쪽 sh 에서 설정 파일을 불러온 뒤(set -a 로 모두 export), 받은 인자를 그대로 promote.py 에 넘깁니다.
+exec env -i \
+    PATH=/usr/local/bin:/usr/bin:/bin \
+    HOME="$HOME" \
+    LANG="${LANG:-C.UTF-8}" \
+    PYTHONUNBUFFERED=1 \
+    FASTEMBED_CACHE_PATH="$DATA_DIR/fastembed_cache" \
+    RAG_KNOWLEDGE_DIR="$DATA_DIR/knowledge" \
+    /bin/sh -c '
+        set -a
+        . "$1"
+        set +a
+        shift
+        exec "$@"
+    ' rag-promote "$ENV_FILE" "$VENV/bin/python" "$APP_DIR/promote.py" "$@"

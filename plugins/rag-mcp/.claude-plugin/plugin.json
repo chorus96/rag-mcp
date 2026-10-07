@@ -1,6 +1,6 @@
 {
   "name": "rag-mcp",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "rag-mcp 서버에 연결해 런북, 과거 장애, RCA를 검색하는 MCP 도구와 사용 안내 스킬을 제공합니다. 서버는 별도로 설치해야 합니다.",
   "author": {
     "name": "chorus96"

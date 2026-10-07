@@ -57,7 +57,9 @@ section "2. 배포 스크립트"
 for f in deploy/install.sh deploy/uninstall.sh; do
     if bash -n "$f" 2>/dev/null; then pass "$f 문법"; else fail "$f 문법 오류"; fi
 done
-if sh -n deploy/rag-ingest 2>/dev/null; then pass "deploy/rag-ingest 문법"; else fail "deploy/rag-ingest 문법 오류"; fi
+for f in deploy/rag-ingest deploy/rag-promote; do
+    if sh -n "$f" 2>/dev/null; then pass "$f 문법"; else fail "$f 문법 오류"; fi
+done
 
 # install.sh가 복사하는 파일 목록과 tools/ 의 실제 파일이 같은지
 listed=$(grep -oE 'tools/\{[^}]+\}\.py' deploy/install.sh | sed -E 's|tools/\{([^}]+)\}\.py|\1|' | tr ',' '\n' | sort)
@@ -68,10 +70,10 @@ else
     fail "install.sh 복사 목록과 tools/*.py 가 다름 (install.sh: $(echo $listed) / tools: $(echo $actual))"
 fi
 
-# rag-ingest 템플릿의 자리 표시자를 install.sh가 모두 채우는지
-for ph in $(grep -oE '@[A-Z_]+@' deploy/rag-ingest | sort -u); do
-    if grep -q "s|$ph|" deploy/install.sh; then pass "rag-ingest 자리 표시자 $ph 처리됨"
-    else fail "rag-ingest 자리 표시자 $ph 를 install.sh가 채우지 않음"; fi
+# 명령 템플릿(rag-ingest, rag-promote)의 자리 표시자를 install.sh가 모두 채우는지
+for ph in $(cat deploy/rag-ingest deploy/rag-promote | grep -oE '@[A-Z_]+@' | sort -u); do
+    if grep -q "s|$ph|" deploy/install.sh; then pass "명령 템플릿 자리 표시자 $ph 처리됨"
+    else fail "명령 템플릿 자리 표시자 $ph 를 install.sh가 채우지 않음"; fi
 done
 
 # --- 3. 설정과 문서의 환경 변수 -----------------------------------------------------------

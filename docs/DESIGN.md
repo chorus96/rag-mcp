@@ -28,7 +28,8 @@ rag-mcp는 런북, 과거 장애, RCA(근본 원인 분석) 문서를 **Qdrant**
 | [`vectorstore.py`](../tools/vectorstore.py) | Qdrant 컬렉션 스키마, BM25 희소 벡터(FastEmbed), 하이브리드 질의 |
 | [`reranker.py`](../tools/reranker.py) | Cohere/Jina 호환 크로스 인코더 리랭킹 (선택 사항) |
 | [`capture.py`](../tools/capture.py) | 내부 쓰기 API의 실제 로직: 장애 기록, 반복 장애 확인, 피드백, 통계 |
-| [`documents.py`](../tools/documents.py) | MCP 쓰기 도구의 실제 로직: 문서를 파일로 저장하고 바로 색인 (선택 기능) |
+| [`documents.py`](../tools/documents.py) | 초안(`draft/`) 문서 로직: MCP 쓰기 도구의 추가·삭제, `rag-promote`의 목록·승격 |
+| [`promote.py`](../tools/promote.py) | 초안 승격 명령 `rag-promote` (사람 전용, MCP 도구 아님) |
 | [`plugins/rag-mcp`](../plugins/rag-mcp) | Claude Code 플러그인: MCP 서버 연결 설정과 검색 도구 사용 안내 스킬 (서버 코드는 포함하지 않음) |
 
 `ingest.py`, `capture.py`, `server.py`는 모두 `vectorstore.py`와 `embeddings.py`를 거칩니다. 그래서
@@ -257,8 +258,8 @@ rag-ingest --recreate           # 컬렉션을 지우고 전체 재구축
 - **경로는 서버가 정합니다.** 호출자는 제목과 문서 유형만 넘기고, 파일 이름은 제목에서 만든 안전한 이름(글자·숫자·`-`)
   입니다. `doc_type`도 소문자·숫자·`-`·`_`만 허용하므로 `draft/` 밖에 쓸 수 없습니다.
 - **모델은 `draft/`에만 씁니다.** 모델이 만든 문서는 초안으로 `draft/`에 모이고 저장 즉시 검색됩니다. 사람이
-  검토한 뒤 정식 폴더로 옮기면 되고(`mv` 후 `rag-ingest` — 옮긴 문서의 `draft/` 쪽 청크는 `rag_delete_document`나
-  `--recreate`로 정리), 사람이 관리하는 정식 문서는 모델이 바꾸거나 지울 수 없습니다. 검색 결과의 `source`가
+  검토한 뒤 `rag-promote`로 정식 폴더에 올리고(아래 "초안 승격"), 사람이 관리하는 정식 문서는 모델이 바꾸거나
+  지울 수 없습니다. 검색 결과의 `source`가
   `draft/`로 시작하면 초안입니다.
 - **색인에 실패해도 파일은 남깁니다.** 응답에 `saved: true`와 오류를 함께 돌려주므로, 원인을 고친 뒤
   `rag-ingest`로 다시 색인하면 됩니다.
@@ -268,6 +269,29 @@ rag-ingest --recreate           # 컬렉션을 지우고 전체 재구축
 - **삭제 범위를 제한합니다.** `source`는 문서 디렉터리 기준 상대 경로여야 하고, 정규화했을 때 `draft/` 안이어야
   합니다(절대 경로, `draft/` 밖, `..`로 빠져나가는 경로는 거부). `.md`/`.pdf` 문서만 지울 수 있습니다.
 - **청크 삭제에 실패하면 파일은 지우지 않습니다.** 파일만 사라지고 청크가 검색에 남는 상태를 피하기 위해서입니다.
+
+### 초안 승격 (`rag-promote`)
+
+모델이 만든 초안을 사람이 검토한 뒤 정식 문서로 올리는 **사람 전용 명령**입니다. MCP 도구가 아니므로 쓰기 도구를
+켜도 모델은 승격할 수 없습니다. 그래서 "모델은 `draft/`에만, 정식 문서는 사람이 검토해서"라는 원칙이 유지됩니다.
+
+```bash
+rag-promote                                    # 초안 목록과 옮겨질 위치
+rag-promote draft/runbooks/foo.md [...]        # draft/runbooks/foo.md → runbooks/foo.md
+rag-promote --overwrite draft/runbooks/foo.md  # 정식 위치에 같은 이름의 문서가 있으면 바꾸기
+```
+
+| 단계 | 동작 |
+|------|------|
+| 1. 확인 | `source`가 `draft/` 안의 `.md`/`.pdf` 파일인지 확인. 정식 위치에 문서가 있으면 `--overwrite` 없이는 중단 |
+| 2. 복사 | 초안을 정식 위치(`draft/` 를 뺀 같은 경로)에 복사. 덮어쓸 때는 기존 내용을 메모리에 백업 |
+| 3. 색인 | 정식 위치를 `ingest_file`로 색인 (`rag-ingest`와 같은 청크 ID) |
+| 4. 정리 | 초안의 청크와 파일을 삭제 |
+
+- **색인에 실패하면 되돌립니다.** 정식 위치를 원래대로(없던 파일은 삭제, 덮어쓴 파일은 백업 내용으로) 돌리고
+  초안은 그대로 두므로, 실패해도 아무것도 바뀌지 않습니다.
+- **초안 청크 정리에 실패하면** 승격은 끝난 상태로 초안 파일을 남기고 알려 줍니다. `rag-promote --overwrite`로
+  다시 실행하거나 `rag_delete_document`로 초안을 지우면 됩니다.
 
 ## 8. 임베딩
 
@@ -362,7 +386,7 @@ curl -s http://localhost:6333/collections/rag_kb | grep -o '"size":[0-9]*'
 | 설정 파일 | `~/.config/rag-mcp/rag-mcp.env` (권한 `600`) |
 | 데이터 | `~/.local/share/rag-mcp/data/{knowledge,qdrant,fastembed_cache}` |
 | systemd 유닛 | [`deploy/systemd/`](../deploy/systemd) → `~/.config/systemd/user` (경로는 `%h`) |
-| 수집 명령 | `~/.local/bin/rag-ingest` |
+| 명령 | `~/.local/bin/rag-ingest` (문서 수집), `~/.local/bin/rag-promote` (초안 승격) |
 
 - **사용자 권한으로만 설치합니다.** 전용 시스템 사용자나 `/opt`, `/etc` 같은 시스템 경로를 쓰지 않으므로
   관리자 권한 없이 설치·업그레이드·제거할 수 있습니다. 설치 스크립트는 root로 실행하면 멈춥니다.
