@@ -4,14 +4,15 @@
     "name": "chorus96"
   },
   "metadata": {
-    "description": "rag-mcp 지식 베이스(런북, 장애, RCA) 검색 MCP 플러그인 마켓플레이스"
+    "description": "조직의 지식 베이스(런북, 과거 장애, RCA)를 검색하는 rag-mcp 플러그인 마켓플레이스"
   },
   "plugins": [
     {
       "name": "rag-mcp",
       "source": "./plugins/rag-mcp",
-      "description": "rag-mcp 서버에 연결해 런북·과거 장애·RCA를 시맨틱 검색하는 MCP 플러그인",
-      "category": "knowledge"
+      "description": "rag-mcp 서버에 연결해 런북, 과거 장애, RCA를 검색하는 MCP 도구와 사용 안내 스킬",
+      "category": "knowledge",
+      "homepage": "https://github.com/chorus96/rag-mcp"
     }
   ]
 }
