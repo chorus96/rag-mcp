@@ -3,7 +3,7 @@
 [Model Context Protocol](https://modelcontextprotocol.io)(MCP)로 노출되는 셀프 호스팅
 **AI 어시스턴트용 RAG 메모리 서버**입니다. MCP를 지원하는 모든 LLM 클라이언트(Claude Desktop /
 Claude Code, LibreChat Agents, 프록시를 통한 Open WebUI, 직접 만든 도구 등)에 여러분의 문서 —
-런북, 장애 보고서, RCA, 위키 내보내기 등 마크다운이나 PDF로 된 모든 것 — 를 대상으로 검색 가능한
+런북, 장애 보고서, RCA(근본 원인 분석), 위키 내보내기 등 마크다운이나 PDF로 된 모든 것 — 를 대상으로 검색 가능한
 장기 메모리를 제공합니다.
 
 - **읽기 전용 LLM 인터페이스** — 모델은 *검색*만 할 수 있습니다. 쓰기는 배치 수집(ingestion) 작업이나
