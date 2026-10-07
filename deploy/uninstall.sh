@@ -14,8 +14,15 @@
 #   항상:      systemd 사용자 서비스(qdrant, rag-mcp), 명령 rag-ingest·rag-promote,
 #              애플리케이션·Python 가상환경·Qdrant 바이너리
 #   --purge:   위에 더해 설정 파일(~/.config/rag-mcp)과
-#              데이터(~/.local/share/rag-mcp/data: 문서, Qdrant 저장소, 캐시)
-#              (RAG_KNOWLEDGE_DIR 을 이 밖의 경로로 바꿨다면 그 문서 디렉터리는 지우지 않습니다)
+#              데이터(~/.local/share/rag-mcp/data: 기본 문서 디렉터리, Qdrant 저장소, 캐시)
+#
+# 문서 디렉터리 (설정 파일의 RAG_KNOWLEDGE_DIR)
+#   official/(정식 문서)와 draft/(모델이 만든 초안)가 들어 있는, 지식 베이스의 원본입니다.
+#   - --purge 없이 지우면 그대로 남습니다. 다시 설치하면 같은 문서와 색인을 그대로 씁니다.
+#   - --purge 로 지우면 기본 경로(~/.local/share/rag-mcp/data/knowledge)의 문서는 official/·draft/ 모두
+#     삭제됩니다. 남겨야 할 문서가 있으면 먼저 다른 곳에 복사해 두세요. 검토하지 않은 초안도 함께 사라집니다.
+#   - RAG_KNOWLEDGE_DIR 을 데이터 디렉터리 밖의 경로로 바꿨다면, --purge 로도 그 문서 디렉터리는 지우지 않고
+#     남겨 둔 경로를 알려 줍니다. 필요 없으면 직접 지우세요.
 #
 # --purge 없이 지우면 나중에 install.sh로 다시 설치했을 때 기존 설정과 데이터를 그대로 씁니다.
 set -euo pipefail
@@ -55,10 +62,19 @@ rm -rf "$PREFIX/app" "$PREFIX/venv" "$PREFIX/qdrant"
 
 # --- 3. 설정과 데이터 (--purge 일 때만) ---------------------------------------------------
 if [ "$PURGE" = "1" ]; then
+    # 설정 파일을 지우기 전에 문서 디렉터리 위치를 읽어 둡니다 (install.sh와 같은 규칙: 마지막 줄, 따옴표·~ 처리).
+    KNOWLEDGE_DIR=$(sed -n 's/^RAG_KNOWLEDGE_DIR=//p' "$CONF_DIR/rag-mcp.env" 2>/dev/null | tail -n 1 || true)
+    KNOWLEDGE_DIR=${KNOWLEDGE_DIR%\"}; KNOWLEDGE_DIR=${KNOWLEDGE_DIR#\"}
+    KNOWLEDGE_DIR=${KNOWLEDGE_DIR%\'}; KNOWLEDGE_DIR=${KNOWLEDGE_DIR#\'}
+    case "$KNOWLEDGE_DIR" in "~"|"~/"*) KNOWLEDGE_DIR=$HOME${KNOWLEDGE_DIR#\~} ;; esac
     rm -rf "$DATA_DIR" "$CONF_DIR"
     # 다른 파일이 없으면 빈 상위 디렉터리도 정리합니다.
     rmdir "$PREFIX" 2>/dev/null || true
     echo "rag-mcp를 데이터와 설정까지 모두 제거했습니다."
+    # 데이터 디렉터리 밖의 문서 디렉터리는 사용자 문서일 수 있으므로 지우지 않고 알리기만 합니다.
+    if [ -n "$KNOWLEDGE_DIR" ] && [ -d "$KNOWLEDGE_DIR" ]; then
+        echo "문서 디렉터리는 남겨 두었습니다: $KNOWLEDGE_DIR (필요 없으면 직접 지우세요)"
+    fi
 else
     echo "rag-mcp를 제거했습니다. 설정($CONF_DIR)과 데이터($DATA_DIR)는 남아 있습니다."
     echo "모두 지우려면: $0 --purge"
