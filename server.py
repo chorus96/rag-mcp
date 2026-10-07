@@ -213,26 +213,26 @@ def rag_search(
     component: str | None = None,
     limit: int = DEFAULT_LIMIT,
 ) -> dict[str, Any]:
-    """Semantic search across the knowledge base (runbooks, incidents, RCAs).
+    """지식 베이스(런북, 장애, RCA) 전체에 대한 시맨틱 검색.
 
-    Call this while diagnosing an issue to pull in historical context — prior
-    incidents with the same symptom, the runbook for a component, past root
-    causes. Retrieval is by meaning, not keywords, so describe the symptom.
+    문제를 진단하는 동안 과거 맥락을 가져올 때 호출하세요 — 같은 증상의 이전 장애,
+    컴포넌트의 런북, 과거의 근본 원인 등. 키워드가 아니라 의미로 검색하므로 증상을
+    서술하세요.
 
     Args:
-        query: What you're looking for, in natural language. Example:
-            'Longhorn volume stuck in attaching state after node reboot'.
-        doc_type: Optional filter — 'incident', 'runbook', 'rca', or a custom
-            type used at ingestion time. Omit to search everything.
-        cluster: Optional SOFT filter — restrict to knowledge tagged with this
-            cluster (e.g. 'prod-01'). If a cluster-scoped search comes back empty
-            the server retries across ALL clusters (keeping the other filters)
-            and reports `cluster_narrowed: false`, so a fleet-wide precedent is
-            never hidden behind an empty same-cluster result. Omit for fleet-wide.
-        component: Optional HARD filter — restrict to knowledge tagged with this
-            component (e.g. 'longhorn'). Unlike `cluster` there is no empty-result
-            fallback: empty means nothing is tagged with it.
-        limit: Max results to return (1-20). Defaults to 5.
+        query: 찾고 있는 내용 (자연어). 예:
+            '노드 재부팅 후 Longhorn 볼륨이 attaching 상태에서 멈춤'.
+        doc_type: 선택적 필터 — 'incident', 'runbook', 'rca', 또는 수집 시 사용한
+            사용자 정의 유형. 생략하면 전체를 검색합니다.
+        cluster: 선택적 소프트 필터 — 이 클러스터 태그(예: 'prod-01')가 붙은 지식으로
+            한정합니다. 클러스터로 한정한 검색 결과가 비어 있으면 서버가 (다른 필터는
+            유지한 채) 모든 클러스터를 대상으로 다시 검색하고 `cluster_narrowed: false`를
+            보고하므로, 같은 클러스터 결과가 비었다고 전체 범위의 선례가 가려지지
+            않습니다. 전체 범위로 검색하려면 생략하세요.
+        component: 선택적 하드 필터 — 이 컴포넌트 태그(예: 'longhorn')가 붙은 지식으로
+            한정합니다. `cluster`와 달리 빈 결과일 때 대체 검색이 없습니다: 비어 있으면
+            이 태그가 붙은 지식이 없다는 뜻입니다.
+        limit: 반환할 최대 결과 수 (1-20). 기본값 5.
     """
     return _search(query, doc_type, cluster, component, limit)
 
@@ -244,19 +244,19 @@ def search_incidents(
     component: str | None = None,
     limit: int = DEFAULT_LIMIT,
 ) -> dict[str, Any]:
-    """Search only past incidents / RCAs for ones matching the current symptom.
+    """과거 장애 / RCA만 대상으로 현재 증상과 일치하는 것을 검색합니다.
 
-    Shortcut for rag_search(..., doc_type='incident'). Use this when you want
-    'has this happened before?' rather than 'what's the documented procedure?'.
-    Pass the target `cluster` to ask 'has this happened before ON THIS CLUSTER?'
-    (a soft narrow — empty same-cluster results fall back to all clusters).
+    rag_search(..., doc_type='incident')의 단축 도구입니다. '문서화된 절차가 뭐지?'가
+    아니라 '전에 이런 일이 있었나?'를 알고 싶을 때 사용하세요. 대상 `cluster`를 넘기면
+    '이 클러스터에서 전에 이런 일이 있었나?'를 묻게 됩니다 (소프트 필터 — 같은 클러스터
+    결과가 비어 있으면 모든 클러스터로 대체 검색).
 
     Args:
-        query: The symptom or error, in natural language.
-        cluster: Optional SOFT filter — cluster-tagged incidents only, with a
-            fleet-wide fallback when the same-cluster search is empty.
-        component: Optional HARD filter — incidents tagged with this component.
-        limit: Max results (1-20). Defaults to 5.
+        query: 증상 또는 에러 (자연어).
+        cluster: 선택적 소프트 필터 — 해당 클러스터 태그가 붙은 장애만 검색하며, 같은
+            클러스터 결과가 비어 있으면 전체 범위로 대체 검색합니다.
+        component: 선택적 하드 필터 — 이 컴포넌트 태그가 붙은 장애만 검색합니다.
+        limit: 최대 결과 수 (1-20). 기본값 5.
     """
     return _search(query, "incident", cluster, component, limit)
 
@@ -268,28 +268,28 @@ def search_runbooks(
     component: str | None = None,
     limit: int = DEFAULT_LIMIT,
 ) -> dict[str, Any]:
-    """Search only runbooks / documented procedures.
+    """런북 / 문서화된 절차만 검색합니다.
 
-    Shortcut for rag_search(..., doc_type='runbook'). Use this when you want the
-    established procedure for a component or task. Pass `component` (e.g.
-    'longhorn') to scope to one component's runbooks.
+    rag_search(..., doc_type='runbook')의 단축 도구입니다. 컴포넌트나 작업에 대해
+    정해진 절차를 알고 싶을 때 사용하세요. `component`(예: 'longhorn')를 넘기면 해당
+    컴포넌트의 런북으로 범위를 좁힙니다.
 
     Args:
-        query: The component or task, in natural language.
-        cluster: Optional SOFT filter — cluster-tagged runbooks only, with a
-            fleet-wide fallback when the same-cluster search is empty.
-        component: Optional HARD filter — runbooks tagged with this component.
-        limit: Max results (1-20). Defaults to 5.
+        query: 컴포넌트 또는 작업 (자연어).
+        cluster: 선택적 소프트 필터 — 해당 클러스터 태그가 붙은 런북만 검색하며, 같은
+            클러스터 결과가 비어 있으면 전체 범위로 대체 검색합니다.
+        component: 선택적 하드 필터 — 이 컴포넌트 태그가 붙은 런북만 검색합니다.
+        limit: 최대 결과 수 (1-20). 기본값 5.
     """
     return _search(query, "runbook", cluster, component, limit)
 
 
 @mcp.tool()
 def rag_collections() -> dict[str, Any]:
-    """List Qdrant collections and the point count of the active knowledge base.
+    """Qdrant 컬렉션 목록과 현재 지식 베이스의 포인트 수를 보여 줍니다.
 
-    Use this first to confirm the knowledge base exists and has been populated
-    before running searches.
+    검색을 실행하기 전에 먼저 이 도구로 지식 베이스가 존재하고 채워져 있는지
+    확인하세요.
     """
     try:
         names = [c.name for c in _qdrant.get_collections().collections]
@@ -318,10 +318,10 @@ def rag_collections() -> dict[str, Any]:
 
 @mcp.tool()
 def rag_health() -> dict[str, Any]:
-    """Reachability check for both dependencies: Qdrant and the embedding model.
+    """두 의존성 Qdrant와 임베딩 모델의 접근 가능 여부를 확인합니다.
 
-    Returns per-dependency status. Call this first if searches are failing to
-    tell whether the problem is the vector DB or the local embedding model.
+    의존성별 상태를 반환합니다. 검색이 실패하면 먼저 이 도구를 호출해 문제가 벡터
+    DB인지 임베딩 모델인지 구분하세요.
     """
     health: dict[str, Any] = {"status": "ok"}
 
