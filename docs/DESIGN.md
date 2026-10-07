@@ -10,7 +10,7 @@ MCP 서버로 노출하여, 에이전트가 운영 중인 클러스터를 디버
   [`ingest.py`](../ingest.py)가 별도 경로로 기록하므로, LLM에 노출되는 인터페이스는 읽기 전용으로
   유지됩니다.
 - **벤더 중립.** 특정 LLM, UI, 임베딩 벤더에 묶여 있지 않습니다. 채팅 LLM은 연결하는 MCP
-  클라이언트가 정합니다. 임베딩은 교체 가능한 제공자([`embeddings.py`](./embeddings.py))를
+  클라이언트가 정합니다. 임베딩은 교체 가능한 제공자([`embeddings.py`](../embeddings.py))를
   거칩니다 — `ollama`(오프라인 기본값) 또는 `openai`(OpenAI 호환 엔드포인트). 코드는 같고 환경
   변수 하나만 바꾸면 됩니다. 접두사는 자동으로 붙습니다. 비대칭 모델(nomic)에는
   `search_query:`/`search_document:` 접두사가 붙고, 대칭 모델(OpenAI `text-embedding-*`)에는
