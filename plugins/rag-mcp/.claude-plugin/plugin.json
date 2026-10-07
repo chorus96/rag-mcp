@@ -1,6 +1,6 @@
 {
   "name": "rag-mcp",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "rag-mcp 서버(읽기 전용 RAG 메모리)에 연결해 런북, 과거 장애, RCA를 검색하는 MCP 도구를 제공합니다.",
   "author": {
     "name": "chorus96"
