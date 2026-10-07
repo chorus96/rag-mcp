@@ -311,6 +311,54 @@ RAG_MCP_URL=http://10.0.0.5:8084/mcp claude
 검색 도구의 `limit`은 1부터 `RAG_MAX_LIMIT`(기본 20) 사이로 제한되며, 생략하면 `RAG_DEFAULT_LIMIT`(기본 5)입니다.
 결과의 `source`가 `official/`로 시작하면 정식 문서, `draft/`로 시작하면 아직 검토하지 않은 초안입니다.
 
+### 정식 문서·초안 검색 (`search_official`, `search_draft`)
+
+세 검색 도구는 같은 검색 경로를 쓰고, 어느 폴더의 문서를 대상으로 하는지만 다릅니다. Claude Code에서는 자연어로 물으면
+플러그인의 `rag-knowledge` 스킬이 알맞은 도구를 고릅니다(검토된 정식 문서부터 찾고, 없으면 초안을 봅니다).
+
+| 요청 예 | 도구 호출 | 검색 대상 |
+|------|------|------|
+| "Longhorn 볼륨이 attaching에서 멈췄을 때 어떻게 해?" | `search_official(query="Longhorn 볼륨이 attaching 상태에서 멈춤")` | `official/`만 |
+| "longhorn 관련 정식 문서만 찾아 줘" | `search_official(query="볼륨 복구", component="longhorn")` | `official/` 중 `component: longhorn` |
+| "최근에 추가된 초안 중에 볼륨 복구 내용 있어?" | `search_draft(query="볼륨 복구 절차")` | `draft/`만 |
+| "prod-01 클러스터 기준으로 초안까지 다 찾아 줘" | `rag_search(query="볼륨 복구", cluster="prod-01")` | 둘 다 (`cluster`는 소프트 필터) |
+| — | `rag_search(query="볼륨 복구", doc_type="draft")` | `search_draft`와 같음 |
+
+응답 예 (`search_draft(query="볼륨 복구 절차", limit=1)`):
+
+```json
+{
+  "status": "ok",
+  "collection": "rag_kb",
+  "query": "볼륨 복구 절차",
+  "doc_type": "draft",
+  "cluster": null,
+  "cluster_narrowed": null,
+  "component": null,
+  "reranked": false,
+  "count": 1,
+  "results": [
+    {
+      "score": 0.0328,
+      "doc_type": "draft",
+      "title": "Longhorn 볼륨 복구 절차",
+      "source": "draft/longhorn-볼륨-복구.md",
+      "tags": ["longhorn"],
+      "text": "# 절차\n1. 볼륨을 detach 합니다 ...",
+      "truncated": false
+    }
+  ]
+}
+```
+
+- `doc_type`은 결과마다 `official` 또는 `draft`이고, `source`의 맨 앞 폴더와 같습니다. 초안을 근거로 답할 때는
+  검토 전이라는 점을 밝히세요.
+- `score`는 하이브리드 검색에서 RRF 결합 점수라 작은 값으로 나옵니다([쉬운 설명](#쉬운-설명-질의-하나가-처리되는-과정)).
+  리랭킹이 켜져 있으면 `reranked: true`와 함께 결과마다 `rerank_score`가 붙습니다.
+- `text`는 `RAG_SNIPPET_CHARS`(기본 1200자)까지만 돌려주고, 잘렸으면 `truncated: true`입니다.
+- 결과가 없으면 `count: 0`, `results: []`입니다. 정식 문서에서 찾지 못하면 `search_draft`나 표현을 바꾼 질의로
+  다시 찾아보세요.
+
 ### 필터의 의미
 
 | 필터 | 종류 | 결과가 비었을 때 |
