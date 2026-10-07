@@ -1,25 +1,31 @@
-"""공유 Qdrant 벡터 저장소 계층: 명명된 밀집 벡터 + BM25 희소 벡터 (하이브리드 검색).
+"""tools/vectorstore.py — Qdrant 컬렉션과 하이브리드 검색.
 
-검색 1단계. 밀집 벡터는 의미를 잡아내지만 운영 텍스트에서 중요한 정확한 토큰 —
-에러 문자열(`CrashLoopBackOff`), 리소스 ID(`c-xxxxx`), 컴포넌트 이름(`Longhorn`) —
-을 놓칩니다. 희소 BM25 벡터가 이를 찾아냅니다. 청크마다 두 벡터를 모두 저장하고
-(Qdrant 명명된 벡터) 질의 시점에 Reciprocal Rank Fusion(RRF)으로 결합하므로, 재현율이
-두 신호의 이점을 모두 얻습니다.
+역할
+  Qdrant 컬렉션 스키마, BM25 희소 벡터 계산, 하이브리드 질의를 한곳에서 다룹니다. ingest.py,
+  capture.py, server.py가 모두 이 모듈을 거치므로, 쓰기 경로와 읽기 경로 사이에서 컬렉션 구조와
+  벡터 이름이 어긋나지 않습니다.
 
-희소 벡터는 FastEmbed의 `Qdrant/bm25` 모델로 로컬에서 만듭니다 — API 키가 필요 없고
-오프라인에서도 동작해 스택의 나머지 부분과 맞습니다. IDF는 컬렉션의
-`Modifier.IDF`로 서버 측에서 적용되므로, 질의 쪽은 단어 존재 여부만 있으면 됩니다.
+벡터 구성 (Qdrant 명명된 벡터)
+  - dense: 임베딩 엔드포인트가 만든 의미 벡터 (코사인 거리)
+  - bm25:  FastEmbed `Qdrant/bm25`로 로컬에서 만든 키워드 벡터. IDF는 컬렉션의 Modifier.IDF로
+           서버 측에서 적용하므로, 질의 쪽은 단어 존재 여부만 보내면 됩니다.
+  밀집 벡터는 의미를 잡지만 에러 문자열(`CrashLoopBackOff`), 리소스 ID(`c-xxxxx`), 컴포넌트
+  이름(`Longhorn`) 같은 정확한 토큰을 놓치기 쉽습니다. BM25가 이를 보완하고, 질의할 때 두 결과를
+  Reciprocal Rank Fusion(RRF)으로 결합합니다.
 
-단일 기준점: `ingest.py`, `capture.py`, `server.py`가 모두 여기를 거치므로, 쓰기
-경로와 읽기 경로 사이에서 컬렉션 스키마와 벡터 이름이 어긋나지 않습니다.
+공개 함수
+  - ensure_collection: 컬렉션과 페이로드 인덱스 생성 (이미 있으면 그대로)
+  - named_vectors:     포인트 하나의 벡터 묶음 구성
+  - embed_documents_sparse / embed_query_sparse: BM25 희소 벡터
+  - query:             하이브리드(기본) 또는 밀집 전용 검색
+  - sparse_available / describe: 하이브리드 동작 여부와 설정
 
-우아한 성능 저하: FastEmbed를 import/로드할 수 없거나 하이브리드가 꺼져 있으면
-(`RAG_HYBRID=false`), 컬렉션은 밀집 전용이 되고 질의는 일반 밀집 검색으로 대체됩니다.
-아무것도 깨지지 않습니다 — 키워드 신호만 잃을 뿐입니다.
+대체 동작
+  FastEmbed를 불러올 수 없거나 RAG_HYBRID=false 이면 밀집 검색만 합니다. 검색은 계속 동작하고
+  키워드 신호만 잃습니다.
 
-스키마 참고: 명명된 벡터(`dense`)를 사용하므로, 이전의 이름 없는 벡터 컬렉션과
-호환되지 않습니다. 하이브리드로 옮기려면 한 번 다시 수집해야 합니다
-(`python ingest.py --recreate`).
+주의
+  RAG_HYBRID를 바꾸면 컬렉션 구조가 달라지므로 rag-ingest --recreate 로 재구축해야 합니다.
 """
 
 from __future__ import annotations
@@ -40,6 +46,7 @@ from qdrant_client.models import (
     VectorParams,
 )
 
+# --- 설정 ---------------------------------------------------------------------
 log = logging.getLogger("rag-vectorstore")
 
 # 명명된 벡터 키. 모든 읽기/쓰기 경로가 일치하도록 상수로 둡니다.
@@ -57,6 +64,7 @@ _bm25 = None            # 지연 로드되는 FastEmbed 모델
 _bm25_loaded = False    # 로드를 시도한 적이 있는지
 
 
+# --- BM25 희소 벡터 -----------------------------------------------------------
 def _load_bm25() -> Any | None:
     """FastEmbed BM25 모델을 지연 import + 생성합니다. 캐시됩니다. 하이브리드가
     꺼져 있거나 FastEmbed를 쓸 수 없으면 None을 반환합니다 (로그는 한 번만)."""
@@ -109,6 +117,7 @@ def embed_query_sparse(text: str) -> SparseVector | None:
     return _to_sparse(next(iter(model.query_embed(text))))
 
 
+# --- 컬렉션과 포인트 ----------------------------------------------------------
 def named_vectors(dense: list[float], sparse: SparseVector | None) -> dict[str, Any]:
     """청크 하나에 대한 PointStruct.vector 매핑을 만듭니다."""
     vectors: dict[str, Any] = {DENSE: dense}
@@ -146,6 +155,7 @@ def ensure_collection(
             pass
 
 
+# --- 검색 ---------------------------------------------------------------------
 def query(
     client: QdrantClient,
     collection: str,

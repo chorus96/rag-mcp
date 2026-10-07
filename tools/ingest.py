@@ -1,32 +1,35 @@
-"""지식 베이스 수집 작업.
+"""tools/ingest.py — 문서 수집.
 
-마크다운과 PDF 문서(런북, 과거 장애, RCA, 참고 자료)를 읽어 청크로 나누고, 각 청크를
-OpenAI 호환 임베딩 엔드포인트로 임베딩한 뒤 Qdrant에 업서트합니다. RAG 메모리의
-의도적인 별도 쓰기 경로이며, MCP 서버 자체는 읽기 전용입니다.
+역할
+  마크다운과 PDF 문서(런북, 과거 장애, RCA, 참고 자료)를 읽어 청크로 나누고, OpenAI 호환 임베딩
+  엔드포인트로 임베딩한 뒤 Qdrant에 업서트합니다. MCP 서버는 읽기 전용이므로, 이 명령이 지식
+  베이스를 채우는 정해진 쓰기 경로입니다.
 
-지식 베이스가 바뀔 때마다 실행하세요 (로컬, CI, 또는 cron 작업에서):
+실행
+  설치한 서버에서는 rag-ingest 명령(deploy/rag-ingest)으로 실행합니다. 개발용 직접 실행:
+      python tools/ingest.py --path knowledge [--recreate]
 
-    python ingest.py --path ./knowledge
+처리 과정
+  1. 파일 탐색 (.md, .pdf)
+  2. 파싱: 마크다운은 YAML front matter 분리, PDF는 페이지마다 `# [Page N]` 섹션으로 추출
+  3. 청킹: 헤딩 기준 섹션 → 크면 문단 단위로 나눔 (각 청크 앞에 헤딩을 붙임)
+  4. 임베딩(EMBED_BATCH_SIZE 단위) + BM25 희소 벡터
+  5. 업서트(QDRANT_UPSERT_BATCH 단위) → 줄어든 문서의 남은 청크 삭제
 
-멱등적: 청크 ID가 (source, chunk index)에서 파생되므로, 다시 실행하면 중복을 만들지
-않고 기존 포인트를 갱신합니다. 실행 사이에 문서가 줄어들면, 남은 뒷부분 청크를 오래된
-검색 결과로 남겨 두지 않고 삭제합니다 (`_delete_orphan_chunks` 참고).
-
-마크다운 문서 형식 (front matter는 선택 사항이지만 권장):
-
+문서 형식 (front matter는 선택)
     ---
-    title: Longhorn volume stuck attaching
+    title: Longhorn 볼륨이 attaching 상태에서 멈춤
     type: incident          # incident | runbook | rca | ...  (기본값: 폴더 이름, 없으면 "note")
     tags: [longhorn, storage, node-reboot]
     ---
     # 본문 마크다운...
 
-PDF 문서는 페이지 단위로 추출합니다 (각 페이지가 `# [Page N]` 섹션이 되어 청킹 후에도
-페이지 맥락이 유지됩니다). PDF에는 front matter가 없으므로 `type`은 항상 상위 폴더
-이름에서, 제목은 파일 이름에서 추론합니다.
+  `type`을 생략하면 상위 폴더 이름에서 끝의 s를 뗀 값입니다 (incidents/ → incident).
+  PDF에는 front matter가 없으므로 type은 폴더 이름, 제목은 파일 이름에서 가져옵니다.
 
-`type`을 생략하면 상위 폴더 이름에서 추론합니다
-(예: knowledge/incidents/* -> "incident", knowledge/runbooks/* -> "runbook").
+멱등성
+  청크 ID가 (source, chunk index)에서 정해지므로 다시 실행해도 중복이 생기지 않습니다. 문서를
+  삭제하거나 이름을 바꾸면 이전 청크가 남으므로 --recreate 로 재구축하세요.
 """
 
 from __future__ import annotations
@@ -53,8 +56,9 @@ from qdrant_client.models import (
 import embeddings
 import vectorstore
 
-# 저렴한 사전 필터링을 위해 색인할 문서 메타데이터 (3단계). 키워드 인덱스이며,
-# 이미 있는 인덱스를 만드는 것은 vectorstore.ensure_collection에서 무시됩니다.
+# --- 설정 ---------------------------------------------------------------------
+# 사전 필터링을 위해 키워드 인덱스를 만들 페이로드 필드. 이미 있는 인덱스를 다시 만드는 것은
+# vectorstore.ensure_collection에서 무시됩니다.
 # `source`는 질의 필터가 아니라 오래된 청크 정리 필터를 위해 색인합니다.
 _INDEXED_FIELDS = ("doc_type", "component", "cluster", "source")
 
@@ -94,6 +98,7 @@ UPSERT_BATCH_SIZE = max(1, int(os.environ.get("QDRANT_UPSERT_BATCH", "64")))
 _ID_NAMESPACE = uuid.UUID("6f3a9c1e-9b2d-5a44-8c11-a1b2c3d4e5f6")
 
 
+# --- 문서 파싱과 청킹 ---------------------------------------------------------
 def _parse_front_matter(raw: str) -> tuple[dict[str, Any], str]:
     """선택적 YAML front matter를 본문과 분리합니다. (meta, body)를 반환합니다."""
     if raw.startswith("---"):
@@ -136,7 +141,7 @@ def _chunk(text: str, size: int, overlap: int) -> list[str]:
 
 
 def _chunk_document(body: str) -> list[str]:
-    """섹션 인식 청킹 (3단계): 마크다운 헤딩 기준으로 나눠 런북 단계나 장애 섹션이
+    """섹션 인식 청킹: 마크다운 헤딩 기준으로 나눠 런북 단계나 장애 섹션이
     온전히 유지되게 하고, 각 청크 앞에 헤딩을 붙여 단독으로도 맥락을 갖게 한 뒤,
     너무 큰 섹션 안에서는 문단 청커로 대체합니다. 헤딩이 없는 본문은 이전과 똑같이
     동작합니다."""
@@ -191,6 +196,7 @@ def _extract_pdf_text(path: Path) -> str:
     return "\n\n".join(pages)
 
 
+# --- 임베딩과 Qdrant 쓰기 -----------------------------------------------------
 def _embed_batch(texts: list[str]) -> list[list[float]]:
     """모든 청크의 밀집 벡터를 요청당 EMBED_BATCH_SIZE개 청크씩 만듭니다.
 
@@ -259,6 +265,7 @@ def _ensure_collection(client: QdrantClient, dim: int, recreate: bool) -> None:
     vectorstore.ensure_collection(client, COLLECTION, dim, payload_indexes=_INDEXED_FIELDS)
 
 
+# --- 수집 실행 ----------------------------------------------------------------
 def _discover_files(path: Path) -> list[Path]:
     """`path` 아래의 지원되는 모든 (.md/.pdf) 파일. ID가 안정적이도록 정렬합니다."""
     return sorted(
@@ -304,7 +311,7 @@ def ingest(path: Path, recreate: bool) -> None:
             _ensure_collection(client, len(dense[0]), recreate)
             collection_ready = True
 
-        # 사전 필터링을 위해 선택적 문서 메타데이터를 그대로 전달 (3단계).
+        # front matter의 선택적 메타데이터를 필터용 페이로드로 그대로 넘깁니다.
         extra = {k: meta[k] for k in ("component", "severity", "cluster") if meta.get(k)}
         points = [
             PointStruct(
@@ -330,6 +337,7 @@ def ingest(path: Path, recreate: bool) -> None:
     log.info("done: %d file(s), %d chunk(s) into '%s'", len(files), total_chunks, COLLECTION)
 
 
+# --- 명령줄 -------------------------------------------------------------------
 def main() -> None:
     parser = argparse.ArgumentParser(description="Ingest markdown/PDF docs into the Qdrant knowledge base.")
     parser.add_argument(

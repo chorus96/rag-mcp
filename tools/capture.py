@@ -1,20 +1,20 @@
-"""RAG 메모리의 지식 기록 쓰기 경로 ("플라이휠").
+"""tools/capture.py — 내부 쓰기 API의 로직 (지식 플라이휠).
 
-순환 고리를 완성하는, 의도적이고 신뢰할 수 있는 쓰기 경로입니다: 에이전트가 조사를
-마치면 그 결과인 RCA를 여기에 다시 기록해, 다음에 비슷한 알림이 오면 "전에 본 것"으로
-알아볼 수 있게 합니다. 배치 `ingest.py`(런북/문서)를 장애 단위 기록으로 보완합니다.
+역할
+  에이전트가 조사를 마치면 그 결과(RCA)를 지식 베이스에 기록해, 다음에 비슷한 알림이 왔을 때
+  "전에 본 것"으로 알아볼 수 있게 합니다. 문서 단위 수집(ingest.py)을 장애 단위 기록으로
+  보완합니다.
 
-중요 — 읽기 전용 MCP 인터페이스는 유지됩니다
---------------------------------------------
-이 중 어느 것도 ``@mcp.tool()``로 노출되지 않습니다. LLM은 ``server.py``의 검색
-도구만 봅니다. 기록/피드백은 일반 HTTP 라우트(``server.py``의 ``@mcp.custom_route``
-참고)이며, 모델이 아니라 신뢰할 수 있는 에이전트 프로세스가 호출합니다. 덕분에 LLM에
-노출되는 서버는 엄격히 읽기 전용으로 유지됩니다 — 모델에게 쓰기 도구는 절대 제공되지
-않습니다.
+주요 함수 (server.py의 /internal/knowledge/* 라우트가 호출)
+  - capture_incident: 장애/RCA 하나를 fingerprint 기준으로 기록 (재발이면 occurrence_count 증가)
+  - find_similar:     반복 장애 사전 확인 — "이 증상을 본 적이 있나?" (밀집 검색만 사용)
+  - record_feedback:  기록된 장애에 사람의 판단(상태, 신뢰도, 메모)을 덧붙임
+  - stats:            지식 베이스 개수와 현재 설정
 
-임베딩 + Qdrant는 여기에 있으므로(지식 서비스가 소유), 기록과 질의가 똑같이
-임베딩됩니다 — ``embeddings.py``의 엄격한 규칙(수집과 질의는 반드시 같은 제공자 +
-모델을 사용)이 구조적으로 충족됩니다.
+설계 원칙
+  - LLM에 노출하지 않음: 어느 것도 @mcp.tool()이 아니며, 신뢰할 수 있는 프로세스만 HTTP로 호출합니다.
+  - 수집과 질의의 일관성: 임베딩과 Qdrant를 이 서비스가 직접 다루므로, 기록과 질의가 같은 임베딩
+    설정을 씁니다.
 """
 
 from __future__ import annotations
@@ -39,6 +39,7 @@ import reranker
 import vectorstore
 from ingest import _chunk  # 배치 수집과 똑같은 청킹을 재사용 (DRY)
 
+# --- 설정 ---------------------------------------------------------------------
 log = logging.getLogger("rag-capture")
 
 QDRANT_URL = os.environ.get("QDRANT_URL", "http://localhost:6333")
@@ -61,6 +62,7 @@ _INDEXED_FIELDS = (
 _client = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY, timeout=HTTP_TIMEOUT)
 
 
+# --- 내부 도우미 --------------------------------------------------------------
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -113,6 +115,7 @@ def _existing_history(fingerprint: str) -> dict[str, Any]:
     return {"occurrence_count": p.get("occurrence_count", 1), "first_seen": p.get("first_seen")}
 
 
+# --- 장애 기록 ----------------------------------------------------------------
 def capture_incident(doc: dict[str, Any]) -> dict[str, Any]:
     """장애/RCA 하나를 fingerprint를 키로 지식 베이스에 업서트합니다.
 
@@ -197,6 +200,7 @@ def capture_incident(doc: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+# --- 반복 장애 확인 -----------------------------------------------------------
 def find_similar(query: str, doc_type: str = "incident", limit: int = 3, min_score: float = 0.0,
                  cluster: str | None = None) -> dict[str, Any]:
     """반복 장애 사전 확인을 위한 시맨틱 조회. ``min_score`` 이상인 결과를 알림
@@ -277,6 +281,7 @@ def find_similar(query: str, doc_type: str = "incident", limit: int = 3, min_sco
             "cluster": cluster, "cluster_narrowed": cluster_narrowed, "results": hits}
 
 
+# --- 피드백과 통계 ------------------------------------------------------------
 def record_feedback(fingerprint: str, status: str | None = None, confidence: str | None = None,
                     note: str | None = None) -> dict[str, Any]:
     """기록된 장애에 사람의 결정을 덧붙입니다 (피드백 루프).

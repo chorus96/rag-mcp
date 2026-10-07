@@ -1,24 +1,26 @@
-"""
-RAG 메모리를 위한 제공자 무관 임베딩.
+"""tools/embeddings.py — 임베딩 호출.
 
-지원:
-- OpenAI 호환 /v1/embeddings 엔드포인트 (네이티브 배치 입력). OpenAI API, Hugging Face
-  TEI, vLLM, LocalAI, LiteLLM 프록시 등 이 형식을 제공하는 서버라면
-  무엇이든 쓸 수 있습니다. 엔드포인트는 EMBEDDINGS_BASE_URL로 반드시 지정해야 합니다.
+역할
+  OpenAI 호환 /v1/embeddings 엔드포인트로 텍스트를 밀집 벡터로 바꿉니다. OpenAI API, Hugging Face
+  TEI, vLLM, LocalAI, LiteLLM 프록시 등 이 형식을 제공하는 서버라면 무엇이든 쓸 수 있습니다.
+  server.py, ingest.py, capture.py가 모두 이 모듈을 거칩니다.
 
-기능:
-- 대칭/비대칭 모델을 코드에서 처리: 비대칭 모델(예: nomic)에는 질의/문서용 작업
-  접두사가 자동으로 붙고, 대칭 모델(예: OpenAI text-embedding-*)에는 붙지 않습니다.
-  EMBED_QUERY_PREFIX / EMBED_DOC_PREFIX 환경 변수를 명시하면 항상 자동 기본값보다
-  우선합니다 (자동 감지가 모르는 모델 계열을 위한 탈출구, 예: "query:"/"passage:"를
-  쓰는 e5/bge).
-- rag-mcp 전체에서 쓰는 단일 공개 진입점 `embed(text, kind)`, 그리고 편의 래퍼
-  `embed_query` / `embed_document` / `embed_documents`.
-- HTTP 오류에 상태 코드 + 응답 본문을 담아, 엔드포인트/모델 문제(잘못된 모델, 404,
-  인증)를 디버깅할 수 있게 합니다.
+공개 함수
+  - embed(text, kind):     텍스트 하나 (kind는 'query' 또는 'document')
+  - embed_documents(texts): 문서 여러 개를 한 번의 요청으로
+  - embed_query / embed_document: 편의 래퍼
+  - describe():            현재 설정 요약 (상태 확인·로그용, 비밀 값 제외)
 
-중요: 수집과 질의는 반드시 같은 제공자 + 모델을 사용해야 합니다. Qdrant 벡터는 모델에
-종속되므로, 모델을 바꾸면 다시 수집해야 합니다. rag-mcp/README.md를 참고하세요.
+동작
+  - EMBEDDINGS_BASE_URL에는 기본값이 없습니다. 문서가 의도치 않게 외부 API로 전송되지 않도록
+    운영자가 반드시 지정해야 하며, 비어 있으면 EmbeddingError를 냅니다.
+  - 비대칭 모델 접두사: nomic 계열은 질의/문서 접두사를 자동으로 붙이고, 그 외(bge-m3, OpenAI 등)는
+    붙이지 않습니다. EMBED_QUERY_PREFIX / EMBED_DOC_PREFIX를 지정하면 항상 그 값이 우선합니다.
+  - HTTP 오류는 상태 코드와 응답 본문을 담아, 잘못된 URL·모델(404)이나 키 문제(401)를 알 수 있게 합니다.
+
+주의
+  수집과 질의는 반드시 같은 엔드포인트와 모델을 써야 합니다. Qdrant 벡터는 모델에 종속되므로,
+  모델을 바꾸면 rag-ingest --recreate 로 다시 수집하세요.
 """
 
 from __future__ import annotations
@@ -29,9 +31,7 @@ from dataclasses import dataclass
 import httpx
 
 
-# =========================================================
-# 설정
-# =========================================================
+# --- 설정 ---------------------------------------------------------------------
 
 @dataclass
 class EmbeddingConfig:
@@ -83,9 +83,7 @@ CONFIG = _build_config()
 HTTP_TIMEOUT = float(os.environ.get("RAG_TIMEOUT_SECONDS", "60"))
 
 
-# =========================================================
-# 오류
-# =========================================================
+# --- 오류 ---------------------------------------------------------------------
 
 class EmbeddingError(RuntimeError):
     pass
@@ -99,9 +97,7 @@ def _http_error(provider: str, exc: httpx.HTTPStatusError) -> EmbeddingError:
     return EmbeddingError(f"{provider} embeddings HTTP {exc.response.status_code}{detail}")
 
 
-# =========================================================
-# 헬퍼
-# =========================================================
+# --- 내부 도우미 --------------------------------------------------------------
 
 def describe() -> dict[str, str]:
     return {
@@ -128,9 +124,7 @@ def _openai_endpoint() -> str:
     return f"{base}/embeddings" if base.endswith("/v1") else f"{base}/v1/embeddings"
 
 
-# =========================================================
-# 제공자
-# =========================================================
+# --- 엔드포인트 호출 ----------------------------------------------------------
 
 def _embed_openai(texts: list[str]) -> list[list[float]]:
     """OpenAI 호환 /v1/embeddings는 배치 `input` 배열을 기본으로 받습니다."""
@@ -173,9 +167,7 @@ def _embed_batch(texts: list[str]) -> list[list[float]]:
     return _embed_openai(texts)
 
 
-# =========================================================
-# 공개 API — rag-mcp의 다른 부분이 호출하는 것
-# =========================================================
+# --- 공개 API — 다른 모듈이 호출하는 함수 -------------------------------------
 
 def embed(text: str, kind: str) -> list[float]:
     """텍스트 하나를 임베딩합니다. `kind`는 'query' 또는 'document'이며 비대칭 작업

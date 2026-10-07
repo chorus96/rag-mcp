@@ -1,20 +1,23 @@
-"""RAG 메모리 MCP 서버 — 런북, 과거 장애, RCA(근본 원인 분석)로 이루어진 Qdrant
-지식 베이스에 대한 읽기 전용 시맨틱 검색.
+"""tools/server.py — rag-mcp MCP 서버.
 
+역할
+  런북, 과거 장애, RCA(근본 원인 분석) 지식 베이스에 대한 검색 도구를 MCP(streamable-http)로
+  제공합니다. 같은 프로세스에서 신뢰할 수 있는 자동화용 내부 쓰기 API(HTTP 라우트)도 제공합니다.
 
-읽기 전용 원칙
---------------
-이 서버는 검색(SEARCH) 도구만 노출합니다. 지식 베이스는 별도 경로의 `ingest.py`
-작업이 채우므로(README.md 참고), LLM에 노출되는 인터페이스는 읽기 전용으로
-유지됩니다.
+구성
+  - 공통 검색 경로 `_search`: 질의 임베딩 → 하이브리드 검색 → (선택) 리랭킹 → 응답 구성
+  - MCP 도구: rag_search, search_incidents, search_runbooks, rag_collections, rag_health
+  - 내부 쓰기 API: /internal/knowledge/{capture,similar,feedback,stats} (실제 로직은 capture.py)
 
-벤더 중립 설계
---------------
-특정 LLM, UI, 임베딩 벤더에 묶여 있지 않습니다. 채팅 LLM은 연결하는 MCP
-클라이언트(LibreChat, mcpo를 통한 Open WebUI, 직접 만든 UI/CLI 등)가 정합니다.
-임베딩은 `embeddings.py`를 거쳐 OpenAI 호환 /v1/embeddings 엔드포인트를 사용하므로,
-코드 변경 없이 직접 띄운 서버(TEI, vLLM 등)로 오프라인 동작하거나 호스팅 API와 함께
-동작합니다.
+설계 원칙
+  - 읽기 전용: MCP 도구는 검색만 합니다. 지식 베이스 기록은 rag-ingest(ingest.py)와 내부 API로만
+    이루어지며, 모델에게 쓰기 도구는 제공하지 않습니다.
+  - 벤더 중립: 채팅 LLM은 연결한 MCP 클라이언트가 정하고, 임베딩은 embeddings.py를 거쳐 OpenAI 호환
+    엔드포인트를 씁니다.
+
+주의
+  @mcp.tool() 함수의 docstring은 LLM에게 그대로 전달되는 도구 설명입니다. 동작을 바꾸면 함께
+  고치세요.
 """
 
 from __future__ import annotations
@@ -37,6 +40,7 @@ import embeddings
 import reranker
 import vectorstore
 
+# --- 설정 ---------------------------------------------------------------------
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(name)s %(message)s",
@@ -62,6 +66,7 @@ mcp = FastMCP("rag", host=MCP_HOST, port=MCP_PORT)
 _qdrant = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY, timeout=HTTP_TIMEOUT)
 
 
+# --- 공통 검색 경로 -----------------------------------------------------------
 def _clamp_limit(limit: int) -> int:
     if limit < 1:
         return 1
@@ -143,8 +148,7 @@ def _search(query: str, doc_type: str | None, cluster: str | None, component: st
                 "status": "error",
                 "error": (
                     f"collection '{COLLECTION}' not found in Qdrant. Populate it "
-                    f"first with the ingestion job (see rag-mcp/README.md: "
-                    f"`python ingest.py --path ./knowledge`)."
+                    f"first with the ingestion command (`rag-ingest`; see README.md)."
                 ),
             }
         return {"status": "error", "error": f"qdrant error: {exc}"}
@@ -205,6 +209,7 @@ def _search(query: str, doc_type: str | None, cluster: str | None, component: st
     return response
 
 
+# --- MCP 도구 (LLM에 노출됨) --------------------------------------------------
 @mcp.tool()
 def rag_search(
     query: str,
@@ -347,9 +352,7 @@ def rag_health() -> dict[str, Any]:
     return health
 
 
-# ---------------------------------------------------------------------------
-# 내부 쓰기 API (MCP 도구 아님 — LLM에는 보이지 않음)
-# ---------------------------------------------------------------------------
+# --- 내부 쓰기 API (MCP 도구 아님 — LLM에는 보이지 않음) ----------------------
 # 지식 "플라이휠": 신뢰할 수 있는 에이전트 프로세스가 조사를 마친 뒤 여기서 RCA를
 # 기록하고 사람의 피드백을 남기며, /similar로 반복 장애 사전 확인을 합니다. 이것들은
 # 일반 HTTP 라우트이므로 위의 읽기 전용 MCP 도구 인터페이스는 그대로입니다 — 모델은
@@ -407,6 +410,7 @@ async def _stats_route(request: Request) -> JSONResponse:
     return await _guarded(request, lambda _b: capture.stats())
 
 
+# --- 실행 ---------------------------------------------------------------------
 def main() -> None:
     emb = embeddings.describe()
     rr = reranker.describe()
