@@ -227,22 +227,26 @@ RAG_MCP_URL=http://10.0.0.5:8084/mcp claude
 |------|------|
 | 1 | 환경 변수 `RAG_MCP_URL` |
 | 2 | 플러그인 설정 `server_url` (`/plugin configure`) |
+
 플러그인은 서버에 연결만 하므로, rag-mcp 서버는 [빠른 시작](#빠른-시작)대로 따로 설치해 두어야 합니다.
 
 ### Claude Code 직접 설정
 
-플러그인 없이 프로젝트의 `.mcp.json`에 직접 등록할 수도 있습니다.
+플러그인 없이 프로젝트의 `.mcp.json`에 직접 등록할 수도 있습니다. 플러그인과 마찬가지로 환경 변수
+`RAG_MCP_URL`이 있으면 그 주소를, 없으면 `http://localhost:8084/mcp`를 씁니다.
 
 ```json
 {
   "mcpServers": {
     "rag": {
       "type": "http",
-      "url": "http://localhost:8084/mcp"
+      "url": "${RAG_MCP_URL:-http://localhost:8084/mcp}"
     }
   }
 }
 ```
+
+프로젝트 `.mcp.json`의 서버는 처음 쓸 때 Claude Code가 사용 승인을 묻습니다.
 
 ### 그 밖의 MCP 클라이언트
 
