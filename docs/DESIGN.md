@@ -265,3 +265,67 @@ EMBEDDINGS_MODEL=text-embedding-3-small \       # 대칭 모델 → 접두사가
 ```
 
 질의도 같은 방식으로 임베딩되도록 `rag-mcp` 서비스에도 똑같은 변수를 설정하세요.
+
+## 한국어 / 다국어 문서
+
+기본 임베딩 모델 `nomic-embed-text`는 영어 위주로 학습되어 한국어 질의·문서의 의미 검색 정확도가
+떨어질 수 있습니다. 한국어 문서가 많다면 다국어 모델 **`bge-m3`**(1024차원, 최대 입력 8192 토큰)를
+권장합니다. 코드 변경은 필요 없습니다.
+
+- **차원 자동 처리** — 컬렉션은 실제 임베딩 길이로 생성되므로(`ingest.py`, `capture.py`) 1024차원에
+  자동으로 맞춰집니다.
+- **접두사 불필요** — bge-m3는 질의/문서 접두사가 필요 없습니다. 자동 감지는 `nomic`에만 접두사를
+  붙이므로 기본값(빈 값) 그대로 두고, `EMBED_QUERY_PREFIX`/`EMBED_DOC_PREFIX`는 설정하지 마세요.
+
+### Ollama로 설정하기 (오프라인, 권장)
+
+```bash
+ollama pull bge-m3
+```
+
+```bash
+# .env
+EMBEDDINGS_PROVIDER=ollama
+EMBEDDINGS_MODEL=bge-m3
+```
+
+### OpenAI 호환 서버로 설정하기 (예: TEI)
+
+GPU 서버에서 Hugging Face TEI(Text Embeddings Inference)로 `BAAI/bge-m3`를 서빙하는 경우:
+
+```bash
+# .env
+EMBEDDINGS_PROVIDER=openai
+EMBEDDINGS_BASE_URL=http://<tei-host>:8080   # /v1 은 자동으로 붙습니다
+EMBEDDINGS_API_KEY=dummy                     # 인증이 없으면 아무 값
+EMBEDDINGS_MODEL=BAAI/bge-m3
+```
+
+### 적용 및 확인
+
+모델을 바꾸면 반드시 컬렉션을 재구축해야 합니다(기존 벡터와 차원·의미가 다릅니다).
+
+```bash
+docker compose up -d rag-mcp                  # 새 모델로 질의하도록 재시작
+docker compose run --rm rag-ingest --recreate # 컬렉션 재생성 + 재수집
+
+# 컬렉션 차원 확인 → "size":1024 이면 성공
+curl -s http://localhost:6333/collections/rag_kb | grep -o '"size":[0-9]*'
+```
+
+그다음 `rag_health()`에서 모델이 `bge-m3`로 표시되는지 확인하고, 한국어 질의로 `rag_search`를
+실행해 보세요.
+
+### 참고 사항
+
+- **BM25는 여전히 한국어에 약합니다.** 키워드 검색(`Qdrant/bm25`)은 영어 기준으로 토큰을 나누므로
+  조사가 붙은 형태("볼륨이", "볼륨을")를 서로 다른 단어로 취급합니다. RRF 결합에서 dense 검색이
+  상당 부분 보완하지만, 결과가 이상하면 `RAG_HYBRID=false`(dense 전용)와 비교해 보세요 — 이 값을
+  바꿀 때도 `--recreate`가 필요합니다. 영어 토큰(`CrashLoopBackOff`, 리소스 이름 등)은 계속 잘
+  검색됩니다.
+- **리랭커도 다국어 모델을 쓰세요.** `rerank-english-v3.0`은 영어 전용입니다. Cohere
+  `rerank-multilingual-v3.0` 또는 Jina `jina-reranker-v2-base-multilingual`을 사용하세요.
+- **속도.** bge-m3(약 1.2GB)는 nomic보다 커서 CPU에서는 수집이 느려질 수 있습니다. Ollama는 청크를
+  하나씩 임베딩하므로 문서가 많으면 시간이 걸립니다.
+- **청크 크기.** 기본 `CHUNK_SIZE=1500`자는 bge-m3의 최대 입력 길이보다 훨씬 작아 그대로 써도
+  됩니다.
