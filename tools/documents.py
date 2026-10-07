@@ -9,9 +9,15 @@
                                              사람이 쓰는 rag-promote 명령(promote.py)만 호출하며 MCP 도구가
                                              아닙니다 (모델은 정식 폴더에 쓸 수 없음)
 
-  문서 디렉터리는 정식 문서(official/)와 초안(draft/)으로 나뉩니다. MCP로는 draft/ 하위만 추가·삭제할 수
-  있습니다. 사람이 관리하는 정식 문서(official/)는 모델이 바꾸거나 지울 수 없고, 모델이 만든 문서는 draft/에
-  모여 사람이 검토한 뒤 official/로 옮길 수 있습니다. draft/ 문서도 저장 즉시 검색됩니다.
+문서 디렉터리 (RAG_KNOWLEDGE_DIR → KNOWLEDGE_DIR)
+    KNOWLEDGE_DIR/
+    ├── official/     OFFICIAL_SUBDIR — 사람이 관리하는 정식 문서. 이 모듈은 승격할 때만 씁니다.
+    └── draft/        DRAFT_SUBDIR    — 모델이 만든 초안. MCP 쓰기 도구는 여기만 다룹니다.
+  - 추가: draft/<제목>.md 로 저장합니다. 문서 유형은 폴더가 아니라 front matter의 type 에 씁니다.
+  - 삭제: source 를 정규화해 draft/ 안일 때만 지웁니다 (_resolve_source).
+  - 승격: draft/<경로> → official/<경로>. 하위 경로는 그대로 유지합니다 (draft/a/b.md → official/a/b.md).
+  - source 는 KNOWLEDGE_DIR 기준 상대 경로이고, 색인도 rag-ingest와 같이 KNOWLEDGE_DIR 을 root 로 합니다.
+    그래서 초안은 저장 즉시 검색되고, 나중에 rag-ingest 가 같은 파일을 다시 색인해도 ID가 같습니다.
 
 왜 파일로도 저장하나
   지식 베이스의 원본은 문서 디렉터리입니다. 파일로 남겨 두면 rag-ingest --recreate 로 재구축해도
@@ -49,6 +55,7 @@ log = logging.getLogger("rag-documents")
 
 # --- 설정 ---------------------------------------------------------------------
 WRITE_ENABLED = os.environ.get("RAG_MCP_WRITE", "false").strip().lower() in ("1", "true", "yes", "on")
+# 문서 디렉터리. 비어 있으면 기본 경로, ~ 는 홈으로 풂 (install.sh·rag-ingest·rag-promote와 같은 규칙).
 KNOWLEDGE_DIR = Path(os.path.expanduser(
     os.environ.get("RAG_KNOWLEDGE_DIR") or "~/.local/share/rag-mcp/data/knowledge"
 ))

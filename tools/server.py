@@ -10,6 +10,12 @@
   - (선택) MCP 쓰기 도구: rag_add_document, rag_delete_document — RAG_MCP_WRITE=true 일 때만 등록,
     문서 디렉터리의 draft/ 아래만 다룸 (실제 로직은 documents.py)
 
+문서 디렉터리 (RAG_KNOWLEDGE_DIR)
+  official/(사람이 관리하는 정식 문서)와 draft/(모델이 만든 초안)로 나뉩니다. 검색은 Qdrant만 쓰고 문서
+  디렉터리를 읽지 않습니다. 결과의 source(예: official/foo.md, draft/foo.md)로 정식 문서와 초안이 구분됩니다.
+  서버가 문서 디렉터리에 쓰는 것은 쓰기 도구를 켰을 때 draft/ 아래뿐이고, official/ 로의 승격은 사람이
+  rag-promote(promote.py)로 합니다.
+
 설계 원칙
   - 기본은 읽기 전용: MCP 도구는 검색만 합니다. 지식 베이스 기록은 rag-ingest(ingest.py)로
     이루어집니다. 모델이 문서를 추가·삭제하는 쓰기 도구는 운영자가 RAG_MCP_WRITE=true로 켤 때만

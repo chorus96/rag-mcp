@@ -2,12 +2,22 @@
 
 역할
   마크다운과 PDF 문서(런북, RCA, 참고 자료 등)를 읽어 청크로 나누고, OpenAI 호환 임베딩
-  엔드포인트로 임베딩한 뒤 Qdrant에 업서트합니다. MCP 서버는 읽기 전용이므로, 이 명령이 지식
-  베이스를 채우는 정해진 쓰기 경로입니다.
+  엔드포인트로 임베딩한 뒤 Qdrant에 업서트합니다. 사람이 관리하는 정식 문서(official/)를 지식 베이스에
+  넣는 정해진 경로입니다. MCP 쓰기 도구(documents.py)와 rag-promote(promote.py)도 파일 하나를 색인할 때
+  이 모듈의 ingest_file 을 그대로 씁니다.
 
 실행
   설치한 서버에서는 rag-ingest 명령(deploy/rag-ingest)으로 실행합니다. 개발용 직접 실행:
       python tools/ingest.py --path knowledge [--recreate]
+
+문서 디렉터리 (--path, 설치본에서는 설정 파일의 RAG_KNOWLEDGE_DIR)
+    knowledge/
+    ├── official/     정식 문서 — 사람이 넣고 이 명령으로 색인
+    └── draft/        초안 — MCP 쓰기 도구가 만들고 바로 색인 (이 명령도 함께 다시 색인)
+  - 디렉터리 아래의 .md / .pdf 를 폴더 구분 없이 모두 수집합니다(official/·draft/ 밖의 파일도 포함).
+  - source 는 문서 디렉터리 기준 상대 경로(예: official/foo.md)이고, 포인트 ID와 오래된 청크 정리의
+    기준입니다. 그래서 누가 색인하든 root 를 문서 디렉터리로 맞춰야 같은 ID가 나옵니다.
+  - official/·draft/ 는 문서의 단계일 뿐 유형이 아닙니다. 유형은 아래 "문서 형식"의 규칙으로 정합니다.
 
 처리 과정
   1. 파일 탐색 (.md, .pdf)
@@ -24,10 +34,11 @@
     ---
     # 본문 마크다운...
 
-  정식 문서는 official/, 모델이 만든 초안은 draft/ 아래에 둡니다.
-  `type`을 생략하면 official/·draft/ 다음 하위 폴더 이름에서 끝의 s를 뗀 값이고
-  (official/runbooks/ → runbook), 하위 폴더가 없으면 "note"입니다. front matter에 type을 쓰는 것을 권장합니다.
-  PDF에는 front matter가 없으므로 type은 폴더 이름, 제목은 파일 이름에서 가져옵니다.
+  doc_type 은 다음 순서로 정합니다 (_infer_doc_type).
+    1. front matter 의 type
+    2. official/·draft/ 를 건너뛴 첫 하위 폴더 이름에서 끝의 s를 뗀 값 (official/runbooks/ → runbook)
+    3. 그 밖에는 "note" (official/ 바로 아래 둔 문서 등) — 그래서 front matter에 type을 쓰는 것을 권장합니다.
+  PDF에는 front matter가 없으므로 type은 2·3번 규칙으로, 제목은 파일 이름에서 가져옵니다.
 
 멱등성
   청크 ID가 (source, chunk index)에서 정해지므로 다시 실행해도 중복이 생기지 않습니다. 문서를
