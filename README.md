@@ -543,6 +543,60 @@ systemctl --user restart rag-mcp
 > 내용이 쌓이거나 필요한 문서가 사라질 수 있습니다. 신뢰하는 사용자와 클라이언트만 접속하는 서버에서만 켜세요.
 > 꺼져 있으면 도구가 등록되지 않아 모델에게 보이지도 않습니다.
 
+#### `rag_add_document` 사용 예
+
+대화 흐름 (플러그인의 `rag-add-document` 스킬 기준):
+
+1. 사용자: "방금 정리한 Longhorn 볼륨 복구 절차를 지식 베이스에 추가해 줘"
+2. 모델: `search_official`·`search_draft`로 같은 내용의 문서가 있는지 확인합니다.
+3. 모델: 제목·태그·컴포넌트와 본문을 보여 주고 "이대로 저장할까요?"라고 확인을 받습니다.
+4. 모델: `rag_add_document`를 호출하고, 저장된 `source`와 승격 방법을 알려 줍니다.
+
+도구 호출:
+
+```json
+{
+  "title": "Longhorn 볼륨 복구 절차",
+  "content": "# 절차\n1. 볼륨을 detach 합니다.\n2. 노드에 다시 attach 합니다.\n\n# 확인\n파드가 Running 인지 확인합니다.",
+  "tags": ["longhorn", "storage"],
+  "component": "longhorn"
+}
+```
+
+서버에 저장되는 파일 `draft/longhorn-볼륨-복구-절차.md` (인자가 front matter가 됩니다):
+
+```markdown
+---
+title: Longhorn 볼륨 복구 절차
+tags:
+- longhorn
+- storage
+component: longhorn
+---
+
+# 절차
+1. 볼륨을 detach 합니다.
+2. 노드에 다시 attach 합니다.
+
+# 확인
+파드가 Running 인지 확인합니다.
+```
+
+응답:
+
+```json
+{"status": "ok", "source": "draft/longhorn-볼륨-복구-절차.md", "doc_type": "draft",
+ "title": "Longhorn 볼륨 복구 절차", "chunks": 2, "replaced": false}
+```
+
+- 저장 즉시 색인되어 `search_draft`·`rag_search`로 찾을 수 있습니다. `doc_type`은 항상 `draft`입니다.
+- 같은 제목으로 다시 저장하면 `{"status": "error", "source": "draft/...", "error": "a document already exists at ...;
+  pass overwrite=true to replace it"}`가 옵니다. 바꾸려면 `"overwrite": true`를 넘기고, 응답의 `replaced`가 `true`가
+  됩니다.
+- 색인만 실패하면 `"saved": true`와 오류가 함께 오고 파일은 남습니다. 원인을 고친 뒤 `rag-ingest`로 다시 색인하세요.
+- 검토가 끝나면 서버에서 `rag-promote draft/longhorn-볼륨-복구-절차.md`로 `official/`에 올립니다
+  ([초안 승격](#초안-승격-rag-promote)). 필요 없으면 `rag_delete_document("draft/longhorn-볼륨-복구-절차.md")`로 지웁니다.
+
 | 항목 | 동작 |
 |------|------|
 | 등록 | `RAG_MCP_WRITE=true`일 때만 서버 시작 시 도구를 등록. 꺼져 있으면 도구 목록에도 없음 |
