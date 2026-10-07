@@ -95,7 +95,7 @@ CHUNK_OVERLAP = int(os.environ.get("CHUNK_OVERLAP", "100"))
 HTTP_TIMEOUT = float(os.environ.get("RAG_TIMEOUT_SECONDS", "60"))
 
 # 문서별 두 왕복 요청의 배치 크기. 둘 다 HTTP 요청당 작업량을 제한해, 큰 문서
-# 하나(긴 런북, 100페이지 PDF)가 지나치게 크고 전부 아니면 전무인 단일 호출이 되지
+# 하나(긴 마크다운, 100페이지 PDF)가 지나치게 크고 전부 아니면 전무인 단일 호출이 되지
 # 않게 합니다.
 #
 # EMBED_BATCH_SIZE: 임베딩 요청당 청크 수. OpenAI 호환 `/v1/embeddings`는 입력 개수
@@ -154,7 +154,7 @@ def _chunk(text: str, size: int, overlap: int) -> list[str]:
 
 
 def _chunk_document(body: str) -> list[str]:
-    """섹션 인식 청킹: 마크다운 헤딩 기준으로 나눠 런북 단계나 RCA 섹션이
+    """섹션 인식 청킹: 마크다운 헤딩 기준으로 나눠 절차의 단계 같은 섹션이
     온전히 유지되게 하고, 각 청크 앞에 헤딩을 붙여 단독으로도 맥락을 갖게 한 뒤,
     너무 큰 섹션 안에서는 문단 청커로 대체합니다. 헤딩이 없는 본문은 이전과 똑같이
     동작합니다."""
@@ -252,7 +252,7 @@ def _delete_orphan_chunks(client: QdrantClient, source: str, kept: int) -> None:
     """같은 source를 이전에 더 길게 수집했을 때 남은 포인트를 삭제합니다.
 
     포인트 ID는 uuid5(f"{source}#{index}")이므로, 재수집이 멱등적인 것은 문서의
-    청크 수가 줄지 않을 때뿐입니다. 런북을 30개 청크에서 20개로 줄이거나 PDF를 더
+    청크 수가 줄지 않을 때뿐입니다. 문서를 30개 청크에서 20개로 줄이거나 PDF를 더
     적은 페이지로 다시 내보내면, 20..29번 청크가 컬렉션에 영원히 남아 오래된 텍스트로
     계속 검색에 걸립니다. 현재 청크가 이미 들어간 뒤가 되도록 업서트 다음에
     실행합니다. 고아 청크는 오래된 검색 결과일 뿐 수집 전체를 중단할 이유는 아니므로
