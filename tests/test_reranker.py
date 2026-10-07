@@ -1,16 +1,28 @@
-"""리랭커: 엔드포인트 구성, 응답 파싱, 최선형(best-effort) 계약
-(잘못된 키 / 중단된 엔드포인트 / 잘못된 형식의 응답 본문은 RerankError를 발생시켜
-호출자가 밀집 검색 순서로 되돌아가게 해야 합니다 — 리랭킹 때문에 검색이 깨지는 일은 없습니다)."""
+"""tools/reranker.py 테스트 — 리랭킹.
+
+확인하는 것
+  - 기본값은 꺼짐(RERANK_PROVIDER=none)이며, 꺼져 있으면 외부 호출을 하지 않음
+  - 엔드포인트 주소 구성: Cohere(/v2/rerank), Jina(/v1/rerank), 이미 완성된 주소
+  - 응답 처리: 관련도 순으로 정렬, 범위를 벗어난 인덱스는 버림, 빈 입력은 호출 없이 빈 결과
+  - 최선형(best-effort) 계약: 네트워크 오류나 잘못된 응답은 RerankError 를 내어, 호출자가
+    원래 검색 순서로 되돌아갈 수 있게 함 (리랭킹 때문에 검색이 깨지면 안 됨)
+
+방법
+  - httpx.post 를 가짜 함수로 바꿔 실제 API를 호출하지 않습니다.
+"""
 
 import sys
 from pathlib import Path
 
 import pytest
 
+# 소스가 tools/ 에 있으므로 import 경로에 추가합니다.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
 
 import reranker  # noqa: E402
 
+
+# --- 활성화 여부 --------------------------------------------------------------
 
 def test_disabled_by_default():
     # 기본 환경에서는 RERANK_PROVIDER가 설정되지 않음 -> "none".
@@ -24,6 +36,8 @@ def test_rerank_raises_when_disabled(monkeypatch):
         reranker.rerank("q", ["a", "b"])
 
 
+# --- 엔드포인트 주소 ----------------------------------------------------------
+
 @pytest.mark.parametrize("base,expected", [
     ("https://api.cohere.com", "https://api.cohere.com/v2/rerank"),
     ("https://api.jina.ai/v1", "https://api.jina.ai/v1/rerank"),
@@ -35,6 +49,8 @@ def test_endpoint_building(monkeypatch, base, expected):
     monkeypatch.setattr(reranker, "BASE_URL", base)
     assert reranker._endpoint() == expected
 
+
+# --- 응답 처리 ----------------------------------------------------------------
 
 def test_rerank_orders_by_relevance_and_maps_indices(monkeypatch):
     monkeypatch.setattr(reranker, "PROVIDER", "cohere")
@@ -65,6 +81,8 @@ def test_rerank_empty_docs_returns_empty(monkeypatch):
     assert reranker.rerank("q", []) == []             # 호출도 예외도 없음
 
 
+# --- 오류 처리 (최선형 계약) --------------------------------------------------
+
 def test_rerank_network_error_raises(monkeypatch):
     monkeypatch.setattr(reranker, "PROVIDER", "cohere")
     monkeypatch.setattr(reranker.httpx, "post", _boom_request)
@@ -79,7 +97,7 @@ def test_rerank_malformed_body_raises(monkeypatch):
         reranker.rerank("q", ["a"])
 
 
-# ---- 헬퍼 ----------------------------------------------------------------
+# --- 테스트 도우미 ------------------------------------------------------------
 
 def _boom(*_a, **_k):
     raise AssertionError("httpx.post should not have been called")

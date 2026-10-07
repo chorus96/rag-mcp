@@ -1,26 +1,35 @@
-"""검색 도구의 메타데이터 필터: `cluster`(소프트 필터) + `component`(하드 필터).
+"""tools/server.py, tools/capture.py 테스트 — 검색 필터.
 
-`server._search`의 Qdrant 필터 구성, 같은 클러스터 검색 결과가 비었을 때 전체
-범위의 선례가 보이도록 하는 소프트 필터 재시도, 그리고 반복 장애 감지 경로
-(`capture.find_similar`)의 같은 동작을 다룹니다. Qdrant와 임베딩 모델은 모킹하므로
-실제 저장소에는 전혀 접근하지 않습니다.
+확인하는 것
+  - Qdrant 필터 구성: doc_type / component 는 하드 필터, cluster 는 소프트 필터
+  - 소프트 필터 재시도: 같은 클러스터 결과가 비면 클러스터 조건만 빼고(하드 필터는 유지)
+    전체 범위로 다시 검색하고 `cluster_narrowed: false` 를 보고함
+  - 단축 도구: search_incidents / search_runbooks 가 doc_type 을 고정함
+  - 반복 장애 확인(capture.find_similar)도 같은 소프트 필터 규칙을 따르며,
+    min_score 미만 결과는 "없음"으로 취급함
 
-소프트 필터 계약 (설계: "이 클러스터에서 전에 이런 일이 있었나?" 기능): 클러스터
-필터가 전체 범위의 선례를 절대 가려서는 안 됩니다. 클러스터로 한정한 검색 결과가
-비어 있으면 클러스터 조건 없이(하드 필터는 유지한 채) 다시 검색하고
-`cluster_narrowed: false`를 보고해, 호출자가 "이 클러스터에는 선례 없음"과
-"어디에도 선례 없음"을 구분할 수 있게 합니다.
+왜 중요한가
+  "이 클러스터에서 전에 이런 일이 있었나?"를 물을 때, 클러스터 필터가 다른 클러스터의 선례를
+  가려서는 안 됩니다. `cluster_narrowed` 로 "이 클러스터에는 없음"과 "어디에도 없음"을
+  구분할 수 있어야 합니다.
+
+방법
+  - 임베딩과 vectorstore.query 를 가짜로 바꿔, 호출마다 넘어온 필터를 기록하고 미리 정한
+    결과를 돌려줍니다. 실제 Qdrant에는 접근하지 않습니다.
 """
 
 import sys
 import types
 from pathlib import Path
 
+# 소스가 tools/ 에 있으므로 import 경로에 추가합니다.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
 
 import capture  # noqa: E402
 import server  # noqa: E402
 
+
+# --- 테스트 도우미 ------------------------------------------------------------
 
 def _point(payload=None, score=0.9):
     return types.SimpleNamespace(payload=payload or {}, score=score, id="pt")
@@ -51,6 +60,8 @@ def _patch_search(monkeypatch, results):
     monkeypatch.setattr(server.vectorstore, "query", rec)
     return rec
 
+
+# --- server._search — 필터 구성과 소프트 필터 재시도 --------------------------
 
 def test_search_no_filters_no_query_filter(monkeypatch):
     rec = _patch_search(monkeypatch, [[_point()]])
@@ -110,6 +121,8 @@ def test_component_empty_does_not_retry(monkeypatch):
     assert out["cluster_narrowed"] is None
 
 
+# --- 단축 도구 (search_incidents / search_runbooks) ---------------------------
+
 def test_search_incidents_shortcut_scopes_doc_type_and_cluster(monkeypatch):
     rec = _patch_search(monkeypatch, [[_point()]])
     out = server.search_incidents("stuck attaching", "prod-01")
@@ -134,7 +147,7 @@ def test_search_incidents_fleet_fallback(monkeypatch):
     assert out["cluster_narrowed"] is False
 
 
-# --- 반복 장애 감지 경로 (capture.find_similar) -------------------------
+# --- 반복 장애 확인 (capture.find_similar) ------------------------------------
 
 
 def _patch_similar(monkeypatch, results):

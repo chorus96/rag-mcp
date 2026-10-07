@@ -1,22 +1,27 @@
-"""수집: 지원 파일 탐색, PDF 텍스트 추출, 쓰기 배치.
+"""tools/ingest.py 테스트 — 문서 수집.
 
-PDF 추출은 가짜 pypdf로 검증하므로 실제 PDF가 필요 없습니다.
-페이지가 `# [Page N]` 섹션이 되는지(섹션 인식 청킹이 페이지 맥락을 유지하도록),
-빈 페이지/이미지 전용 페이지를 건너뛰는지, 탐색이 .md와 .pdf 파일만 찾고
-나머지는 무시하는지 확인합니다.
+확인하는 것
+  - 파일 탐색: .md / .pdf 만 찾고 나머지 확장자는 무시
+  - PDF 추출: 페이지마다 `# [Page N]` 섹션을 만들어 청킹 후에도 페이지 맥락이 남음,
+    빈 페이지·이미지 전용 PDF는 건너뜀
+  - 임베딩 배치: EMBED_BATCH_SIZE 단위로 요청하고, 벡터 순서가 청크 순서와 같음
+  - 업서트 배치: 요청당 UPSERT_BATCH_SIZE 포인트를 넘지 않음
+  - 오래된 청크 정리: 문서가 줄어들면 남은 뒷부분 청크만 지우고, 실패해도 수집을 멈추지 않음
 
-배치 테스트는 가짜 Qdrant 클라이언트로 문서별 쓰기 경로를 검증합니다:
-임베딩은 청크 순서를 유지한 채 EMBED_BATCH_SIZE 크기의 요청으로 나가고,
-업서트는 UPSERT_BATCH_SIZE 포인트로 제한되며, 실행 사이에 줄어든 문서는
-고아가 된 뒷부분 청크가 삭제됩니다."""
+방법
+  - pypdf, 임베딩, Qdrant 클라이언트를 모두 가짜 객체로 바꿔 실제 PDF나 서버 없이 실행합니다.
+"""
 
 import sys
 from pathlib import Path
 
+# 소스가 tools/ 에 있으므로 import 경로에 추가합니다.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
 
 import ingest  # noqa: E402
 
+
+# --- 파일 탐색 ----------------------------------------------------------------
 
 def test_discover_files_picks_md_and_pdf_only(tmp_path):
     (tmp_path / "runbooks").mkdir()
@@ -30,6 +35,8 @@ def test_discover_files_picks_md_and_pdf_only(tmp_path):
     assert found == ["a.md", "b.pdf", "c.PDF"]
     assert "d.txt" not in found and "e.yaml" not in found
 
+
+# --- PDF 텍스트 추출 ----------------------------------------------------------
 
 class _FakePage:
     def __init__(self, text):
@@ -68,9 +75,7 @@ def test_extract_pdf_text_empty_for_image_only_pdf(monkeypatch):
     assert ingest._extract_pdf_text(Path("unused.pdf")) == ""
 
 
-# ---------------------------------------------------------------------------
-# 임베딩 배치
-# ---------------------------------------------------------------------------
+# --- 임베딩 배치 --------------------------------------------------------------
 
 def test_embed_batch_splits_requests_and_keeps_order(monkeypatch):
     """청크마다 요청 하나가 아니라 EMBED_BATCH_SIZE개 청크마다 요청 하나를 보내고,
@@ -101,9 +106,7 @@ def test_embed_batch_empty_input_makes_no_requests(monkeypatch):
     assert calls == []
 
 
-# ---------------------------------------------------------------------------
-# 업서트 배치 + 오래된 청크 정리
-# ---------------------------------------------------------------------------
+# --- 업서트 배치 + 오래된 청크 정리 -------------------------------------------
 
 class _FakeCount:
     def __init__(self, count):

@@ -1,18 +1,27 @@
-"""Vectorstore: 명명된 벡터 구성과 하이브리드/밀집 질의 라우팅.
+"""tools/vectorstore.py 테스트 — 벡터 구성과 질의 경로.
 
-희소 계층을 모킹하므로 FastEmbed가 필요 없습니다. 하이브리드가 prefetch + RRF
-결합을 사용하는지, 희소 벡터가 없거나 hybrid=False이면 밀집 전용을 사용하는지,
-모델이 없으면 희소 헬퍼가 None으로 대체되는지 확인합니다."""
+확인하는 것
+  - 명명된 벡터: 밀집 벡터만, 또는 밀집 + 희소 벡터를 올바른 이름으로 담음
+  - 질의 경로: 희소 벡터가 있으면 prefetch 두 개 + RRF 결합(하이브리드),
+    없거나 hybrid=False 이면 밀집 검색만 함 (hybrid=False 이면 희소 벡터를 계산조차 안 함)
+  - 대체 동작: BM25 모델을 불러올 수 없으면 희소 관련 함수가 None 을 돌려줌
+
+방법
+  - 희소 벡터 계산과 Qdrant 클라이언트를 가짜로 바꿔, FastEmbed나 Qdrant 없이 실행합니다.
+"""
 
 import sys
 from pathlib import Path
 
 from qdrant_client.models import FusionQuery, SparseVector
 
+# 소스가 tools/ 에 있으므로 import 경로에 추가합니다.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
 
 import vectorstore  # noqa: E402
 
+
+# --- 테스트 도우미 ------------------------------------------------------------
 
 class _FakeResult:
     def __init__(self, points):
@@ -28,6 +37,8 @@ class _FakeClient:
         return _FakeResult(["point"])
 
 
+# --- 명명된 벡터 --------------------------------------------------------------
+
 def test_named_vectors_dense_only():
     assert vectorstore.named_vectors([0.1, 0.2], None) == {vectorstore.DENSE: [0.1, 0.2]}
 
@@ -38,6 +49,8 @@ def test_named_vectors_includes_sparse():
     assert nv[vectorstore.DENSE] == [0.1]
     assert nv[vectorstore.SPARSE] is sv
 
+
+# --- 질의 경로 (하이브리드 / 밀집) --------------------------------------------
 
 def test_query_dense_fallback_when_no_sparse(monkeypatch):
     monkeypatch.setattr(vectorstore, "embed_query_sparse", lambda _t: None)
@@ -73,6 +86,8 @@ def test_query_hybrid_false_forces_dense(monkeypatch):
     vectorstore.query(client, "kb", [0.1], "q", query_filter=None, limit=3, hybrid=False)
     assert client.calls[0]["using"] == vectorstore.DENSE
 
+
+# --- BM25 모델이 없을 때 ------------------------------------------------------
 
 def test_sparse_helpers_degrade_without_model(monkeypatch):
     monkeypatch.setattr(vectorstore, "_load_bm25", lambda: None)
