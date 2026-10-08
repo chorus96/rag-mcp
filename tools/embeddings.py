@@ -49,8 +49,8 @@ def _build_config() -> EmbeddingConfig:
     # 있으면 _embed_batch에서 안내 메시지와 함께 오류를 냅니다.
     provider = os.environ.get("EMBEDDINGS_PROVIDER", "openai").strip().lower()
     model = os.environ.get("EMBEDDINGS_MODEL", "bge-m3")
-    # 기본값을 두지 않습니다: 문서가 의도치 않게 외부 API로 전송되지 않도록, 어느
-    # 엔드포인트를 쓸지 운영자가 명시해야 합니다.
+    # 기본값을 두지 않습니다: 문서가 의도하지 않은 곳으로 전송되지 않도록, 운영자가 사내
+    # 임베딩 서버 주소를 명시해야 합니다.
     base_url = (os.environ.get("EMBEDDINGS_BASE_URL") or "").strip()
     api_key = os.environ.get("EMBEDDINGS_API_KEY")
 
