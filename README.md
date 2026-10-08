@@ -894,6 +894,79 @@ rag-ingest
 - 응답은 `index`로 다시 정렬하므로, 서버가 순서를 바꿔 돌려줘도 청크와 벡터가 어긋나지 않습니다.
 - HTTP 오류는 상태 코드와 응답 본문을 그대로 보여 줘, 잘못된 주소(404)나 인증 문제(401)를 바로 알 수 있습니다.
 
+### 설정 예시
+
+모두 설정 파일 `~/.config/rag-mcp/rag-mcp.env`에 적고, 바꾼 뒤에는 `systemctl --user restart rag-mcp`로 재시작합니다.
+같은 줄 끝에 주석을 달지 마세요(systemd가 주석까지 값으로 읽습니다).
+
+**① 기본 — 인증 없는 사내 서버**
+
+```bash
+EMBEDDINGS_BASE_URL=http://embedding.internal.example:8080
+EMBEDDINGS_API_KEY=
+EMBEDDINGS_MODEL=bge-m3
+```
+
+요청 주소: `http://embedding.internal.example:8080/v1/embeddings`
+
+**② API 게이트웨이 경로 아래에 있고 토큰 인증을 쓰는 서버**
+
+```bash
+# 주소가 /v1 로 끝나면 /embeddings 만 붙습니다
+EMBEDDINGS_BASE_URL=https://ai-gateway.internal.example/embedding/v1
+# Authorization: Bearer <토큰> 으로 보냅니다
+EMBEDDINGS_API_KEY=사내-발급-토큰
+EMBEDDINGS_MODEL=bge-m3
+```
+
+요청 주소: `https://ai-gateway.internal.example/embedding/v1/embeddings`. 토큰이 들어 있으므로 설정 파일 권한(`600`)을
+그대로 두세요.
+
+**③ 사내 인증서(사설 CA)를 쓰는 HTTPS 서버**
+
+```bash
+EMBEDDINGS_BASE_URL=https://embedding.internal.example
+EMBEDDINGS_MODEL=bge-m3
+# 사내 CA 인증서(PEM) 묶음. 이 파일의 인증서만 신뢰하므로 사내 CA가 반드시 들어 있어야 합니다
+SSL_CERT_FILE=/etc/pki/tls/certs/internal-ca-bundle.pem
+```
+
+인증서를 확인할 수 없으면 `CERTIFICATE_VERIFY_FAILED` 오류가 납니다. 인증서 검증을 끄는 설정은 없습니다. 리랭킹으로 외부
+API도 함께 쓴다면 이 묶음에 공용 CA 인증서도 넣어야 합니다.
+
+**④ 질의·문서 접두사가 필요한 모델 (예: e5 계열)**
+
+```bash
+EMBEDDINGS_BASE_URL=http://embedding.internal.example:8080
+EMBEDDINGS_MODEL=multilingual-e5-large
+# 끝의 공백까지 접두사이므로 큰따옴표로 감쌉니다
+EMBED_QUERY_PREFIX="query: "
+EMBED_DOC_PREFIX="passage: "
+```
+
+**⑤ 요청 크기·응답 시간 제한이 있는 서버**
+
+```bash
+EMBEDDINGS_BASE_URL=http://embedding.internal.example:8080
+EMBEDDINGS_MODEL=bge-m3
+# 요청당 청크 수를 줄임 (기본 32) — 413/400 오류가 날 때
+EMBED_BATCH_SIZE=8
+# 응답이 느린 서버 — 초 단위 (기본: 임베딩 60, 서버의 Qdrant 연결 30. 설정하면 둘 다 이 값)
+RAG_TIMEOUT_SECONDS=120
+# 모델의 최대 입력이 짧을 때(예: 512 토큰) 청크를 줄임 (기본 1500자). 바꾸면 rag-ingest 를 다시 실행
+CHUNK_SIZE=800
+```
+
+**⑥ 프록시를 거쳐야 닿는 서버**
+
+```bash
+EMBEDDINGS_BASE_URL=https://embedding.internal.example
+EMBEDDINGS_MODEL=bge-m3
+HTTPS_PROXY=http://proxy.internal.example:3128
+# 같은 서버의 Qdrant(localhost:6333)는 프록시를 거치지 않게 합니다
+NO_PROXY=localhost,127.0.0.1
+```
+
 ### 연결 확인
 
 rag-mcp에 연결하기 전에, 사내 서버가 OpenAI 호환 형식으로 응답하는지 확인합니다.
