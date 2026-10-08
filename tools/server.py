@@ -351,7 +351,7 @@ def rag_health() -> dict[str, Any]:
 
     # 리랭킹은 선택 사항이며 최선형입니다. 설정만 보고합니다 (실제 호출 확인 없음).
     health["reranker"] = reranker.describe()
-    health["retrieval"] = vectorstore.describe()  # 하이브리드 켜짐/꺼짐 + 희소 모델
+    health["retrieval"] = vectorstore.describe()  # 하이브리드 켜짐/꺼짐 + 키워드 벡터 방식(kiwi-bm25)
 
     return health
 

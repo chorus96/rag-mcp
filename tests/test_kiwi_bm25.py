@@ -1,11 +1,11 @@
-"""tools/kiwi_bm25.py 테스트 — 한국어 형태소 기반 BM25 희소 벡터 (기본 희소 모델 kiwi-bm25).
+"""tools/kiwi_bm25.py 테스트 — 한국어 형태소 기반 BM25 희소 벡터.
 
 확인하는 것
   - 토큰: 조사·어미를 떼어 내용어만 남김 ("볼륨이"/"볼륨을" → "볼륨"), 영문·숫자는 원문 그대로 소문자로 남김
   - 질의 벡터: 토큰마다 1.0, 중복 제거
   - 문서 벡터: BM25 TF 가중치 (같은 단어가 많을수록 커지되 포화됨)
   - 조사만 다른 문장끼리 같은 토큰 ID를 가짐 (키워드 검색에서 서로 맞음)
-  - vectorstore 기본 희소 모델이 kiwi-bm25 이고, 그 경로로 희소 벡터를 만듦
+  - vectorstore 가 Kiwi BM25로 희소 벡터를 만듦
 
 방법
   - 실제 Kiwi(kiwipiepy)를 씁니다. 설치되어 있지 않으면 건너뜁니다.
@@ -67,12 +67,12 @@ def test_particle_variants_share_token_ids(bm25):
 
 
 # --- vectorstore 연결 ------------------------------------------------------------
-def test_vectorstore_default_sparse_model_is_kiwi(monkeypatch):
-    assert vectorstore.BM25_MODEL == "kiwi-bm25"
+def test_vectorstore_uses_kiwi_bm25(monkeypatch):
     monkeypatch.setattr(vectorstore, "_bm25", None)
     monkeypatch.setattr(vectorstore, "_bm25_loaded", False)
     monkeypatch.setattr(vectorstore, "_HYBRID_REQUESTED", True)
-    assert isinstance(vectorstore._load_bm25(), vectorstore._KiwiSparse)
+    assert isinstance(vectorstore._load_bm25(), kiwi_bm25.KiwiBM25)
+    assert vectorstore.describe() == {"hybrid": True, "sparse_model": "kiwi-bm25"}
     docs = vectorstore.embed_documents_sparse(["볼륨이 멈춤", "인증서 갱신"])
     assert len(docs) == 2 and all(d.indices for d in docs)
     assert vectorstore.embed_query_sparse("볼륨").indices == [kiwi_bm25.KiwiBM25.token_id("볼륨")]

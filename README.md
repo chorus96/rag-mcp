@@ -156,7 +156,7 @@ journalctl --user -u rag-mcp -f              # 서버 로그
 
 > 키워드(BM25) 검색에 쓰는 한국어 형태소 분석기 Kiwi는 설치 때 `pip`로 함께 설치되며(약 100MB), 실행 중에
 > 따로 내려받는 것이 없습니다. 시작 로그의 `hybrid=True`로 하이브리드 검색이 켜졌는지 확인할 수 있습니다.
-> 희소 모델을 불러오지 못하면 의미 검색만으로 동작합니다(로그에 `sparse model ... unavailable` 경고,
+> Kiwi를 불러오지 못하면 의미 검색만으로 동작합니다(로그에 `sparse model ... unavailable` 경고,
 > 시작 로그에 `hybrid=False`).
 
 ### 5. 클라이언트 연결
@@ -176,7 +176,6 @@ Claude Code라면 [플러그인](#claude-code-플러그인-권장)으로 연결�
 | `~/.config/rag-mcp/rag-mcp.env` | 설정 파일 ([.env.example](.env.example) 복사본, 권한 600) |
 | `~/.local/share/rag-mcp/data/knowledge` | [문서 디렉터리](#문서-디렉터리): `official/`(정식 문서, 샘플 포함), `draft/`(모델이 만든 초안) |
 | `~/.local/share/rag-mcp/data/qdrant` | Qdrant 데이터 |
-| `~/.local/share/rag-mcp/data/fastembed_cache` | FastEmbed 모델 캐시 (`RAG_SPARSE_MODEL=Qdrant/bm25`일 때만 씀) |
 | `~/.config/systemd/user/{qdrant,rag-mcp}.service` | systemd 사용자 서비스 ([`deploy/systemd/`](deploy/systemd), 경로는 `%h`) |
 | `~/.local/bin/rag-ingest` | 문서 수집 명령 |
 | `~/.local/bin/rag-promote` | 초안(`draft/`) 승격 명령 |
@@ -760,31 +759,33 @@ Qdrant 컬렉션 하나(기본 이름 `rag_kb`)에 모든 문서를 저장합니
 
 BM25는 질의의 단어가 문서에 얼마나 들어 있는지로 점수를 매기는 키워드 검색 방식입니다. 드문 단어일수록
 가중치가 크고(IDF, Qdrant가 컬렉션 전체 기준으로 계산), 같은 단어가 많을수록 점수가 오르되 일정 수준에서
-포화됩니다. 그래서 **단어를 어떻게 나누느냐**가 품질을 좌우합니다.
+포화됩니다. 그래서 **단어를 어떻게 나누느냐**가 품질을 좌우합니다. 흔한 BM25처럼 공백에서 나누면 한국어는 조사·어미가
+붙은 채로 한 단어가 되므로, rag-mcp는 한국어 형태소 분석기 [Kiwi](https://github.com/bab2min/kiwipiepy)로 단어를
+나눕니다(`tools/kiwi_bm25.py`).
 
-| 희소 모델 (`RAG_SPARSE_MODEL`) | 단어 나누기 | "볼륨이 멈췄어요" |
+| 단어 나누기 | "볼륨이 멈췄어요" | 문서의 "…볼륨을 … 멈추면…" |
 |------|------|------|
-| `kiwi-bm25` (기본) | 한국어 형태소 분석기 [Kiwi](https://github.com/bab2min/kiwipiepy)로 내용어만 남기고 조사·어미를 버림. 영문·숫자는 원문 그대로(소문자) | `볼륨`, `멈추` |
-| `Qdrant/bm25` | FastEmbed의 영어 기준 BM25. 공백·기호로 나누고 영어 어간 추출. FastEmbed는 선택 설치 | `볼륨이`, `멈췄어요` |
+| 공백 기준 (흔한 BM25) | `볼륨이`, `멈췄어요` | `볼륨을`, `멈추면` — 맞는 단어 없음 |
+| Kiwi 형태소 (rag-mcp) | `볼륨`, `멈추` | `볼륨`, `멈추` — 둘 다 맞음 |
 
 - **남기는 형태소:** 일반·고유 명사, 수사, 동사·형용사 어간, 어근, 한자. 조사·어미·접두사는 버립니다
   ("재부팅한" → `부팅`).
 - **영문·숫자는 형태소 분석과 별개로 원문에서 그대로 뽑습니다.** `CrashLoopBackOff`, `cert-manager`(→ `cert`,
-  `manager`), `c-1a2b3c`(→ `c`, `1a2b3c`) 같은 토큰이 `Qdrant/bm25`와 같은 방식으로 맞습니다.
-- **가중치와 해시는 FastEmbed BM25와 같습니다** (BM25 `k=1.2`, `b=0.75`, mmh3 해시, 질의 쪽은 1.0). 단어를 나누는
-  부분만 다르므로 컬렉션 구조와 RRF 결합은 그대로입니다.
+  `manager`), `c-1a2b3c`(→ `c`, `1a2b3c`) 같은 토큰이 소문자로 정확히 맞습니다.
+- **가중치:** BM25(`k=1.2`, `b=0.75`)로 문서 쪽 단어 가중치를 매기고, 질의 쪽은 단어마다 1.0입니다. 단어는 mmh3로
+  해시한 ID로 저장하고, IDF는 Qdrant가 계산합니다.
 - **설치와 속도:** `kiwipiepy`는 `pip`로 설치되며 모델(약 100MB)이 패키지에 들어 있어 실행 중에 내려받는 것이
   없습니다. 형태소 분석은 초당 수만 글자 수준이라 임베딩 시간에 비하면 작습니다. 대신 Kiwi를 불러오는 데 몇 초가
   걸리고 메모리를 수백 MB(측정 환경에서 약 0.5GB) 더 씁니다. 서버와 `rag-ingest`가 각각 불러옵니다. 메모리가
-  부족하면 다른 희소 모델을 쓰거나 키워드 검색을 끄세요([희소 모델 바꾸기](#희소-모델-바꾸기-rag_sparse_model)).
+  부족하면 키워드 검색을 끄세요([키워드 검색 끄기와 재구축](#키워드-검색-끄기와-재구축)).
 
 #### 비교 결과
 
-한국어 문서 6개와 질의 8개로 두 희소 모델의 BM25 순위를 비교했습니다. 질의는 문서와 조사·어미가 다르게 붙은
-자연스러운 문장입니다. 표의 숫자는 정답 문서의 BM25 순위이고, `—`는 정답 문서와 맞는 단어가 하나도 없어 점수가 0인
-경우입니다.
+한국어 문서 6개와 질의 8개로, 공백 기준으로 단어를 나눈 BM25와 Kiwi 형태소로 나눈 BM25의 순위를 비교했습니다.
+질의는 문서와 조사·어미가 다르게 붙은 자연스러운 문장입니다. 표의 숫자는 정답 문서의 BM25 순위이고, `—`는 정답 문서와
+맞는 단어가 하나도 없어 점수가 0인 경우입니다.
 
-| 질의 | `Qdrant/bm25` 토큰 | 순위 | `kiwi-bm25` 토큰 | 순위 |
+| 질의 | 공백 기준 토큰 | 순위 | Kiwi 형태소 토큰 | 순위 |
 |------|------|:--:|------|:--:|
 | 볼륨을 분리하는 방법 | `볼륨을` `분리하는` `방법` | 1 | `볼륨` `분리` `방법` | 1 |
 | 볼륨이 멈췄어요 | `볼륨이` `멈췄어요` | 1 | `볼륨` `멈추` | 1 |
@@ -796,17 +797,16 @@ BM25는 질의의 단어가 문서에 얼마나 들어 있는지로 점수를 �
 | 로그를 정리하고 싶어요 | `로그를` `정리하고` `싶어요` | 2 | `로그` `정리` | 1 |
 | **합계** | | **1위 3/8, 점수 0 4/8** | | **1위 8/8, 점수 0 0/8** |
 
-- `Qdrant/bm25`는 "인증서**가**"(문서)와 "인증서"(질의)처럼 조사만 달라도 다른 단어로 봐서, 질의의 절반에서 정답 문서와
-  맞는 단어가 하나도 없었습니다. `kiwi-bm25`는 모든 질의에서 정답 문서가 1위였습니다.
-- 영어 토큰(`CrashLoopBackOff`)은 두 모델이 똑같이 찾습니다.
+- 공백 기준으로 나누면 "인증서**가**"(문서)와 "인증서"(질의)처럼 조사만 달라도 다른 단어가 되어, 질의의 절반에서 정답
+  문서와 맞는 단어가 하나도 없었습니다. Kiwi 형태소로 나누면 모든 질의에서 정답 문서가 1위였습니다.
+- 영어 토큰(`CrashLoopBackOff`)은 두 방식이 똑같이 찾습니다.
 - "롤백" → `롤` `백`처럼 사전에 없는 단어는 형태소가 어색하게 나뉩니다. 문서와 질의가 같은 방식으로 나뉘므로 이 예에서는
   맞았지만, 신조어·전문 용어가 많은 문서에서는 결과가 달라질 수 있습니다.
-- 같은 문서를 실제 Qdrant에 `kiwi-bm25`로 색인해 하이브리드 검색(`rag_search`와 같은 경로)으로 돌려도 8개 질의 모두
+- 같은 문서를 실제 Qdrant에 색인해 하이브리드 검색(`rag_search`와 같은 경로)으로 돌려도 8개 질의 모두
   정답 문서가 1위였습니다(의미 검색 쪽은 테스트용 임베딩이라, 이 결과는 BM25가 순위를 정한 것입니다).
 
 > ⚠️ 문서 6개, 질의 8개짜리 작은 비교라 정확도 수치로 일반화할 수 없습니다. 방향을 확인하는 용도로 보고, 실제 문서와
-> 질의로 확인하세요. `Qdrant/bm25` 열은 FastEmbed의 토크나이저(`SimpleTokenizer`)로 계산했습니다. 영어 어간 추출과
-> 불용어 처리는 한글 토큰에 영향을 주지 않으므로 한국어 문장에서는 실제 `Qdrant/bm25`와 같은 토큰입니다.
+> 질의로 확인하세요. "공백 기준" 열은 공백·기호로 나누고 소문자로 바꾼, 흔히 쓰는 BM25 토큰입니다.
 
 <details>
 <summary>비교에 쓴 문서 6개</summary>
@@ -825,44 +825,25 @@ BM25는 질의의 단어가 문서에 얼마나 들어 있는지로 점수를 �
 
 </details>
 
-#### 희소 모델 바꾸기 (`RAG_SPARSE_MODEL`)
+#### 키워드 검색 끄기와 재구축
 
-희소 모델은 설정 파일(`~/.config/rag-mcp/rag-mcp.env`)의 `RAG_SPARSE_MODEL`로 고릅니다. 질의와 문서가 같은
-방식으로 나뉘어야 키워드가 맞으므로, **어느 경우든 바꾼 뒤에는 `rag-ingest --recreate`로 재구축**해야 합니다.
-
-| 바꾸려는 것 | 설정 파일 | 적용 명령 |
-|------|------|------|
-| `Qdrant/bm25`로 (영어 위주 문서, 메모리 절약) | `RAG_SPARSE_MODEL=Qdrant/bm25` | `./deploy/install.sh` → `rag-ingest --recreate` |
-| `kiwi-bm25`로 되돌리기 (기본값) | `RAG_SPARSE_MODEL=kiwi-bm25` (또는 줄을 지우거나 주석 처리) | `systemctl --user restart rag-mcp` → `rag-ingest --recreate` |
-| 키워드 검색 끄기 (의미 검색만) | `RAG_HYBRID=false` | `systemctl --user restart rag-mcp` → `rag-ingest --recreate` |
-
-`Qdrant/bm25`로 바꾸는 예:
+키워드 검색은 설정 파일(`~/.config/rag-mcp/rag-mcp.env`)의 `RAG_HYBRID`로 켜고 끕니다. 끄면 의미 검색만 하고 Kiwi를
+불러오지 않습니다. 컬렉션 구조가 바뀌므로 바꾼 뒤에는 재구축하세요.
 
 ```bash
-# 1. 설정 파일에서 희소 모델 지정 (같은 줄 끝에 주석을 달지 마세요)
-vi ~/.config/rag-mcp/rag-mcp.env
-#   RAG_SPARSE_MODEL=Qdrant/bm25
-
-# 2. 설치 스크립트를 다시 실행 — 설정을 보고 FastEmbed(선택 의존성)를 설치하고 서비스를 재시작합니다
-./deploy/install.sh
-
-# 3. 새 방식으로 색인을 다시 만듭니다
+vi ~/.config/rag-mcp/rag-mcp.env      # RAG_HYBRID=false (다시 켜려면 true)
+systemctl --user restart rag-mcp
 rag-ingest --recreate
 
-# 4. 확인 — 시작 로그에 사용 중인 희소 모델과 hybrid=True 가 나옵니다
-journalctl --user -u rag-mcp | grep -E 'sparse model|hybrid='
+# 확인 — 시작 로그에 hybrid=True/False 가 나옵니다
+journalctl --user -u rag-mcp | grep -E 'sparse model|hybrid'
 ```
 
-- **`Qdrant/bm25`는 FastEmbed가 필요합니다.** FastEmbed(onnxruntime 포함)는 선택 의존성
-  ([`requirements-fastembed.txt`](requirements-fastembed.txt))이라 기본 설치에 들어가지 않고, 2단계의 설치 스크립트가
-  설정을 보고 함께 설치합니다. 직접 설치하려면 `~/.local/share/rag-mcp/venv/bin/pip install -r
-  ~/.local/share/rag-mcp/app/requirements-fastembed.txt`를 실행한 뒤 서버를 재시작하세요. 처음 시작할 때 모델을
-  `huggingface.co`에서 내려받으므로, 프록시가 필요하면 설정 파일에 `HTTPS_PROXY`를 넣으세요.
-- **확인 방법:** MCP 도구 `rag_health()` 응답의 `retrieval`에 `hybrid`(키워드 검색 동작 여부)와 `sparse_model`이
-  나옵니다. 모델을 불러오지 못하면 시작 로그에 `sparse model ... unavailable` 경고가 남고 `hybrid=False`(의미 검색만)로
-  동작합니다.
-- **이전 버전에서 업그레이드했다면** 설정을 바꾸지 않았더라도 한 번 `rag-ingest --recreate`를 실행하세요. 예전 기본값은
-  `Qdrant/bm25`였고 지금 기본값은 `kiwi-bm25`라서 기존 색인의 키워드가 맞지 않습니다.
+- **확인 방법:** MCP 도구 `rag_health()` 응답의 `retrieval`에 `hybrid`(키워드 검색 동작 여부)와 `sparse_model`
+  (`kiwi-bm25`)이 나옵니다. Kiwi를 불러오지 못하면 시작 로그에 `sparse model ... unavailable` 경고가 남고 의미
+  검색만으로 동작합니다.
+- **이전 버전에서 업그레이드했다면** 설정을 바꾸지 않았더라도 한 번 `rag-ingest --recreate`를 실행하세요. 키워드
+  벡터를 만드는 방식이 Kiwi 형태소 분석으로 바뀌어, 기존 색인의 키워드가 새 질의와 맞지 않습니다.
 
 ### 개념 정리
 
@@ -964,7 +945,7 @@ curl -s http://localhost:6333/collections/rag_kb | grep -o '"size":[0-9]*'
 
 **참고 사항:**
 
-- **키워드 검색도 한국어를 이해합니다.** 기본 희소 모델 `kiwi-bm25`가 조사·어미를 떼어 "볼륨이"와 "볼륨을"을
+- **키워드 검색도 한국어를 이해합니다.** 한국어 형태소 분석기 Kiwi가 조사·어미를 떼어 "볼륨이"와 "볼륨을"을
   같은 단어로 맞춥니다([키워드 검색(BM25)과 한국어](#키워드-검색bm25과-한국어)).
 - **리랭커도 다국어 모델이 기본값입니다.** 리랭킹을 켜면(`RERANK_PROVIDER=cohere`) 기본 모델은 Cohere
   `rerank-multilingual-v3.0`입니다. Jina라면 `jina-reranker-v2-base-multilingual`을 지정하세요. 영어 전용
@@ -1000,7 +981,6 @@ curl -s http://localhost:6333/collections/rag_kb | grep -o '"size":[0-9]*'
 | `QDRANT_UPSERT_BATCH` | `64` | Qdrant 업서트 요청당 포인트 수 |
 | **검색** | | |
 | `RAG_HYBRID` | `true` | 하이브리드 검색(밀집 + BM25). 바꾸면 `--recreate` 필요 |
-| `RAG_SPARSE_MODEL` | `kiwi-bm25` | BM25 희소 모델 — `kiwi-bm25`(한국어 형태소 분석) 또는 `Qdrant/bm25`(FastEmbed, 영어 기준, 선택 설치). 바꾸면 `--recreate` 필요 |
 | `RAG_DEFAULT_LIMIT` / `RAG_MAX_LIMIT` | `5` / `20` | 검색 결과 기본 개수 / 최대 개수 |
 | `RAG_SNIPPET_CHARS` | `1200` | 결과마다 반환하는 텍스트의 최대 글자 수 (넘으면 `truncated: true`) |
 | **리랭킹** | | |
@@ -1037,9 +1017,9 @@ curl -s http://localhost:6333/collections/rag_kb | grep -o '"size":[0-9]*'
 | [`tools/promote.py`](tools/promote.py) | 초안 승격 명령 `rag-promote` (사람 전용, MCP 도구 아님) |
 | [`tools/embeddings.py`](tools/embeddings.py) | OpenAI 호환 임베딩 호출, 비대칭 모델 접두사 처리 |
 | [`tools/vectorstore.py`](tools/vectorstore.py) | Qdrant 컬렉션 스키마, BM25 희소 벡터, 하이브리드 질의 |
-| [`tools/kiwi_bm25.py`](tools/kiwi_bm25.py) | 한국어 형태소 분석(Kiwi) 기반 BM25 희소 벡터 (기본 희소 모델 `kiwi-bm25`) |
+| [`tools/kiwi_bm25.py`](tools/kiwi_bm25.py) | 한국어 형태소 분석(Kiwi) 기반 BM25 희소 벡터 |
 | [`tools/reranker.py`](tools/reranker.py) | Cohere/Jina 호환 크로스 인코더 리랭킹 (선택 사항) |
-| `requirements.txt`, `requirements-fastembed.txt` | Python 의존성, 선택 의존성(FastEmbed — `RAG_SPARSE_MODEL=Qdrant/bm25`일 때만) |
+| `requirements.txt` | Python 의존성 |
 | `deploy/` | 설치·제거 스크립트, systemd 유닛, `rag-ingest`·`rag-promote` 명령 템플릿 |
 | `knowledge/official/` | 샘플 문서 |
 | `.claude-plugin/marketplace.json` | Claude Code 플러그인 마켓플레이스 정의 |

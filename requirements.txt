@@ -6,12 +6,9 @@ PyYAML>=6.0
 # PDF ingestion support (tools/ingest.py) — text extraction for .pdf knowledge docs.
 pypdf>=4.0
 
-# Korean morphological analyzer for the default BM25 sparse model (kiwi-bm25,
-# tools/kiwi_bm25.py). Pure pip install, bundles its model (~100MB), runs offline.
+# Korean morphological analyzer for BM25 keyword vectors in hybrid search
+# (tools/kiwi_bm25.py). Pure pip install, bundles its model (~100MB), runs offline.
+# If it fails to load, rag-mcp falls back to dense-only (see tools/vectorstore.py).
 kiwipiepy>=0.20
-# Token hashing for kiwi-bm25 (same hash as FastEmbed BM25).
+# Token hashing for the BM25 sparse vectors.
 mmh3>=4.0
-
-# Optional: FastEmbed for RAG_SPARSE_MODEL=Qdrant/bm25 lives in
-# requirements-fastembed.txt (deploy/install.sh installs it only when the config
-# selects a FastEmbed sparse model).

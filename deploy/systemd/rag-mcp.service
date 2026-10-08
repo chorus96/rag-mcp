@@ -36,9 +36,6 @@ WorkingDirectory=%h/.local/share/rag-mcp/app
 EnvironmentFile=%h/.config/rag-mcp/rag-mcp.env
 # 로그를 버퍼링 없이 바로 journal로 보냅니다.
 Environment=PYTHONUNBUFFERED=1
-# FastEmbed 모델 캐시. RAG_SPARSE_MODEL=Qdrant/bm25 일 때만 최초 실행 시 내려받고, rag-ingest와 함께 씁니다.
-# 기본 희소 모델 kiwi-bm25 는 pip 패키지에 모델이 들어 있어 쓰지 않습니다.
-Environment=FASTEMBED_CACHE_PATH=%h/.local/share/rag-mcp/data/fastembed_cache
 # 문서 디렉터리의 기본값 (rag-ingest, rag-promote와 같은 값). 설정 파일(EnvironmentFile)의 값이 항상 우선하고,
 # 설정 파일의 값이 비어 있으면 서버가 같은 기본 경로를 씁니다.
 Environment=RAG_KNOWLEDGE_DIR=%h/.local/share/rag-mcp/data/knowledge

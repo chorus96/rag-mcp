@@ -1,27 +1,26 @@
-"""tools/kiwi_bm25.py — 한국어 형태소 기반 BM25 희소 벡터 (기본 희소 모델 `kiwi-bm25`).
+"""tools/kiwi_bm25.py — 한국어 형태소 기반 BM25 희소 벡터 (하이브리드 검색의 키워드 쪽).
 
 역할
-  FastEmbed `Qdrant/bm25`와 같은 방식(단어 → 해시 → BM25 가중치, IDF는 Qdrant의 Modifier.IDF)으로
-  희소 벡터를 만들되, 단어를 나눌 때 한국어 형태소 분석기 Kiwi(kiwipiepy)를 씁니다.
-  `Qdrant/bm25`는 영어 기준으로 공백에서 단어를 나눠 "볼륨이"와 "볼륨을"을 다른 단어로 보지만,
-  이 모듈은 둘 다 "볼륨"으로 맞춥니다.
+  단어 → 해시 → BM25 가중치로 희소 벡터를 만듭니다(IDF는 Qdrant의 Modifier.IDF). 단어를 나눌 때 한국어
+  형태소 분석기 Kiwi(kiwipiepy)를 쓰므로, 공백에서 단어를 나누는 방식과 달리 "볼륨이"와 "볼륨을"을 둘 다
+  "볼륨"으로 맞춥니다.
 
 토큰
   - 한글: Kiwi로 형태소를 나눈 뒤 내용어만 남깁니다 — 일반·고유 명사(NNG, NNP), 수사(NR),
     동사·형용사 어간(VV, VA), 어근(XR), 한자(SH). 조사·어미·접사는 버립니다.
       "볼륨이 멈췄어요" → ["볼륨", "멈추"]
   - 영문·숫자: 형태소 분석과 별개로, 원문에서 [A-Za-z0-9_] 연속 구간을 소문자로 그대로 씁니다.
-    에러 문자열(CrashLoopBackOff), 리소스 이름(c-1a2b3c → c, 1a2b3c)이 지금처럼 정확히 맞습니다.
+    에러 문자열(CrashLoopBackOff), 리소스 이름(c-1a2b3c → c, 1a2b3c)이 정확히 맞습니다.
   - 40자를 넘는 토큰은 버립니다.
 
 가중치
   - 문서: BM25 TF 부분  tf * (k + 1) / (tf + k * (1 - b + b * |d| / avg_len))   (k=1.2, b=0.75, avg_len=256)
   - 질의: 토큰마다 1.0 (중복 제거)
-  - 토큰 ID: abs(mmh3.hash(token)) — FastEmbed BM25와 같은 해시
+  - 토큰 ID: abs(mmh3.hash(token))
   IDF는 컬렉션의 Modifier.IDF로 Qdrant가 계산합니다.
 
 주의
-  토큰 방식이 다른 모델(`Qdrant/bm25`)로 만든 컬렉션과 섞어 쓸 수 없습니다. 모델을 바꾸면
+  단어를 나누는 방식을 바꾸면(이 파일의 품사 목록 등) 질의와 기존 색인의 토큰이 맞지 않으므로
   rag-ingest --recreate 로 재구축하세요.
 """
 
@@ -34,15 +33,13 @@ from collections import Counter
 import mmh3
 from qdrant_client.models import SparseVector
 
-MODEL_NAME = "kiwi-bm25"
-
 # 남길 Kiwi 품사 (내용어). 영문(SL)·숫자(SN)는 원문에서 따로 뽑으므로 여기서는 빼 둡니다.
 _KEEP_TAGS = frozenset({"NNG", "NNP", "NR", "VV", "VA", "XR", "SH"})
 _ASCII_WORD = re.compile(r"[A-Za-z0-9_]+")
 _HANGUL = re.compile(r"[가-힣ㄱ-ㆎ]")
 _MAX_TOKEN_LEN = 40
 
-# BM25 매개변수 (FastEmbed Bm25 기본값과 같음)
+# BM25 매개변수 (흔히 쓰는 기본값)
 K = 1.2
 B = 0.75
 AVG_LEN = 256.0

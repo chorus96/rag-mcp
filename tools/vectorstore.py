@@ -7,12 +7,9 @@
 
 벡터 구성 (Qdrant 명명된 벡터)
   - dense: 임베딩 엔드포인트가 만든 의미 벡터 (코사인 거리)
-  - bm25:  로컬에서 만든 BM25 키워드 벡터. IDF는 컬렉션의 Modifier.IDF로 서버 측에서 적용하므로,
-           질의 쪽은 단어 존재 여부만 보내면 됩니다. 단어를 나누는 방식은 RAG_SPARSE_MODEL로 정합니다.
-             kiwi-bm25 (기본): 한국어 형태소 분석기 Kiwi로 나눔 (kiwi_bm25.py). 조사·어미를 떼어 "볼륨이"와
-                               "볼륨을"이 같은 단어 "볼륨"이 됩니다. pip 패키지만으로 동작합니다.
-             Qdrant/bm25:      FastEmbed의 영어 기준 BM25. FastEmbed는 선택 의존성(requirements-fastembed.txt)이고,
-                               최초 실행 시 huggingface.co에서 모델을 내려받습니다.
+  - bm25:  로컬에서 만든 BM25 키워드 벡터 (kiwi_bm25.py). 한국어 형태소 분석기 Kiwi로 조사·어미를 떼어
+           "볼륨이"와 "볼륨을"이 같은 단어 "볼륨"이 됩니다. pip 패키지만으로 동작하며 실행 중에 내려받는 것이
+           없습니다. IDF는 컬렉션의 Modifier.IDF로 서버 측에서 적용하므로, 질의 쪽은 단어 존재 여부만 보냅니다.
   밀집 벡터는 의미를 잡지만 에러 문자열(`CrashLoopBackOff`), 리소스 ID(`c-xxxxx`), 컴포넌트
   이름(`Longhorn`) 같은 정확한 토큰을 놓치기 쉽습니다. BM25가 이를 보완하고, 질의할 때 두 결과를
   Reciprocal Rank Fusion(RRF)으로 결합합니다.
@@ -25,12 +22,11 @@
   - sparse_available / describe: 하이브리드 동작 여부와 설정
 
 대체 동작
-  희소 모델을 불러올 수 없거나 RAG_HYBRID=false 이면 밀집 검색만 합니다. 검색은 계속 동작하고
+  Kiwi를 불러올 수 없거나 RAG_HYBRID=false 이면 밀집 검색만 합니다. 검색은 계속 동작하고
   키워드 신호만 잃습니다.
 
 주의
-  RAG_HYBRID나 RAG_SPARSE_MODEL을 바꾸면 컬렉션 구조나 토큰이 달라지므로 rag-ingest --recreate 로
-  재구축해야 합니다.
+  RAG_HYBRID를 바꾸면 컬렉션 구조가 달라지므로 rag-ingest --recreate 로 재구축해야 합니다.
 """
 
 from __future__ import annotations
@@ -59,58 +55,21 @@ DENSE = "dense"
 SPARSE = "bm25"
 
 # 코드 변경 없이 하이브리드를 강제로 끌 수 있습니다 (밀집 전용이지만 스키마는 여전히
-# 명명된 벡터). 기본값은 켜짐이며, 실제 상태는 희소 모델 로드 여부에도 달려 있습니다.
+# 명명된 벡터). 기본값은 켜짐이며, 실제 상태는 Kiwi 로드 여부에도 달려 있습니다.
 _HYBRID_REQUESTED = os.environ.get("RAG_HYBRID", "true").strip().lower() not in (
     "0", "false", "no", "off", ""
 )
-BM25_MODEL = os.environ.get("RAG_SPARSE_MODEL", "").strip() or "kiwi-bm25"
+# 희소 벡터를 만드는 방식의 이름 (rag_health 등에 표시).
+SPARSE_MODEL = "kiwi-bm25"
 
-_bm25 = None            # 지연 로드되는 희소 임베더 (embed_documents / embed_query)
+_bm25 = None            # 지연 로드되는 kiwi_bm25.KiwiBM25
 _bm25_loaded = False    # 로드를 시도한 적이 있는지
 
 
 # --- BM25 희소 벡터 -----------------------------------------------------------
-class _FastEmbedSparse:
-    """FastEmbed 희소 모델(예: Qdrant/bm25)을 KiwiBM25와 같은 모양으로 감쌉니다."""
-
-    def __init__(self, model_name: str) -> None:
-        try:
-            from fastembed import SparseTextEmbedding
-        except ImportError as exc:  # 선택 의존성 (requirements-fastembed.txt)
-            raise RuntimeError(
-                f"{model_name} needs FastEmbed, which is optional: "
-                "pip install -r requirements-fastembed.txt (or re-run deploy/install.sh)"
-            ) from exc
-
-        self._model = SparseTextEmbedding(model_name=model_name)
-
-    @staticmethod
-    def _to_sparse(embedding: Any) -> SparseVector:
-        return SparseVector(indices=embedding.indices.tolist(), values=embedding.values.tolist())
-
-    def embed_documents(self, texts: list[str]) -> list[SparseVector]:
-        return [self._to_sparse(e) for e in self._model.embed(texts)]
-
-    def embed_query(self, text: str) -> SparseVector:
-        return self._to_sparse(next(iter(self._model.query_embed(text))))
-
-
-class _KiwiSparse:
-    def __init__(self) -> None:
-        import kiwi_bm25
-
-        self._model = kiwi_bm25.KiwiBM25()
-
-    def embed_documents(self, texts: list[str]) -> list[SparseVector]:
-        return [self._model.embed_document(t) for t in texts]
-
-    def embed_query(self, text: str) -> SparseVector:
-        return self._model.embed_query(text)
-
-
 def _load_bm25() -> Any | None:
-    """희소 임베더를 지연 import + 생성합니다. 캐시됩니다. 하이브리드가 꺼져 있거나
-    모델을 쓸 수 없으면 None을 반환합니다 (로그는 한 번만)."""
+    """Kiwi BM25 임베더를 지연 import + 생성합니다. 캐시됩니다. 하이브리드가 꺼져 있거나
+    Kiwi를 쓸 수 없으면 None을 반환합니다 (로그는 한 번만)."""
     global _bm25, _bm25_loaded
     if _bm25_loaded:
         return _bm25
@@ -119,10 +78,12 @@ def _load_bm25() -> Any | None:
         log.info("hybrid search disabled (RAG_HYBRID=false); using dense-only")
         return None
     try:
-        _bm25 = _KiwiSparse() if BM25_MODEL == "kiwi-bm25" else _FastEmbedSparse(BM25_MODEL)
-        log.info("hybrid search enabled (sparse model=%s)", BM25_MODEL)
+        import kiwi_bm25
+
+        _bm25 = kiwi_bm25.KiwiBM25()
+        log.info("hybrid search enabled (sparse model=%s)", SPARSE_MODEL)
     except Exception as exc:  # noqa: BLE001 - 어떤 실패든 => 밀집 전용, 치명적이지 않음
-        log.warning("sparse model %s unavailable (%s); falling back to dense-only", BM25_MODEL, exc)
+        log.warning("sparse model %s unavailable (%s); falling back to dense-only", SPARSE_MODEL, exc)
         _bm25 = None
     return _bm25
 
@@ -133,7 +94,7 @@ def sparse_available() -> bool:
 
 
 def describe() -> dict[str, Any]:
-    return {"hybrid": sparse_available(), "sparse_model": BM25_MODEL if _HYBRID_REQUESTED else None}
+    return {"hybrid": sparse_available(), "sparse_model": SPARSE_MODEL if _HYBRID_REQUESTED else None}
 
 
 def embed_documents_sparse(texts: list[str]) -> list[SparseVector | None]:
@@ -141,7 +102,7 @@ def embed_documents_sparse(texts: list[str]) -> list[SparseVector | None]:
     model = _load_bm25()
     if model is None:
         return [None] * len(texts)
-    return model.embed_documents(texts)
+    return [model.embed_document(t) for t in texts]
 
 
 def embed_query_sparse(text: str) -> SparseVector | None:

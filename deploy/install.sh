@@ -13,7 +13,7 @@
 #   1. 디렉터리 준비
 #   2. 애플리케이션 복사, Python 가상환경에 의존성 설치
 #   3. Qdrant 바이너리 설치
-#   4. 설정 파일 rag-mcp.env 생성 (이미 있으면 그대로 둠), 설정에 따라 선택 의존성(FastEmbed) 설치
+#   4. 설정 파일 rag-mcp.env 생성 (이미 있으면 그대로 둠)
 #   5. 문서 디렉터리 준비: official/·draft/ 폴더 생성, 샘플 문서 복사 (비어 있을 때만)
 #   6. systemd 사용자 서비스(qdrant, rag-mcp) 등록·시작, 명령 rag-ingest·rag-promote 설치
 #
@@ -21,7 +21,7 @@
 #   앱 / venv    ~/.local/share/rag-mcp/{app,venv}
 #   Qdrant       ~/.local/share/rag-mcp/qdrant
 #   설정 파일    ~/.config/rag-mcp/rag-mcp.env
-#   데이터       ~/.local/share/rag-mcp/data/{knowledge,qdrant,fastembed_cache}
+#   데이터       ~/.local/share/rag-mcp/data/{knowledge,qdrant}
 #   문서         설정 파일의 RAG_KNOWLEDGE_DIR (기본 ~/.local/share/rag-mcp/data/knowledge)
 #                  official/   정식 문서 — 사람이 넣고 rag-ingest 로 색인 (샘플 문서가 여기에 들어감)
 #                  draft/      초안 — MCP 쓰기 도구를 켜면 모델이 여기에만 씀, rag-promote 로 official/ 에 승격
@@ -101,14 +101,14 @@ esac
 # --- 1. 디렉터리 ---------------------------------------------------------------------
 # 데이터와 설정(API 키 포함)은 본인만 접근할 수 있게 합니다(700).
 install -d -m 755 "$PREFIX" "$PREFIX/app" "$PREFIX/qdrant" "$BIN_DIR" "$UNIT_DIR"
-install -d -m 700 "$DATA_DIR" "$DATA_DIR/qdrant" "$DATA_DIR/fastembed_cache" "$CONF_DIR"
+install -d -m 700 "$DATA_DIR" "$DATA_DIR/qdrant" "$CONF_DIR"
 # 문서 디렉터리는 설정 파일의 RAG_KNOWLEDGE_DIR 을 읽은 뒤 5단계에서 만듭니다.
 
 # --- 2. 애플리케이션 + Python 의존성 -------------------------------------------------
 # 가상환경은 처음 한 번만 만들고, 업그레이드 때는 의존성만 갱신합니다.
 log "애플리케이션 복사 → $PREFIX/app"
 install -m 644 "$SRC_DIR"/tools/{server,ingest,embeddings,documents,promote,reranker,vectorstore,kiwi_bm25}.py \
-    "$SRC_DIR/requirements.txt" "$SRC_DIR/requirements-fastembed.txt" "$PREFIX/app/"
+    "$SRC_DIR/requirements.txt" "$PREFIX/app/"
 
 if [ ! -x "$PREFIX/venv/bin/python" ]; then
     log "Python 가상환경 생성 → $PREFIX/venv"
@@ -140,16 +140,6 @@ if [ ! -f "$ENV_FILE" ]; then
     sed -i "s|^RAG_KNOWLEDGE_DIR=.*|RAG_KNOWLEDGE_DIR=$DATA_DIR/knowledge|" "$ENV_FILE"
 else
     log "기존 설정 파일 유지: $ENV_FILE (새 항목은 $SRC_DIR/.env.example 과 비교하세요)"
-fi
-
-# 선택 의존성: 기본 희소 모델 kiwi-bm25 는 requirements.txt 만으로 충분합니다. 설정 파일에서 다른 모델
-# (예: RAG_SPARSE_MODEL=Qdrant/bm25)을 골랐을 때만 FastEmbed(onnxruntime 포함)를 설치합니다.
-SPARSE_MODEL=$(sed -n 's/^RAG_SPARSE_MODEL=//p' "$ENV_FILE" | tail -n 1)
-SPARSE_MODEL=${SPARSE_MODEL%\"}; SPARSE_MODEL=${SPARSE_MODEL#\"}
-SPARSE_MODEL=${SPARSE_MODEL%\'}; SPARSE_MODEL=${SPARSE_MODEL#\'}
-if [ -n "$SPARSE_MODEL" ] && [ "$SPARSE_MODEL" != "kiwi-bm25" ]; then
-    log "선택 의존성 설치 (RAG_SPARSE_MODEL=$SPARSE_MODEL → FastEmbed)"
-    "$PREFIX/venv/bin/pip" install --quiet -r "$PREFIX/app/requirements-fastembed.txt"
 fi
 
 # --- 5. 문서 디렉터리 ----------------------------------------------------------------

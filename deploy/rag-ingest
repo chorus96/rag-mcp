@@ -36,7 +36,6 @@ DATA_DIR=@DATA_DIR@
 # env -i 로 호출한 셸의 환경 변수를 모두 버리고, 꼭 필요한 값과 설정 파일만으로 깨끗한 환경을
 # 만들어 실행합니다. 서비스와 같은 조건에서 수집하기 위해서입니다.
 #   - 프록시가 필요하면 HTTPS_PROXY 등을 설정 파일에 넣으세요 (셸에서 export 한 값은 무시됩니다).
-#   - FASTEMBED_CACHE_PATH: FastEmbed 모델 캐시를 서버와 함께 씁니다 (RAG_SPARSE_MODEL=Qdrant/bm25 일 때만 사용).
 #   - RAG_KNOWLEDGE_DIR: 여기 적은 값은 기본값입니다. 설정 파일에 값이 있으면 그 값이 우선하고,
 #     설정 파일의 값이 비어 있으면 기본값으로 되돌립니다 (install.sh, 서버와 같은 규칙).
 # 안쪽 sh 에서 설정 파일을 불러온 뒤(set -a 로 모두 export), 받은 인자 뒤에 --path <문서 디렉터리>를
@@ -46,7 +45,6 @@ exec env -i \
     HOME="$HOME" \
     LANG="${LANG:-C.UTF-8}" \
     PYTHONUNBUFFERED=1 \
-    FASTEMBED_CACHE_PATH="$DATA_DIR/fastembed_cache" \
     RAG_KNOWLEDGE_DIR="$DATA_DIR/knowledge" \
     /bin/sh -c '
         default_dir=$RAG_KNOWLEDGE_DIR

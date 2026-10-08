@@ -14,7 +14,7 @@
 #   항상:      systemd 사용자 서비스(qdrant, rag-mcp), 명령 rag-ingest·rag-promote,
 #              애플리케이션·Python 가상환경·Qdrant 바이너리
 #   --purge:   위에 더해 설정 파일(~/.config/rag-mcp)과
-#              데이터(~/.local/share/rag-mcp/data: 기본 문서 디렉터리, Qdrant 저장소, 캐시)
+#              데이터(~/.local/share/rag-mcp/data: 기본 문서 디렉터리, Qdrant 저장소)
 #
 # 문서 디렉터리 (설정 파일의 RAG_KNOWLEDGE_DIR)
 #   official/(정식 문서)와 draft/(모델이 만든 초안)가 들어 있는, 지식 베이스의 원본입니다.

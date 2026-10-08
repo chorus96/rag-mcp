@@ -1,7 +1,0 @@
-# Optional dependency: only needed for RAG_SPARSE_MODEL=Qdrant/bm25 (FastEmbed's
-# English-oriented BM25, downloaded from huggingface.co on first use). The default
-# sparse model kiwi-bm25 does not need it. Pulls onnxruntime.
-#   deploy/install.sh installs this automatically when the config file selects a
-#   FastEmbed model; to install by hand:
-#     ~/.local/share/rag-mcp/venv/bin/pip install -r requirements-fastembed.txt
-fastembed>=0.3,<0.8
