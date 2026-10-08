@@ -111,7 +111,8 @@ agentic retrieval).
 - `curl`, `tar`
 - **OpenAI 호환 임베딩 엔드포인트** — 예: 같은 서버에서
   [Hugging Face TEI](https://github.com/huggingface/text-embeddings-inference)로 `BAAI/bge-m3` 서빙,
-  또는 OpenAI API ([임베딩 엔드포인트 설정](#임베딩-엔드포인트-설정) 참고)
+  또는 OpenAI API ([임베딩 엔드포인트 설정](#임베딩-엔드포인트-설정) 참고). `huggingface.co`가 막혀 있다면 모델 파일을
+  미리 옮겨 두세요([허깅페이스에 접속할 수 없을 때](#허깅페이스에-접속할-수-없을-때-오프라인-모델-준비))
 
 ### 1. 설치
 
@@ -928,7 +929,9 @@ API라면 OpenAI `text-embedding-3-small`/`-large`도 다국어를 지원합니�
 **TEI로 bge-m3 서빙하기 (오프라인, 권장):**
 [Hugging Face TEI](https://github.com/huggingface/text-embeddings-inference)(Text Embeddings Inference)는
 `BAAI/bge-m3`를 OpenAI 호환 `/v1/embeddings`로 서빙합니다. 설치 방법은 TEI 문서를 따르세요(CPU/GPU 빌드
-제공). 같은 서버의 8080 포트에서 띄웠다면 위의 "직접 띄운 서버" 설정 그대로 쓰면 됩니다.
+제공). 같은 서버의 8080 포트에서 띄웠다면 위의 "직접 띄운 서버" 설정 그대로 쓰면 됩니다. TEI는 처음 시작할 때 모델
+파일을 `huggingface.co`에서 내려받습니다. 접속할 수 없는 환경이라면
+[허깅페이스에 접속할 수 없을 때](#허깅페이스에-접속할-수-없을-때-오프라인-모델-준비)를 보세요.
 
 **적용 및 확인:**
 
@@ -953,6 +956,44 @@ curl -s http://localhost:6333/collections/rag_kb | grep -o '"size":[0-9]*'
 - **속도.** bge-m3(약 1.2GB)는 CPU로 서빙하면 수집이 느릴 수 있습니다. 문서가 많다면 GPU에서 서빙하거나
   `EMBED_BATCH_SIZE`를 엔드포인트가 허용하는 범위에서 늘리세요.
 - **청크 크기.** 기본 `CHUNK_SIZE=1500`자는 bge-m3의 최대 입력 길이보다 훨씬 작아 그대로 써도 됩니다.
+
+### 허깅페이스에 접속할 수 없을 때 (오프라인 모델 준비)
+
+rag-mcp 자체는 `huggingface.co`에 접속하지 않습니다. 키워드 검색의 Kiwi는 `pip` 패키지에 모델이 들어 있고, Qdrant는
+GitHub 릴리스에서 받습니다. 접속이 필요한 것은 **임베딩 서버(TEI, vLLM 등)가 `BAAI/bge-m3` 모델을 처음 내려받을 때**
+뿐입니다. 사내망 등에서 `huggingface.co`가 막혀 있다면, 접속되는 다른 컴퓨터에서 모델 파일을 받아 서버로 옮긴 뒤 로컬
+경로로 띄우세요.
+
+1. **접속되는 컴퓨터에서 모델 내려받기** — 저장소 전체(가중치, `config.json`, `tokenizer.json`, sentence-transformers
+   설정 파일 등)를 그대로 받습니다.
+
+   ```bash
+   python3 -m pip install -U huggingface_hub
+   huggingface-cli download BAAI/bge-m3 --local-dir bge-m3     # 최신 버전에서는 hf download 도 같습니다
+   ```
+
+2. **서버로 옮기기** — 예: `scp -r bge-m3 <서버>:/srv/models/` (USB 등 다른 방법도 됩니다). 저장소 전체는 수 GB입니다.
+3. **로컬 경로로 임베딩 서버 실행** — 모델 이름 대신 디렉터리 경로를 넘기고, 다시 내려받으려 하지 않도록
+   `HF_HUB_OFFLINE=1`을 설정합니다.
+
+   ```bash
+   # TEI: --model-id 에 로컬 디렉터리를 지정
+   HF_HUB_OFFLINE=1 text-embeddings-router --model-id /srv/models/bge-m3 --port 8080
+
+   # vLLM: 경로로 띄우고, 요청에 쓰는 모델 이름을 bge-m3 로 맞춤
+   #       (버전에 따라 임베딩 모드 옵션이 필요합니다. vLLM 문서를 확인하세요)
+   HF_HUB_OFFLINE=1 vllm serve /srv/models/bge-m3 --served-model-name bge-m3 --port 8080
+   ```
+
+4. **rag-mcp 설정은 그대로** — `EMBEDDINGS_BASE_URL=http://localhost:8080`, `EMBEDDINGS_MODEL=bge-m3`. 서버를 재시작하고
+   `rag_health()`에서 임베딩 엔드포인트가 응답하는지 확인한 뒤 `rag-ingest`를 실행하세요.
+
+- 임베딩 서버의 시작 로그에 다운로드 시도나 "파일을 찾을 수 없음" 오류가 보이면, 옮긴 디렉터리에 빠진 파일이 있는
+  것입니다. 일부 파일만 고르지 말고 저장소 전체를 옮기세요.
+- 프록시를 거치면 `huggingface.co`에 접속할 수 있는 환경이라면, 임베딩 서버를 실행할 때 `HTTPS_PROXY`를 지정하는 것으로도
+  충분합니다(rag-mcp 설정 파일의 `HTTPS_PROXY`는 임베딩 서버에는 적용되지 않습니다).
+- 리랭킹(`RERANK_PROVIDER=cohere`)은 기본으로 Cohere의 외부 API(`RERANK_BASE_URL`)에 접속합니다. 외부 접속이 막힌
+  환경에서는 켜지 않거나, 내부에서 접속할 수 있는 Cohere 호환 `/rerank` 서버로 `RERANK_BASE_URL`을 바꾸세요.
 
 ## 설정
 
