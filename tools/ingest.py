@@ -94,9 +94,8 @@ HTTP_TIMEOUT = float(os.environ.get("RAG_TIMEOUT_SECONDS", "60"))
 # 하나(긴 마크다운, 100페이지 PDF)가 지나치게 크고 전부 아니면 전무인 단일 호출이 되지
 # 않게 합니다.
 #
-# EMBED_BATCH_SIZE: 임베딩 요청당 청크 수. OpenAI 호환 `/v1/embeddings`는 입력 개수
-#   (OpenAI 2048개)와 요청당 토큰 수에 상한이 있어, 큰 문서의 청크를 한 번에 보낼 수
-#   없습니다.
+# EMBED_BATCH_SIZE: 임베딩 요청당 청크 수. 사내 임베딩 서버마다 요청당 입력 개수와 토큰 수에
+#   상한이 있어, 큰 문서의 청크를 한 번에 보낼 수 없습니다.
 # UPSERT_BATCH_SIZE: Qdrant 업서트당 포인트 수. 각 포인트는 밀집 벡터, BM25 희소
 #   벡터, 청크 텍스트를 담으므로, 한 요청 본문에 청크 수백 개를 넣으면
 #   RAG_TIMEOUT_SECONDS 안에 수 메가바이트를 보내야 합니다.

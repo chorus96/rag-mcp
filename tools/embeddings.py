@@ -1,8 +1,8 @@
 """tools/embeddings.py — 임베딩 호출.
 
 역할
-  OpenAI 호환 /v1/embeddings 엔드포인트로 텍스트를 밀집 벡터로 바꿉니다. OpenAI API, Hugging Face
-  TEI, vLLM, LocalAI, LiteLLM 프록시 등 이 형식을 제공하는 서버라면 무엇이든 쓸 수 있습니다.
+  사내 임베딩 서버(OpenAI 호환 /v1/embeddings)에 요청해 텍스트를 밀집 벡터로 바꿉니다. rag-mcp는 임베딩
+  모델을 직접 실행하지 않습니다.
   server.py, ingest.py가 모두 이 모듈을 거칩니다.
 
 공개 함수
@@ -12,14 +12,14 @@
   - describe():            현재 설정 요약 (상태 확인·로그용, 비밀 값 제외)
 
 동작
-  - EMBEDDINGS_BASE_URL에는 기본값이 없습니다. 문서가 의도치 않게 외부 API로 전송되지 않도록
+  - EMBEDDINGS_BASE_URL(사내 서버 주소)에는 기본값이 없습니다. 문서가 의도하지 않은 곳으로 전송되지 않도록
     운영자가 반드시 지정해야 하며, 비어 있으면 EmbeddingError를 냅니다.
-  - 비대칭 모델 접두사: nomic 계열은 질의/문서 접두사를 자동으로 붙이고, 그 외(bge-m3, OpenAI 등)는
+  - 비대칭 모델 접두사: nomic 계열은 질의/문서 접두사를 자동으로 붙이고, 그 외(bge-m3 등)는
     붙이지 않습니다. EMBED_QUERY_PREFIX / EMBED_DOC_PREFIX를 지정하면 항상 그 값이 우선합니다.
   - HTTP 오류는 상태 코드와 응답 본문을 담아, 잘못된 URL·모델(404)이나 키 문제(401)를 알 수 있게 합니다.
 
 주의
-  수집과 질의는 반드시 같은 엔드포인트와 모델을 써야 합니다. Qdrant 벡터는 모델에 종속되므로,
+  수집과 질의는 반드시 같은 서버와 모델을 써야 합니다. Qdrant 벡터는 모델에 종속되므로,
   모델을 바꾸면 rag-ingest --recreate 로 다시 수집하세요.
 """
 
@@ -54,8 +54,8 @@ def _build_config() -> EmbeddingConfig:
     base_url = (os.environ.get("EMBEDDINGS_BASE_URL") or "").strip()
     api_key = os.environ.get("EMBEDDINGS_API_KEY")
 
-    # 비대칭 모델 자동 감지 (질의/문서에 서로 다른 작업 접두사가 필요). nomic은 흔한
-    # 오프라인 기본값입니다. 다른 계열(e5, bge, gte)도 접두사가 필요하지만 문자열이
+    # 비대칭 모델 자동 감지 (질의/문서에 서로 다른 작업 접두사가 필요). nomic 계열은 이름으로
+    # 알아볼 수 있습니다. 다른 계열(e5, bge, gte)도 접두사가 필요하지만 문자열이
     # 다르므로, 그런 경우 EMBED_*_PREFIX를 설정하세요.
     is_asymmetric = "nomic" in model.lower()
 
@@ -161,8 +161,8 @@ def _embed_batch(texts: list[str]) -> list[list[float]]:
         )
     if not CONFIG.base_url:
         raise EmbeddingError(
-            "EMBEDDINGS_BASE_URL is not set: configure an OpenAI-compatible "
-            "embeddings endpoint (e.g. https://api.openai.com or http://localhost:8080 for TEI)"
+            "EMBEDDINGS_BASE_URL is not set: configure your in-house OpenAI-compatible "
+            "embeddings server (e.g. http://embedding.internal.example:8080)"
         )
     return _embed_openai(texts)
 

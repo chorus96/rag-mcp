@@ -13,8 +13,8 @@ agentic retrieval).
 - **하이브리드 검색** — 의미 기반 밀집(dense) 벡터와 BM25 키워드 희소(sparse) 벡터를 Reciprocal Rank
   Fusion(RRF)으로 결합합니다. `CrashLoopBackOff` 같은 에러 문자열이나 리소스 이름도 정확히 찾습니다.
 - **선택적 리랭킹** — Cohere/Jina 호환 크로스 인코더로 결과 순서를 다시 매겨 정밀도를 높입니다.
-- **OpenAI 호환 임베딩** — `/v1/embeddings`를 제공하는 엔드포인트라면 무엇이든 씁니다. 직접 띄운
-  서버(TEI, vLLM 등)로 오프라인 운영하거나 호스팅 API(OpenAI 등)를 쓸 수 있습니다.
+- **사내 임베딩 서버 연결** — 사내에서 운영 중인 OpenAI 호환 `/v1/embeddings` 서버에 연결합니다. 임베딩 모델을
+  rag-mcp가 직접 실행하지 않으므로 모델 파일을 준비할 필요가 없습니다.
 - **한국어 지원** — 기본 임베딩 모델은 다국어 모델 `bge-m3`, 키워드 검색(BM25)은 한국어 형태소 분석기 Kiwi로
   조사·어미를 떼어 단어를 맞추고, 기본 리랭커도 다국어 모델입니다.
 - **마크다운 + PDF 수집** — YAML front matter, 헤딩 기준 청킹, 멱등(idempotent) 재실행을 지원합니다.
@@ -26,7 +26,7 @@ agentic retrieval).
 | 원칙 | 내용 |
 |------|------|
 | **기본은 읽기 전용** | 기본 설정에서 MCP 도구는 검색과 문서 목록 조회만 합니다. 지식 베이스 기록은 수집 명령(`rag-ingest`)으로 이루어집니다. 모델이 문서를 추가·삭제하는 쓰기 도구는 운영자가 `RAG_MCP_WRITE=true`로 켤 때만 등록됩니다. |
-| **벤더 중립** | 채팅 LLM은 연결하는 MCP 클라이언트가 정합니다. 임베딩은 OpenAI 호환 `/v1/embeddings`라면 무엇이든 씁니다. |
+| **벤더 중립** | 채팅 LLM은 연결하는 MCP 클라이언트가 정합니다. 임베딩은 사내 서버의 OpenAI 호환 `/v1/embeddings`로 요청하므로 특정 모델이나 제품에 묶이지 않습니다. |
 | **수집과 질의의 일관성** | 수집과 질의가 같은 임베딩 코드와 설정을 공유하도록 만들어, 벡터가 어긋날 여지를 없앴습니다. |
 | **실패해도 검색은 유지** | 리랭킹, BM25, 오래된 청크 정리 같은 부가 기능은 실패하면 조용히 건너뛰고, 기본 검색은 계속 동작합니다(최선형, best-effort). |
 
@@ -38,7 +38,7 @@ agentic retrieval).
 | **Qdrant** | 문서 청크의 벡터를 저장하는 벡터 DB (`127.0.0.1:6333`) |
 | **rag-ingest** (`tools/ingest.py`) | 문서를 청크로 나누고 임베딩해 Qdrant에 기록하는 수집 명령 |
 | **rag-promote** (`tools/promote.py`) | 검토한 초안(`draft/`)을 정식 문서(`official/`)로 올리는 사람 전용 명령 |
-| **임베딩 엔드포인트** | 텍스트를 벡터로 바꾸는 OpenAI 호환 서버 — **별도로 준비** |
+| **사내 임베딩 서버** | 텍스트를 벡터로 바꾸는 OpenAI 호환 서버 — **rag-mcp에 포함되지 않음, 사내 서버에 연결** |
 | **Claude Code 플러그인** (`plugins/rag-mcp`) | Claude Code에서 rag-mcp 서버에 연결하고, 도구 사용법을 스킬로 안내 |
 
 ## 아키텍처
@@ -52,14 +52,14 @@ agentic retrieval).
                 │
                 ▼
   ┌───────────────────────────┐   embed    ┌─────────────────────────────┐
-  │        rag-ingest         │  chunks    │     embedding provider      │
-  │  · parses front matter    │───────────►│   any OpenAI-compatible     │
-  │  · heading-aware chunks   │            │   /v1/embeddings endpoint   │
-  │    (PDF pages = sections) │◄───────────│   (TEI, vLLM, OpenAI, ...)  │
+  │        rag-ingest         │  chunks    │  in-house embedding server  │
+  │  · parses front matter    │───────────►│      OpenAI-compatible      │
+  │  · heading-aware chunks   │            │        /v1/embeddings       │
+  │    (PDF pages = sections) │◄───────────│    (not part of rag-mcp)    │
   │  · idempotent upserts,    │  vectors   └──────────────▲──────────────┘
   │    stale-tail cleanup     │                           │
   └─────────────┬─────────────┘                           │  the SAME
-                │ upsert                                  │  provider also
+                │ upsert                                  │  server also
                 ▼                                         │  embeds queries
   ┌───────────────────────────┐                           │  (see rag-mcp ↘)
   │      Qdrant  (v1.12)      │                           │
@@ -95,9 +95,9 @@ agentic retrieval).
   └──────────────────────┘
 ```
 
-- **쓰기 경로:** `rag-ingest`가 문서 디렉터리(`official/`, `draft/`)의 문서를 읽어 청크로 나누고, 임베딩 엔드포인트로
+- **쓰기 경로:** `rag-ingest`가 문서 디렉터리(`official/`, `draft/`)의 문서를 읽어 청크로 나누고, 사내 임베딩 서버로
   벡터를 만들어 Qdrant에 저장합니다. BM25 희소 벡터는 rag-mcp가 직접(Kiwi 형태소 분석) 계산합니다.
-- **읽기 경로:** MCP 클라이언트가 검색 도구를 호출하면, rag-mcp가 **같은 임베딩 엔드포인트**로 질의를
+- **읽기 경로:** MCP 클라이언트가 검색 도구를 호출하면, rag-mcp가 **같은 사내 임베딩 서버**로 질의를
   벡터로 바꾸고 Qdrant에서 하이브리드 검색한 뒤 (선택적으로 리랭킹해) 결과를 돌려줍니다.
 - **(선택) MCP 쓰기 도구:** 설정으로 켜면 모델이 `draft/` 아래에 초안 문서를 추가·삭제할 수 있습니다.
   정식 문서로 올리는 것은 사람이 `rag-promote` 명령으로 합니다.
@@ -109,10 +109,8 @@ agentic retrieval).
 - systemd를 쓰는 Linux 서버 (Ubuntu, Debian, RHEL 계열 등)
 - Python 3.10 이상과 venv 모듈 (Debian/Ubuntu: `apt install python3-venv`)
 - `curl`, `tar`
-- **OpenAI 호환 임베딩 엔드포인트** — 예: 같은 서버에서
-  [Hugging Face TEI](https://github.com/huggingface/text-embeddings-inference)로 `BAAI/bge-m3` 서빙,
-  또는 OpenAI API ([임베딩 엔드포인트 설정](#임베딩-엔드포인트-설정) 참고). `huggingface.co`가 막혀 있다면 모델 파일을
-  미리 옮겨 두세요([허깅페이스에 접속할 수 없을 때](#허깅페이스에-접속할-수-없을-때-오프라인-모델-준비))
+- **사내 임베딩 서버** — OpenAI 호환 `/v1/embeddings`를 제공하는 서버의 주소, 인증 정보, 모델 이름
+  ([사내 임베딩 서버 연결](#사내-임베딩-서버-연결) 참고)
 
 ### 1. 설치
 
@@ -126,13 +124,13 @@ git clone https://github.com/chorus96/rag-mcp.git && cd rag-mcp
 `rag-ingest`·`rag-promote` 명령은 `~/.local/bin`에 설치됩니다. 이 경로가 PATH에 없으면 설치 스크립트가 알려
 줍니다.
 
-### 2. 임베딩 엔드포인트 지정
+### 2. 사내 임베딩 서버 지정
 
-설정 파일에서 임베딩 엔드포인트를 지정하고 서버를 재시작합니다.
+설정 파일에서 사내 임베딩 서버를 지정하고 서버를 재시작합니다.
 
 ```bash
 vi ~/.config/rag-mcp/rag-mcp.env
-#   EMBEDDINGS_BASE_URL=http://localhost:8080   (예: 같은 서버의 TEI)
+#   EMBEDDINGS_BASE_URL=http://embedding.internal.example:8080   (사내 임베딩 서버)
 #   EMBEDDINGS_API_KEY=
 #   EMBEDDINGS_MODEL=bge-m3
 systemctl --user restart rag-mcp
@@ -305,7 +303,7 @@ RAG_MCP_URL=http://10.0.0.5:8084/mcp claude
 | `search_official(query, cluster?, component?, limit?)` | 정식 문서(`official/`)만 검색 — `doc_type=official`로 고정 |
 | `search_draft(query, cluster?, component?, limit?)` | 초안(`draft/`)만 검색 — `doc_type=draft`로 고정 |
 | `rag_collections()` | 컬렉션 목록과 포인트 수 (지식 베이스가 채워졌는지 확인) |
-| `rag_health()` | Qdrant와 임베딩 엔드포인트 접근 가능 여부, 리랭커·하이브리드 설정 |
+| `rag_health()` | Qdrant와 사내 임베딩 서버 접근 가능 여부, 리랭커·하이브리드 설정 |
 | `rag_list_documents(folder?, subdir?, limit?)` | 문서 파일 목록 — [문서 목록 보기](#문서-목록-보기-rag_list_documents) |
 | `rag_add_document(title, content, tags?, component?, cluster?, overwrite?)` | (선택) `draft/`에 문서 추가 — [쓰기 도구와 초안 승격](#쓰기-도구와-초안-승격) |
 | `rag_delete_document(source)` | (선택) `draft/` 문서 삭제 — 파일과 청크를 함께 삭제 |
@@ -722,14 +720,14 @@ Qdrant 컬렉션 하나(기본 이름 `rag_kb`)에 모든 문서를 저장합니
 | 임베딩 | 청크 32개 | `EMBED_BATCH_SIZE` |
 | Qdrant 업서트 | 포인트 64개 | `QDRANT_UPSERT_BATCH` |
 
-나눠 보내면 큰 파일을 처리하다 실패해도 앞선 배치는 이미 반영되어 있습니다. 엔드포인트가 413/400
-오류를 돌려주면 `EMBED_BATCH_SIZE`를 줄이세요(엔드포인트마다 요청당 입력 개수와 토큰 상한이 다릅니다).
+나눠 보내면 큰 파일을 처리하다 실패해도 앞선 배치는 이미 반영되어 있습니다. 사내 임베딩 서버가 413/400
+오류를 돌려주면 `EMBED_BATCH_SIZE`를 줄이세요(서버마다 요청당 입력 개수와 토큰 상한이 다릅니다).
 
 ## 검색 파이프라인
 
 `server.py`의 검색 도구는 모두 같은 경로(`_search`)를 거칩니다.
 
-1. **질의 임베딩** — 질의 텍스트를 임베딩 엔드포인트로 밀집 벡터로 바꿉니다.
+1. **질의 임베딩** — 질의 텍스트를 사내 임베딩 서버로 밀집 벡터로 바꿉니다.
 2. **하이브리드 검색 (재현율)** — Qdrant Query API에서 밀집 검색과 BM25 검색을 동시에 실행하고
    (`Prefetch` 두 개), Reciprocal Rank Fusion(RRF)으로 결합합니다. BM25가 없으면 밀집 검색만 합니다.
 3. **리랭킹 (정밀도, 선택 사항)** — 켜져 있으면 후보를 `RERANK_CANDIDATES`개(기본 30)까지 넉넉히
@@ -855,59 +853,80 @@ journalctl --user -u rag-mcp | grep -E 'sparse model|hybrid'
 | HNSW | 근사 최근접 이웃 그래프 인덱스 | 빠른 코사인 검색, 거의 정확한 top-k |
 | RRF | 두 순위 목록을 위치 기준으로 합치는 방법 | 밀집 + 희소 결과를 결합 |
 | 리랭커 (reranker) | `(질의, 청크)` 쌍의 순서를 다시 매기는 크로스 인코더 | Cohere/Jina (선택 사항) |
-| 비대칭 접두사 | 질의와 문서에 서로 다른 작업 태그를 붙이는 방식 | nomic 계열은 필요, bge-m3·OpenAI는 불필요 |
+| 비대칭 접두사 | 질의와 문서에 서로 다른 작업 태그를 붙이는 방식 | e5·nomic 계열은 필요, bge-m3는 불필요 |
 
 > ℹ️ **임베딩 모델은 여러분의 데이터로 학습되지 않습니다.** 사전 학습된 모델이 일반적인 의미 지식으로
 > 텍스트를 숫자로 바꿀 뿐입니다. 조직이나 업계 고유의 맥락은 Qdrant에 수집한 **문서**와 (선택적으로)
 > 리랭커에서 나옵니다.
 
-## 임베딩 엔드포인트 설정
+## 사내 임베딩 서버 연결
 
-임베딩은 OpenAI 호환 엔드포인트로 처리합니다. `EMBEDDINGS_BASE_URL`의 `/v1/embeddings`(URL이 `/v1`로 끝나면
-`/embeddings`)에 배치 `input` 배열로 요청합니다.
-
-**직접 띄운 서버 (오프라인, 권장)** — 예: 같은 서버의 TEI로 `BAAI/bge-m3` 서빙. vLLM, LocalAI 등도
-같은 방식입니다.
+rag-mcp는 텍스트를 벡터로 바꾸는 임베딩 모델을 직접 실행하지 않고, **사내 임베딩 서버**에 요청합니다. 임베딩 서버는
+rag-mcp에 포함되어 있지 않으므로, 사내에서 운영 중인 서버의 주소·인증 정보·모델 이름을 설정 파일에 적어 연결합니다.
 
 ```bash
 # ~/.config/rag-mcp/rag-mcp.env
-EMBEDDINGS_BASE_URL=http://localhost:8080
+EMBEDDINGS_BASE_URL=http://embedding.internal.example:8080
 # 인증이 없으면 비워 둠
 EMBEDDINGS_API_KEY=
-# 엔드포인트가 쓰는 모델 이름 (예: vLLM은 BAAI/bge-m3)
+# 사내 서버가 쓰는 모델 이름을 정확히
 EMBEDDINGS_MODEL=bge-m3
 ```
 
-**호스팅 API** — 예: OpenAI. 문서 내용이 외부로 전송된다는 점에 주의하세요.
-
 ```bash
-# ~/.config/rag-mcp/rag-mcp.env
-EMBEDDINGS_BASE_URL=https://api.openai.com
-EMBEDDINGS_API_KEY=sk-...
-EMBEDDINGS_MODEL=text-embedding-3-small
+systemctl --user restart rag-mcp
+rag-ingest
 ```
 
-- **`EMBEDDINGS_BASE_URL`에는 기본값이 없습니다.** 설정을 빠뜨렸을 때 문서가 의도치 않게 외부 API로
-  전송되지 않도록, 운영자가 엔드포인트를 명시해야 합니다. 비어 있으면 검색과 수집이 오류로 알려 줍니다.
-- `EMBEDDINGS_API_KEY`가 있으면 `Authorization: Bearer` 헤더로 보내고, 비어 있으면 보내지 않습니다.
-- 응답은 `index`로 다시 정렬하므로, 엔드포인트가 순서를 바꿔 돌려줘도 청크와 벡터가 어긋나지 않습니다.
-- HTTP 오류는 상태 코드와 응답 본문을 그대로 보여 줘, 잘못된 URL(404)이나 키 문제(401)를 바로 알 수
-  있습니다.
+### 사내 서버가 갖춰야 할 조건
+
+| 항목 | 내용 |
+|------|------|
+| API 형식 | **OpenAI 호환 `/v1/embeddings`** — `{"model": ..., "input": [...]}`로 요청하고 `data[].embedding`으로 받는 형식. 다른 형식은 연결할 수 없습니다 |
+| 주소 | `EMBEDDINGS_BASE_URL` 뒤에 `/v1/embeddings`가 자동으로 붙습니다. 주소가 `/v1`로 끝나면 `/embeddings`만 붙습니다 |
+| 인증 | `EMBEDDINGS_API_KEY`가 있으면 `Authorization: Bearer <키>` 헤더로 보내고, 비어 있으면 보내지 않습니다 |
+| 모델 | 한국어 문서라면 다국어 모델(예: `bge-m3`, 1024차원)을 권장합니다. 벡터 차원은 첫 수집 때 자동으로 정해집니다 |
+| 요청 크기 | 한 번에 청크 32개씩(`EMBED_BATCH_SIZE`) 보냅니다. 서버의 요청당 입력 개수·토큰 제한에 걸려 413/400 오류가 나면 줄이세요 |
+| 응답 시간 | 요청당 기본 60초(`RAG_TIMEOUT_SECONDS`)까지 기다립니다 |
+
+- **`EMBEDDINGS_BASE_URL`에는 기본값이 없습니다.** 설정을 빠뜨렸을 때 문서가 의도하지 않은 곳으로 전송되지 않도록,
+  운영자가 사내 서버 주소를 명시해야 합니다. 비어 있으면 검색과 수집이 오류로 알려 줍니다.
+- 응답은 `index`로 다시 정렬하므로, 서버가 순서를 바꿔 돌려줘도 청크와 벡터가 어긋나지 않습니다.
+- HTTP 오류는 상태 코드와 응답 본문을 그대로 보여 줘, 잘못된 주소(404)나 인증 문제(401)를 바로 알 수 있습니다.
+
+### 연결 확인
+
+rag-mcp에 연결하기 전에, 사내 서버가 OpenAI 호환 형식으로 응답하는지 확인합니다.
+
+```bash
+curl -s http://embedding.internal.example:8080/v1/embeddings \
+  -H "Authorization: Bearer <사내-서버-토큰>" -H "Content-Type: application/json" \
+  -d '{"model": "bge-m3", "input": ["테스트"]}' | head -c 200
+```
+
+응답에 `"embedding": [...]`이 보이면 됩니다. rag-mcp를 재시작한 뒤 MCP 도구 `rag_health()`에서
+`embeddings.reachable: true`와 모델 이름을 확인하고, 수집 후 컬렉션 차원이 모델과 맞는지 봅니다.
+
+```bash
+# 컬렉션 차원 확인 → bge-m3 라면 "size":1024
+curl -s http://localhost:6333/collections/rag_kb | grep -o '"size":[0-9]*'
+```
 
 ### 비대칭 모델 접두사
 
-일부 모델은 질의와 문서에 서로 다른 작업 태그를 붙여야 성능이 납니다.
+일부 모델은 질의와 문서에 서로 다른 작업 태그를 붙여야 성능이 납니다. 사내 서버의 모델이 여기에 해당하는지
+확인하세요.
 
 | 모델 | 질의 접두사 | 문서 접두사 | 설정 |
 |------|------|------|------|
 | nomic 계열 | `search_query: ` | `search_document: ` | 이름에 `nomic`이 있으면 자동 |
-| bge-m3, OpenAI `text-embedding-*` | 없음 | 없음 | 자동 (기본값) |
+| bge-m3 등 대칭 모델 | 없음 | 없음 | 자동 (기본값) |
 | e5, 구형 bge 등 | `query: ` | `passage: ` | `EMBED_QUERY_PREFIX` / `EMBED_DOC_PREFIX`로 직접 지정 |
 
 ### 일관성 규칙
 
-> ⚠️ **수집과 질의는 반드시 같은 엔드포인트와 모델을 써야 합니다.** 서로 다른 모델의 벡터는 차원과
-> 의미가 달라 비교할 수 없고, 섞어 쓰면 아무 경고 없이 검색이 망가집니다. 엔드포인트나 모델을 바꾼 뒤에는
+> ⚠️ **수집과 질의는 반드시 같은 서버와 모델을 써야 합니다.** 서로 다른 모델의 벡터는 차원과 의미가 달라 비교할 수
+> 없고, 섞어 쓰면 아무 경고 없이 검색이 망가집니다. 사내 서버의 모델이 바뀌었거나 `EMBEDDINGS_MODEL`을 바꾼 뒤에는
 > 서버를 재시작하고 컬렉션을 다시 만드세요.
 >
 > ⚠️ **하이브리드를 켜고 끄면 컬렉션 스키마가 바뀝니다.** `RAG_HYBRID`를 바꾼 뒤에도 같은 방법으로
@@ -920,80 +939,17 @@ EMBEDDINGS_MODEL=text-embedding-3-small
 
 ### 한국어 / 다국어 문서
 
-기본 임베딩 모델 이름은 한국어를 포함한 다국어 모델 **`bge-m3`**(1024차원, 최대 입력 8192 토큰)입니다.
-영어 위주로 학습된 `nomic-embed-text`(768차원)보다 한국어 질의·문서의 의미 검색이 정확합니다. 호스팅
-API라면 OpenAI `text-embedding-3-small`/`-large`도 다국어를 지원합니다. 영어 문서만 쓰고 더 가벼운
-모델을 원하면 엔드포인트에서 `nomic-embed-text`를 서빙하고 `EMBEDDINGS_MODEL`만 바꾸면 됩니다(nomic 계열은
-작업 접두사가 자동으로 붙습니다).
-
-**TEI로 bge-m3 서빙하기 (오프라인, 권장):**
-[Hugging Face TEI](https://github.com/huggingface/text-embeddings-inference)(Text Embeddings Inference)는
-`BAAI/bge-m3`를 OpenAI 호환 `/v1/embeddings`로 서빙합니다. 설치 방법은 TEI 문서를 따르세요(CPU/GPU 빌드
-제공). 같은 서버의 8080 포트에서 띄웠다면 위의 "직접 띄운 서버" 설정 그대로 쓰면 됩니다. TEI는 처음 시작할 때 모델
-파일을 `huggingface.co`에서 내려받습니다. 접속할 수 없는 환경이라면
-[허깅페이스에 접속할 수 없을 때](#허깅페이스에-접속할-수-없을-때-오프라인-모델-준비)를 보세요.
-
-**적용 및 확인:**
-
-```bash
-systemctl --user restart rag-mcp            # 새 모델로 질의하도록 재시작
-rag-ingest --recreate                       # 컬렉션 재생성 + 재수집
-
-# 컬렉션 차원 확인 → "size":1024 이면 성공
-curl -s http://localhost:6333/collections/rag_kb | grep -o '"size":[0-9]*'
-```
-
-그다음 `rag_health()`에서 모델이 `bge-m3`로 표시되는지 확인하고, 한국어 질의로 `rag_search`를 실행해
-보세요.
-
-**참고 사항:**
-
+- **임베딩 모델:** 사내 서버에서 다국어 모델을 쓰세요. 기본 모델 이름 `bge-m3`(1024차원, 최대 입력 8192 토큰)는
+  한국어를 포함한 다국어 모델로, 영어 위주 모델보다 한국어 질의·문서의 의미 검색이 정확합니다.
 - **키워드 검색도 한국어를 이해합니다.** 한국어 형태소 분석기 Kiwi가 조사·어미를 떼어 "볼륨이"와 "볼륨을"을
   같은 단어로 맞춥니다([키워드 검색(BM25)과 한국어](#키워드-검색bm25과-한국어)).
-- **리랭커도 다국어 모델이 기본값입니다.** 리랭킹을 켜면(`RERANK_PROVIDER=cohere`) 기본 모델은 Cohere
-  `rerank-multilingual-v3.0`입니다. Jina라면 `jina-reranker-v2-base-multilingual`을 지정하세요. 영어 전용
-  `rerank-english-v3.0`은 한국어 문서에 쓰지 마세요.
-- **속도.** bge-m3(약 1.2GB)는 CPU로 서빙하면 수집이 느릴 수 있습니다. 문서가 많다면 GPU에서 서빙하거나
-  `EMBED_BATCH_SIZE`를 엔드포인트가 허용하는 범위에서 늘리세요.
-- **청크 크기.** 기본 `CHUNK_SIZE=1500`자는 bge-m3의 최대 입력 길이보다 훨씬 작아 그대로 써도 됩니다.
-
-### 허깅페이스에 접속할 수 없을 때 (오프라인 모델 준비)
-
-rag-mcp 자체는 `huggingface.co`에 접속하지 않습니다. 키워드 검색의 Kiwi는 `pip` 패키지에 모델이 들어 있고, Qdrant는
-GitHub 릴리스에서 받습니다. 접속이 필요한 것은 **임베딩 서버(TEI, vLLM 등)가 `BAAI/bge-m3` 모델을 처음 내려받을 때**
-뿐입니다. 사내망 등에서 `huggingface.co`가 막혀 있다면, 접속되는 다른 컴퓨터에서 모델 파일을 받아 서버로 옮긴 뒤 로컬
-경로로 띄우세요.
-
-1. **접속되는 컴퓨터에서 모델 내려받기** — 저장소 전체(가중치, `config.json`, `tokenizer.json`, sentence-transformers
-   설정 파일 등)를 그대로 받습니다.
-
-   ```bash
-   python3 -m pip install -U huggingface_hub
-   huggingface-cli download BAAI/bge-m3 --local-dir bge-m3     # 최신 버전에서는 hf download 도 같습니다
-   ```
-
-2. **서버로 옮기기** — 예: `scp -r bge-m3 <서버>:/srv/models/` (USB 등 다른 방법도 됩니다). 저장소 전체는 수 GB입니다.
-3. **로컬 경로로 임베딩 서버 실행** — 모델 이름 대신 디렉터리 경로를 넘기고, 다시 내려받으려 하지 않도록
-   `HF_HUB_OFFLINE=1`을 설정합니다.
-
-   ```bash
-   # TEI: --model-id 에 로컬 디렉터리를 지정
-   HF_HUB_OFFLINE=1 text-embeddings-router --model-id /srv/models/bge-m3 --port 8080
-
-   # vLLM: 경로로 띄우고, 요청에 쓰는 모델 이름을 bge-m3 로 맞춤
-   #       (버전에 따라 임베딩 모드 옵션이 필요합니다. vLLM 문서를 확인하세요)
-   HF_HUB_OFFLINE=1 vllm serve /srv/models/bge-m3 --served-model-name bge-m3 --port 8080
-   ```
-
-4. **rag-mcp 설정은 그대로** — `EMBEDDINGS_BASE_URL=http://localhost:8080`, `EMBEDDINGS_MODEL=bge-m3`. 서버를 재시작하고
-   `rag_health()`에서 임베딩 엔드포인트가 응답하는지 확인한 뒤 `rag-ingest`를 실행하세요.
-
-- 임베딩 서버의 시작 로그에 다운로드 시도나 "파일을 찾을 수 없음" 오류가 보이면, 옮긴 디렉터리에 빠진 파일이 있는
-  것입니다. 일부 파일만 고르지 말고 저장소 전체를 옮기세요.
-- 프록시를 거치면 `huggingface.co`에 접속할 수 있는 환경이라면, 임베딩 서버를 실행할 때 `HTTPS_PROXY`를 지정하는 것으로도
-  충분합니다(rag-mcp 설정 파일의 `HTTPS_PROXY`는 임베딩 서버에는 적용되지 않습니다).
-- 리랭킹(`RERANK_PROVIDER=cohere`)은 기본으로 Cohere의 외부 API(`RERANK_BASE_URL`)에 접속합니다. 외부 접속이 막힌
-  환경에서는 켜지 않거나, 내부에서 접속할 수 있는 Cohere 호환 `/rerank` 서버로 `RERANK_BASE_URL`을 바꾸세요.
+- **리랭커도 다국어 모델이 기본값입니다.** 리랭킹을 켜면(`RERANK_PROVIDER=cohere`) 기본 모델은
+  `rerank-multilingual-v3.0`입니다. 리랭킹은 기본으로 Cohere의 외부 API(`RERANK_BASE_URL`)에 접속하므로, 외부 접속이
+  막힌 환경에서는 사내의 Cohere 호환 `/rerank` 서버로 `RERANK_BASE_URL`을 바꾸거나 끈 채로 두세요.
+- **청크 크기.** 기본 `CHUNK_SIZE=1500`자는 bge-m3의 최대 입력 길이보다 훨씬 작아 그대로 써도 됩니다. 사내 서버의
+  모델이 입력 길이가 짧다면 `CHUNK_SIZE`를 그에 맞게 줄이세요.
+- **속도.** 수집 속도는 사내 서버의 처리량에 달려 있습니다. 서버가 허용하는 범위에서 `EMBED_BATCH_SIZE`를 늘리면
+  빨라집니다.
 
 ## 설정
 
@@ -1011,9 +967,9 @@ GitHub 릴리스에서 받습니다. 접속이 필요한 것은 **임베딩 서�
 | `QDRANT_API_KEY` | _(미설정)_ | Qdrant 인증 키 (설정하면 Qdrant와 rag-mcp가 함께 사용) |
 | `RAG_TIMEOUT_SECONDS` | `30` (서버의 Qdrant 연결) / `60` (임베딩 요청, 수집) | HTTP 타임아웃 (초). 설정하면 모두 이 값을 사용 |
 | **임베딩** | | |
-| `EMBEDDINGS_BASE_URL` | _(없음, 필수)_ | OpenAI 호환 임베딩 엔드포인트 (`/v1`은 자동으로 붙음). 예: `http://localhost:8080`(TEI), `https://api.openai.com` |
-| `EMBEDDINGS_API_KEY` | _(미설정)_ | 엔드포인트 API 키 (비워 두면 인증 헤더를 보내지 않음) |
-| `EMBEDDINGS_MODEL` | `bge-m3` | 임베딩 모델 이름 (엔드포인트가 쓰는 이름에 맞춤) |
+| `EMBEDDINGS_BASE_URL` | _(없음, 필수)_ | 사내 임베딩 서버 주소 — OpenAI 호환 `/v1/embeddings` (`/v1`은 자동으로 붙음). 예: `http://embedding.internal.example:8080` |
+| `EMBEDDINGS_API_KEY` | _(미설정)_ | 사내 임베딩 서버 인증 토큰 (`Authorization: Bearer`로 보냄, 비워 두면 보내지 않음) |
+| `EMBEDDINGS_MODEL` | `bge-m3` | 임베딩 모델 이름 (사내 서버가 쓰는 이름에 맞춤) |
 | `EMBED_QUERY_PREFIX` / `EMBED_DOC_PREFIX` | 자동 (nomic → `search_query: `/`search_document: `, 그 외 → 빈 값) | 자동 감지가 놓치는 비대칭 모델에만 지정 (e5 등 → `query: `/`passage: `) |
 | **수집** | | |
 | `RAG_KNOWLEDGE_DIR` | `~/.local/share/rag-mcp/data/knowledge` | 문서 디렉터리 (`official/`, `draft/`). `rag-ingest`가 수집하고 쓰기 도구·`rag-promote`가 씀 (설치 스크립트가 실제 경로로 바꿔 넣음) |

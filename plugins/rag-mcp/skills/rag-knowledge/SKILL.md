@@ -25,7 +25,7 @@ description: 조직의 지식 베이스(마크다운·PDF 문서)를 rag MCP 서
 | `search_official(query, cluster?, component?, limit?)` | 검토된 정식 문서(`official/`)만 근거로 답해야 할 때 |
 | `search_draft(query, cluster?, component?, limit?)` | 초안(`draft/`)만 볼 때 — 정식 문서에 없는 내용을 찾거나, 쌓인 초안을 확인할 때 |
 | `rag_collections()` | 결과가 계속 비어 있을 때 — 지식 베이스가 채워졌는지 확인 |
-| `rag_health()` | 도구 호출이 실패할 때 — Qdrant와 임베딩 엔드포인트 상태 확인 |
+| `rag_health()` | 도구 호출이 실패할 때 — Qdrant와 사내 임베딩 서버 상태 확인 |
 | `rag_list_documents(folder?, subdir?, limit?)` | "어떤 문서가 있지?", "검토할 초안은?" — 정식 문서(`official/`) 또는 초안(`draft/`) 파일 목록. 자세한 사용법은 `rag-list-documents` 스킬 |
 | `rag_add_document(title, content, ...)` | (켜져 있을 때만) 사용자가 문서 추가를 요청했을 때 — 자세한 사용법은 `rag-add-document` 스킬 |
 | `rag_delete_document(source)` | (켜져 있을 때만) 사용자가 초안(`draft/`) 문서 삭제를 요청했을 때 — 자세한 사용법은 `rag-delete-document` 스킬 |
@@ -97,7 +97,7 @@ description: 조직의 지식 베이스(마크다운·PDF 문서)를 rag MCP 서
 |------|------|
 | `collection ... not found` 오류 | 지식 베이스가 아직 만들어지지 않았습니다. 서버 관리자에게 `rag-ingest` 실행을 안내하세요. |
 | 결과가 항상 비어 있음 | `rag_collections()`로 포인트 수를 확인하세요. 0이면 문서가 수집되지 않은 것입니다. |
-| 임베딩 관련 오류 (`EMBEDDINGS_BASE_URL is not set`, 연결 실패, HTTP 401/404 등) | `rag_health()`로 확인한 뒤, 서버의 임베딩 엔드포인트 설정 문제임을 사용자에게 알리세요. |
+| 임베딩 관련 오류 (`EMBEDDINGS_BASE_URL is not set`, 연결 실패, HTTP 401/404 등) | `rag_health()`로 확인한 뒤, rag-mcp 서버의 사내 임베딩 서버 연결 설정(주소·토큰·모델 이름) 문제임을 사용자에게 알리세요. |
 | 도구 자체가 보이지 않거나 연결 실패 | 서버 주소(환경 변수 `RAG_MCP_URL`이 있으면 그 값, 없으면 플러그인의 `server_url` 설정)와 rag-mcp 서버 실행 여부를 확인하도록 안내하세요 (`/plugin configure rag-mcp@rag-mcp`, `/mcp`). |
 
 ## 문서 추가·삭제 (켜져 있을 때만)

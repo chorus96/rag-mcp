@@ -32,7 +32,7 @@ Wants=qdrant.service
 Type=simple
 WorkingDirectory=%h/.local/share/rag-mcp/app
 
-# 설정 파일 (임베딩 엔드포인트, 포트, 리랭킹 등 모든 설정).
+# 설정 파일 (사내 임베딩 서버, 포트, 리랭킹 등 모든 설정).
 EnvironmentFile=%h/.config/rag-mcp/rag-mcp.env
 # 로그를 버퍼링 없이 바로 journal로 보냅니다.
 Environment=PYTHONUNBUFFERED=1

@@ -215,7 +215,7 @@ cat <<EOF
 설치가 끝났습니다.
 
 다음 단계:
-  1. OpenAI 호환 임베딩 엔드포인트를 설정 파일에 지정한 뒤 재시작:
+  1. 사내 임베딩 서버(OpenAI 호환)를 설정 파일에 지정한 뒤 재시작:
        (EMBEDDINGS_BASE_URL / EMBEDDINGS_API_KEY / EMBEDDINGS_MODEL)
        \${EDITOR:-vi} $ENV_FILE
        systemctl --user restart rag-mcp
