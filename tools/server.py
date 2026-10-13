@@ -1,7 +1,7 @@
 """tools/server.py — rag-mcp MCP 서버.
 
 역할
-  마크다운·PDF 문서로 이루어진 지식 베이스에 대한 검색 도구를
+  마크다운 문서로 이루어진 지식 베이스에 대한 검색 도구를
   MCP(streamable-http)로 제공합니다.
 
 구성

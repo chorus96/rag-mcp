@@ -1,17 +1,15 @@
 """tools/ingest.py 테스트 — 문서 수집.
 
 확인하는 것
-  - 파일 탐색: official/·draft/ 아래에서 .md / .pdf 만 찾고 나머지 확장자는 무시. 두 폴더 밖의 문서는
+  - 파일 탐색: official/·draft/ 아래에서 .md 만 찾고 나머지 확장자(.pdf 등)는 무시. 두 폴더 밖의 문서는
     수집하지 않고 건너뛴 개수를 경고로 알림
   - 문서 유형: 맨 앞 폴더 이름(official / draft). 하위 폴더와 front matter 의 type 은 영향을 주지 않음
-  - PDF 추출: 페이지마다 `# [Page N]` 섹션을 만들어 청킹 후에도 페이지 맥락이 남음,
-    빈 페이지·이미지 전용 PDF는 건너뜀
   - 임베딩 배치: EMBED_BATCH_SIZE 단위로 요청하고, 벡터 순서가 청크 순서와 같음
   - 업서트 배치: 요청당 UPSERT_BATCH_SIZE 포인트를 넘지 않음
   - 오래된 청크 정리: 문서가 줄어들면 남은 뒷부분 청크만 지우고, 실패해도 수집을 멈추지 않음
 
 방법
-  - pypdf, 임베딩, Qdrant 클라이언트를 모두 가짜 객체로 바꿔 실제 PDF나 서버 없이 실행합니다.
+  - 임베딩과 Qdrant 클라이언트를 가짜 객체로 바꿔 서버 없이 실행합니다.
   - 파일이 필요한 테스트는 pytest 임시 폴더를 문서 디렉터리로 쓰고, source 예시는 official/... 경로를 씁니다.
 """
 
@@ -26,22 +24,21 @@ import ingest  # noqa: E402
 
 # --- 파일 탐색 ----------------------------------------------------------------
 
-def test_discover_files_picks_md_and_pdf_only(tmp_path):
+def test_discover_files_picks_md_only(tmp_path):
     (tmp_path / "official").mkdir()
     (tmp_path / "official" / "a.md").write_text("x", encoding="utf-8")
-    (tmp_path / "official" / "b.pdf").write_bytes(b"%PDF-1.4")
-    (tmp_path / "official" / "c.PDF").write_bytes(b"%PDF-1.4")
+    (tmp_path / "official" / "b.MD").write_text("x", encoding="utf-8")
+    (tmp_path / "official" / "c.pdf").write_bytes(b"%PDF-1.4")
     (tmp_path / "official" / "d.txt").write_text("x", encoding="utf-8")
     (tmp_path / "official" / "e.yaml").write_text("x", encoding="utf-8")
 
     found = [p.name for p in ingest._discover_files(tmp_path)]
-    assert found == ["a.md", "b.pdf", "c.PDF"]
-    assert "d.txt" not in found and "e.yaml" not in found
+    assert found == ["a.md", "b.MD"]
 
 
 def test_discover_files_only_official_and_draft(tmp_path, caplog):
     for rel in ("official/a.md", "official/team-a/b.md", "draft/c.md",
-                "notes/old.md", "top.md", "other/x.pdf"):
+                "notes/old.md", "top.md", "other/x.md"):
         (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
         (tmp_path / rel).write_text("x", encoding="utf-8")
 
@@ -64,45 +61,6 @@ def test_doc_type_is_top_folder(tmp_path):
     assert doc_type("draft/team-a/a.md") == "draft"
     # 두 폴더 밖은 수집되지 않지만, 직접 호출하면 unknown 입니다.
     assert doc_type("a.md") == "unknown"
-
-
-# --- PDF 텍스트 추출 ----------------------------------------------------------
-
-class _FakePage:
-    def __init__(self, text):
-        self._text = text
-
-    def extract_text(self):
-        return self._text
-
-
-class _FakePdfReader:
-    def __init__(self, pages):
-        self.pages = pages
-
-
-def _patch_pdf(monkeypatch, pages):
-    import types
-
-    fake = types.SimpleNamespace(PdfReader=lambda _path: _FakePdfReader(pages))
-    monkeypatch.setitem(sys.modules, "pypdf", fake)
-
-
-def test_extract_pdf_text_builds_page_sections(monkeypatch):
-    _patch_pdf(monkeypatch, [_FakePage("Page one body"), _FakePage("Page two body")])
-    text = ingest._extract_pdf_text(Path("unused.pdf"))
-    assert text == "# [Page 1]\nPage one body\n\n# [Page 2]\nPage two body"
-
-
-def test_extract_pdf_text_skips_empty_pages(monkeypatch):
-    _patch_pdf(monkeypatch, [_FakePage("   "), _FakePage("Real text"), _FakePage(None)])
-    text = ingest._extract_pdf_text(Path("unused.pdf"))
-    assert text == "# [Page 2]\nReal text"
-
-
-def test_extract_pdf_text_empty_for_image_only_pdf(monkeypatch):
-    _patch_pdf(monkeypatch, [_FakePage(""), _FakePage(" \n ")])
-    assert ingest._extract_pdf_text(Path("unused.pdf")) == ""
 
 
 # --- 임베딩 배치 --------------------------------------------------------------

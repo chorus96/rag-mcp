@@ -49,7 +49,7 @@ description: rag MCP 서버의 rag_delete_document 도구로 지식 베이스의
 |------|------|
 | `only documents under draft/ can be deleted via MCP` | 정식 문서이거나 `draft/` 밖의 경로입니다. 지울 수 없으니 서버 관리자에게 요청하도록 안내하세요. |
 | `no document found at ...` | 파일도 청크도 없습니다. `rag_list_documents(folder="draft")`로 `source`를 다시 확인하세요. |
-| `only .md or .pdf documents can be deleted` | 문서 파일이 아닙니다. 경로를 다시 확인하세요. |
+| `only .md documents can be deleted` | 문서 파일이 아닙니다. 경로를 다시 확인하세요. |
 | `deleting chunks failed ... (the file was not deleted)` | 청크 삭제에 실패해 파일도 그대로 두었습니다. `rag_health()`로 Qdrant 상태를 확인한 뒤 다시 시도하세요. |
 
 ## 하지 말아야 할 것

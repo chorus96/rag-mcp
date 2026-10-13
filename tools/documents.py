@@ -31,7 +31,7 @@
   - 파일 경로는 서버가 정합니다(draft/ + 제목에서 만든 파일 이름). 호출자가 경로를 지정할 수
     없으므로 문서 디렉터리 밖에 쓸 수 없습니다.
   - 같은 이름의 파일이 있으면 overwrite=True 일 때만 덮어씁니다.
-  - 삭제는 draft/ 안의 .md / .pdf 문서만 대상으로 합니다. 경로를 정규화해 draft/ 밖을
+  - 삭제는 draft/ 안의 .md 문서만 대상으로 합니다. 경로를 정규화해 draft/ 밖을
     가리키면 거부합니다.
   - 본문 크기는 RAG_MAX_DOC_CHARS(기본 200000자)로 제한합니다.
 """
@@ -189,8 +189,8 @@ def delete_document(source: str, client: QdrantClient | None = None) -> dict[str
         return {"status": "error",
                 "error": f"only documents under {DRAFT_SUBDIR}/ can be deleted via MCP: {source}"}
     path, source = resolved
-    if path.suffix.lower() not in (".md", ".pdf"):
-        return {"status": "error", "error": "only .md or .pdf documents can be deleted"}
+    if path.suffix.lower() != ".md":
+        return {"status": "error", "error": "only .md documents can be deleted"}
 
     client = client or _client()
     points = _count_chunks(client, source)
@@ -231,7 +231,7 @@ def _indexed_chunks(client: QdrantClient, sources: list[str]) -> dict[str, int] 
 
 def list_documents(folder: str = OFFICIAL_SUBDIR, subdir: str | None = None, limit: int = 100,
                    client: QdrantClient | None = None) -> dict[str, Any]:
-    """official/ 또는 draft/ 아래 문서(.md/.pdf) 목록을 source 순으로 돌려줍니다 (오류도 status로).
+    """official/ 또는 draft/ 아래 문서(.md) 목록을 source 순으로 돌려줍니다 (오류도 status로).
 
     subdir를 주면 <folder>/<subdir>/ 아래만 봅니다. 항목마다 source, title, doc_type, 크기, 수정 시각과
     색인된 청크 수(chunks; 0이면 아직 색인 전)를 넣습니다. 색인 상태를 알 수 없으면 chunks 는 None입니다.
@@ -257,16 +257,15 @@ def list_documents(folder: str = OFFICIAL_SUBDIR, subdir: str | None = None, lim
         return {"status": "error", "error": f"folder not found: {label}"}
     limit = max(1, min(int(limit or 100), MAX_LIST))
 
-    paths = sorted(p for p in base.rglob("*") if p.is_file() and p.suffix.lower() in (".md", ".pdf"))
+    paths = sorted(p for p in base.rglob("*") if p.is_file() and p.suffix.lower() == ".md")
     kb = KNOWLEDGE_DIR.resolve()
     docs = []
     for path in paths[:limit]:
         meta: dict[str, Any] = {}
-        if path.suffix.lower() == ".md":
-            try:
-                meta, _ = ingest._parse_front_matter(path.read_text(encoding="utf-8"))
-            except Exception as exc:  # noqa: BLE001 - 읽지 못한 파일도 목록에는 넣음
-                log.warning("reading %s failed: %s", path, exc)
+        try:
+            meta, _ = ingest._parse_front_matter(path.read_text(encoding="utf-8"))
+        except Exception as exc:  # noqa: BLE001 - 읽지 못한 파일도 목록에는 넣음
+            log.warning("reading %s failed: %s", path, exc)
         stat = path.stat()
         docs.append({
             "source": str(path.relative_to(kb)).replace(os.sep, "/"),
@@ -293,12 +292,10 @@ def list_drafts() -> list[dict[str, str]]:
     root = _draft_dir()
     if not root.is_dir():
         return drafts
-    for path in sorted(p for p in root.rglob("*") if p.is_file() and p.suffix.lower() in (".md", ".pdf")):
+    for path in sorted(p for p in root.rglob("*") if p.is_file() and p.suffix.lower() == ".md"):
         source = str(path.relative_to(KNOWLEDGE_DIR)).replace(os.sep, "/")
-        title = path.stem
-        if path.suffix.lower() == ".md":
-            meta, _ = ingest._parse_front_matter(path.read_text(encoding="utf-8"))
-            title = str(meta.get("title") or title)
+        meta, _ = ingest._parse_front_matter(path.read_text(encoding="utf-8"))
+        title = str(meta.get("title") or path.stem)
         drafts.append({"source": source, "title": title,
                        "promote_to": f"{OFFICIAL_SUBDIR}/{source[len(DRAFT_SUBDIR) + 1:]}"})
     return drafts
@@ -317,7 +314,7 @@ def promote_document(source: str, overwrite: bool = False,
         return {"status": "error", "source": source,
                 "error": f"source must be a document under {DRAFT_SUBDIR}/ (e.g. {DRAFT_SUBDIR}/foo.md)"}
     path, source = resolved
-    if path.suffix.lower() not in (".md", ".pdf") or not path.is_file():
+    if path.suffix.lower() != ".md" or not path.is_file():
         return {"status": "error", "source": source, "error": f"no draft document found at {source}"}
 
     target_rel = Path(OFFICIAL_SUBDIR) / path.relative_to(_draft_dir().resolve())

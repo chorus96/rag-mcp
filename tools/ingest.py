@@ -1,7 +1,7 @@
 """tools/ingest.py — 문서 수집.
 
 역할
-  마크다운과 PDF 문서를 읽어 청크로 나누고, OpenAI 호환 임베딩
+  마크다운 문서를 읽어 청크로 나누고, OpenAI 호환 임베딩
   엔드포인트로 임베딩한 뒤 Qdrant에 업서트합니다. 사람이 관리하는 정식 문서(official/)를 지식 베이스에
   넣는 정해진 경로입니다. MCP 쓰기 도구(documents.py)와 rag-promote(promote.py)도 파일 하나를 색인할 때
   이 모듈의 ingest_file 을 그대로 씁니다.
@@ -14,14 +14,14 @@
     knowledge/
     ├── official/     정식 문서 — 사람이 넣고 이 명령으로 색인
     └── draft/        초안 — MCP 쓰기 도구가 만들고 바로 색인 (이 명령도 함께 다시 색인)
-  - official/·draft/ 아래의 .md / .pdf 만 수집합니다. 두 폴더 밖의 문서는 건너뛰고 개수를 경고로 알립니다.
+  - official/·draft/ 아래의 .md 만 수집합니다. 두 폴더 밖의 문서는 건너뛰고 개수를 경고로 알립니다.
   - source 는 문서 디렉터리 기준 상대 경로(예: official/foo.md)이고, 포인트 ID와 오래된 청크 정리의
     기준입니다. 그래서 누가 색인하든 root 를 문서 디렉터리로 맞춰야 같은 ID가 나옵니다.
   - 문서 유형(doc_type)은 맨 앞 폴더 이름입니다: official/ → "official", draft/ → "draft".
 
 처리 과정
-  1. 파일 탐색 (.md, .pdf)
-  2. 파싱: 마크다운은 YAML front matter 분리, PDF는 페이지마다 `# [Page N]` 섹션으로 추출
+  1. 파일 탐색 (.md)
+  2. 파싱: YAML front matter 분리
   3. 청킹: 헤딩 기준 섹션 → 크면 문단 단위로 나눔 (각 청크 앞에 헤딩을 붙임)
   4. 임베딩(EMBED_BATCH_SIZE 단위) + BM25 희소 벡터
   5. 업서트(QDRANT_UPSERT_BATCH 단위) → 줄어든 문서의 남은 청크 삭제
@@ -34,7 +34,7 @@
     # 본문 마크다운...
 
   doc_type 은 front matter가 아니라 폴더로 정합니다 (_doc_type). 그래서 승격(draft/ → official/)하면 유형도
-  함께 바뀝니다. PDF에는 front matter가 없으므로 제목은 파일 이름에서 가져옵니다.
+  함께 바뀝니다. front matter에 title 이 없으면 제목은 파일 이름에서 가져옵니다.
 
 멱등성
   청크 ID가 (source, chunk index)에서 정해지므로 다시 실행해도 중복이 생기지 않습니다. 문서를
@@ -71,9 +71,8 @@ import vectorstore
 # `source`는 질의 필터가 아니라 오래된 청크 정리 필터를 위해 색인합니다.
 _INDEXED_FIELDS = ("doc_type", "component", "cluster", "source")
 
-# 수집기가 이해하는 파일 형식: 마크다운(front matter 인식, 섹션 청킹)과
-# PDF(페이지 단위 텍스트 추출). 나머지는 모두 건너뜁니다.
-_SUPPORTED_SUFFIXES = (".md", ".pdf")
+# 수집기가 이해하는 파일 형식: 마크다운(front matter 인식, 섹션 청킹). 나머지는 모두 건너뜁니다.
+_SUPPORTED_SUFFIXES = (".md",)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -91,7 +90,7 @@ CHUNK_OVERLAP = int(os.environ.get("CHUNK_OVERLAP", "100"))
 HTTP_TIMEOUT = float(os.environ.get("RAG_TIMEOUT_SECONDS", "60"))
 
 # 문서별 두 왕복 요청의 배치 크기. 둘 다 HTTP 요청당 작업량을 제한해, 큰 문서
-# 하나(긴 마크다운, 100페이지 PDF)가 지나치게 크고 전부 아니면 전무인 단일 호출이 되지
+# 하나(아주 긴 마크다운)가 지나치게 크고 전부 아니면 전무인 단일 호출이 되지
 # 않게 합니다.
 #
 # EMBED_BATCH_SIZE: 임베딩 요청당 청크 수. 사내 임베딩 서버마다 요청당 입력 개수와 토큰 수에
@@ -189,24 +188,6 @@ def _doc_type(file: Path, root: Path) -> str:
     return top if top in _STAGE_DIRS else "unknown"
 
 
-def _extract_pdf_text(path: Path) -> str:
-    """PDF 텍스트를 비어 있지 않은 페이지마다 `# [Page N]` 섹션 하나로 추출합니다.
-
-    페이지 표시가 마크다운 헤딩이므로 `_chunk_document`가 페이지 맥락을 유지합니다
-    (레이아웃과 읽기 순서는 페이지 경계를 넘으면 거의 유지되지 않지만, 섹션은
-    유지됩니다). 추출할 텍스트가 없는 스캔/이미지 전용 PDF는 ""를 반환합니다.
-    """
-    from pypdf import PdfReader
-
-    reader = PdfReader(str(path))
-    pages = []
-    for i, page in enumerate(reader.pages, start=1):
-        text = (page.extract_text() or "").strip()
-        if text:
-            pages.append(f"# [Page {i}]\n{text}")
-    return "\n\n".join(pages)
-
-
 # --- 임베딩과 Qdrant 쓰기 -----------------------------------------------------
 def _embed_batch(texts: list[str]) -> list[list[float]]:
     """모든 청크의 밀집 벡터를 요청당 EMBED_BATCH_SIZE개 청크씩 만듭니다.
@@ -246,8 +227,8 @@ def _delete_orphan_chunks(client: QdrantClient, source: str, kept: int) -> None:
     """같은 source를 이전에 더 길게 수집했을 때 남은 포인트를 삭제합니다.
 
     포인트 ID는 uuid5(f"{source}#{index}")이므로, 재수집이 멱등적인 것은 문서의
-    청크 수가 줄지 않을 때뿐입니다. 문서를 30개 청크에서 20개로 줄이거나 PDF를 더
-    적은 페이지로 다시 내보내면, 20..29번 청크가 컬렉션에 영원히 남아 오래된 텍스트로
+    청크 수가 줄지 않을 때뿐입니다. 문서를 30개 청크에서 20개로 줄이면,
+    20..29번 청크가 컬렉션에 영원히 남아 오래된 텍스트로
     계속 검색에 걸립니다. 현재 청크가 이미 들어간 뒤가 되도록 업서트 다음에
     실행합니다. 고아 청크는 오래된 검색 결과일 뿐 수집 전체를 중단할 이유는 아니므로
     최선형으로 동작합니다.
@@ -278,7 +259,7 @@ def _ensure_collection(client: QdrantClient, dim: int, recreate: bool) -> None:
 
 # --- 수집 실행 ----------------------------------------------------------------
 def _discover_files(path: Path) -> list[Path]:
-    """`path`의 official/·draft/ 아래 지원되는 (.md/.pdf) 파일. ID가 안정적이도록 정렬합니다.
+    """`path`의 official/·draft/ 아래 지원되는 (.md) 파일. ID가 안정적이도록 정렬합니다.
 
     두 폴더 밖에 있는 문서는 수집하지 않고, 몇 개를 건너뛰었는지 경고로 알립니다.
     """
@@ -301,18 +282,11 @@ def ingest_file(client: QdrantClient, file: Path, root: Path, *, ensure: bool = 
     누가 수집하든(rag-ingest, MCP 쓰기 도구) 같은 포인트 ID를 갖습니다. `ensure`가 참이면 컬렉션이
     없을 때 만들고, `recreate`가 참이면 기존 컬렉션을 지우고 새로 만듭니다.
     """
-    if file.suffix.lower() == ".pdf":
-        meta: dict[str, Any] = {}
-        body = _extract_pdf_text(file)
-        if not body:
-            log.warning("skipping PDF with no extractable text %s", file)
-            return 0
-    else:
-        raw = file.read_text(encoding="utf-8")
-        meta, body = _parse_front_matter(raw)
-        if not body:
-            log.warning("skipping empty file %s", file)
-            return 0
+    raw = file.read_text(encoding="utf-8")
+    meta, body = _parse_front_matter(raw)
+    if not body:
+        log.warning("skipping empty file %s", file)
+        return 0
 
     doc_type = _doc_type(file, root)
     source = str(file.relative_to(root)).replace(os.sep, "/")
@@ -353,7 +327,7 @@ def ingest_file(client: QdrantClient, file: Path, root: Path, *, ensure: bool = 
 def ingest(path: Path, recreate: bool) -> None:
     files = _discover_files(path)
     if not files:
-        log.warning("no .md or .pdf files found under %s/{official,draft}", path)
+        log.warning("no .md files found under %s/{official,draft}", path)
         return
 
     client = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY, timeout=HTTP_TIMEOUT)
@@ -373,11 +347,11 @@ def ingest(path: Path, recreate: bool) -> None:
 
 # --- 명령줄 -------------------------------------------------------------------
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Ingest markdown/PDF docs into the Qdrant knowledge base.")
+    parser = argparse.ArgumentParser(description="Ingest markdown docs into the Qdrant knowledge base.")
     parser.add_argument(
         "--path",
         default="./knowledge",
-        help="Knowledge directory; .md and .pdf files under its official/ and draft/ are ingested "
+        help="Knowledge directory; .md files under its official/ and draft/ are ingested "
              "(default: ./knowledge).",
     )
     parser.add_argument(

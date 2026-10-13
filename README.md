@@ -1,6 +1,6 @@
 # rag-mcp
 
-**AI 어시스턴트용 RAG 메모리 서버**입니다. 마크다운·PDF 문서를 색인해 두고, [Model Context Protocol](https://modelcontextprotocol.io)(MCP)로
+**AI 어시스턴트용 RAG 메모리 서버**입니다. 마크다운 문서를 색인해 두고, [Model Context Protocol](https://modelcontextprotocol.io)(MCP)로
 검색 도구를 제공합니다. Claude Code, Claude Desktop 등 MCP를 지원하는 클라이언트라면
 어디서든 "이 작업은 어떻게 하지?", "관련 문서에는 뭐라고 되어 있지?" 같은 질문에 여러분의 문서를 근거로
 답하게 할 수 있습니다. AI 에이전트는 작업하면서 필요할 때마다 관련 문서를 직접 찾아 씁니다(에이전틱 검색,
@@ -17,7 +17,7 @@ agentic retrieval).
   rag-mcp가 직접 실행하지 않으므로 모델 파일을 준비할 필요가 없습니다.
 - **한국어 지원** — 기본 임베딩 모델은 다국어 모델 `bge-m3`, 키워드 검색(BM25)은 한국어 형태소 분석기 Kiwi로
   조사·어미를 떼어 단어를 맞추고, 기본 리랭커도 다국어 모델입니다.
-- **마크다운 + PDF 수집** — YAML front matter, 헤딩 기준 청킹, 멱등(idempotent) 재실행을 지원합니다.
+- **마크다운 수집** — YAML front matter, 헤딩 기준 청킹, 멱등(idempotent) 재실행을 지원합니다.
 - **간단한 설치** — Linux + systemd 서버에 스크립트 하나로 설치합니다. root 권한이 필요 없습니다.
 - **Claude Code 플러그인** — 이 저장소 자체가 플러그인 마켓플레이스입니다.
 
@@ -46,7 +46,7 @@ agentic retrieval).
 ```
                        WRITE PATH — populate the KB
   ┌───────────────────────────┐
-  │       knowledge/**        │   your markdown & PDF docs,
+  │       knowledge/**        │   your markdown docs,
   │    official/ · draft/     │   optional YAML front matter
   └─────────────┬─────────────┘
                 │
@@ -55,7 +55,7 @@ agentic retrieval).
   │        rag-ingest         │  chunks    │  in-house embedding server  │
   │  · parses front matter    │───────────►│      OpenAI-compatible      │
   │  · heading-aware chunks   │            │        /v1/embeddings       │
-  │    (PDF pages = sections) │◄───────────│    (not part of rag-mcp)    │
+  │  · Kiwi BM25 vectors      │◄───────────│    (not part of rag-mcp)    │
   │  · idempotent upserts,    │  vectors   └──────────────▲──────────────┘
   │    stale-tail cleanup     │                           │
   └─────────────┬─────────────┘                           │  the SAME
@@ -426,8 +426,8 @@ RAG_MCP_URL=http://10.0.0.5:8084/mcp claude
 처리 과정과 설계 (`documents.list_documents`):
 
 1. `folder`가 `official`/`draft`인지, `subdir`를 정규화했을 때 그 폴더 안인지 확인합니다.
-2. 폴더 아래의 `.md`/`.pdf`를 경로 순으로 모으고, 앞에서부터 `limit`개만 자세히 읽습니다.
-3. 마크다운은 front matter에서 `title`을 읽고, `doc_type`은 수집과 같은 규칙(`ingest._doc_type`, 폴더 이름)으로
+2. 폴더 아래의 `.md`를 경로 순으로 모으고, 앞에서부터 `limit`개만 자세히 읽습니다.
+3. front matter에서 `title`을 읽고, `doc_type`은 수집과 같은 규칙(`ingest._doc_type`, 폴더 이름)으로
    정합니다.
 4. 돌려줄 `source`들로 Qdrant **facet**(`source` 키, `MatchAny` 필터)을 한 번 호출해 문서별 청크 수를 셉니다.
 
@@ -476,7 +476,7 @@ knowledge/
 
 ### 정식 문서 추가하기
 
-`official/`에 마크다운(`.md`)이나 PDF(`.pdf`)를 넣고 수집 명령을 실행합니다. 서버 재시작은 필요 없습니다.
+`official/`에 마크다운(`.md`) 파일을 넣고 수집 명령을 실행합니다. 서버 재시작은 필요 없습니다.
 
 ```bash
 cp my-doc.md ~/.local/share/rag-mcp/data/knowledge/official/
@@ -486,7 +486,7 @@ rag-ingest --recreate           # 컬렉션을 지우고 전체 재구축
 
 - `rag-ingest`는 서버와 같은 설정 파일을 읽으므로, 서버와 정확히 같은 임베딩 설정을 사용합니다.
 - 요약 줄 `done: N file(s), M chunk(s)`가 예상과 맞는지 확인하세요. 문서가 빠졌다면 그 위의 로그에
-  이유(두 폴더 밖의 문서, 지원하지 않는 확장자, 빈 파일, 텍스트 없는 PDF)가 나옵니다.
+  이유(두 폴더 밖의 문서, 지원하지 않는 확장자, 빈 파일)가 나옵니다.
 - 정기적으로 수집하려면 cron이나 systemd 타이머에 등록하세요.
 
 ```cron
@@ -496,10 +496,8 @@ rag-ingest --recreate           # 컬렉션을 지우고 전체 재구축
 
 ### 문서 형식
 
-- **마크다운** — 선택적인 YAML front matter를 지원합니다.
-- **PDF** — 페이지 단위로 텍스트를 추출하고, 각 페이지를 `# [Page N]` 섹션으로 만듭니다. front matter가
-  없으므로 제목은 파일 이름에서 가져옵니다. 텍스트를 추출할 수 없는 스캔 PDF는
-  건너뜁니다.
+마크다운(`.md`) 파일만 수집합니다. 선택적인 YAML front matter를 지원합니다. 다른 형식(PDF, Word 등)은
+마크다운으로 바꿔서 넣으세요.
 
 ```markdown
 ---
@@ -649,7 +647,7 @@ component: longhorn
 - **삭제는 파일과 청크를 함께 지웁니다.** 파일이 이미 없고 청크만 남아 있어도 청크를 정리하므로, 파일을 지우거나
   이름을 바꾼 뒤 남은 청크를 없앨 때도 쓸 수 있습니다.
 - **삭제 범위를 제한합니다.** `source`는 문서 디렉터리 기준 상대 경로여야 하고, 정규화했을 때 `draft/` 안이어야
-  합니다(절대 경로, `draft/` 밖, `..`로 빠져나가는 경로는 거부). `.md`/`.pdf` 문서만 지울 수 있습니다.
+  합니다(절대 경로, `draft/` 밖, `..`로 빠져나가는 경로는 거부). `.md` 문서만 지울 수 있습니다.
 - **청크 삭제에 실패하면 파일은 지우지 않습니다.** 파일만 사라지고 청크가 검색에 남는 상태를 피하기 위해서입니다.
 
 ### 초안 승격 (`rag-promote`)
@@ -665,7 +663,7 @@ rag-promote --overwrite draft/...              # 정식 위치에 같은 이름�
 
 | 단계 | 동작 |
 |------|------|
-| 1. 확인 | `source`가 `draft/` 안의 `.md`/`.pdf` 파일인지 확인. 정식 위치에 문서가 있으면 `--overwrite` 없이는 중단 |
+| 1. 확인 | `source`가 `draft/` 안의 `.md` 파일인지 확인. 정식 위치에 문서가 있으면 `--overwrite` 없이는 중단 |
 | 2. 복사 | 초안을 정식 위치(`draft/`를 `official/`로 바꾼 같은 경로)에 복사. 덮어쓸 때는 기존 내용을 메모리에 백업 |
 | 3. 색인 | 정식 위치를 `ingest_file`로 색인 (`rag-ingest`와 같은 청크 ID) |
 | 4. 정리 | 초안의 청크와 파일을 삭제 |
@@ -712,7 +710,7 @@ Qdrant 컬렉션 하나(기본 이름 `rag_kb`)에 모든 문서를 저장합니
 
 ### 배치 처리
 
-큰 문서(예: 100페이지 PDF)는 청크 수백 개가 되고, 각 청크가 밀집 벡터·희소 벡터·텍스트를 담고 있어
+큰 문서(예: 아주 긴 마크다운)는 청크 수백 개가 되고, 각 청크가 밀집 벡터·희소 벡터·텍스트를 담고 있어
 한 번에 보내면 수 메가바이트가 됩니다. 그래서 요청을 나눕니다.
 
 | 단계 | 요청당 크기 | 설정 |
@@ -1072,7 +1070,7 @@ curl -s http://localhost:6333/collections/rag_kb | grep -o '"size":[0-9]*'
 - 문서를 삭제하거나 이름을 바꾸면 이전 청크가 남습니다 → `rag-ingest --recreate`로 재구축하세요(`draft/` 문서라면
   `rag_delete_document`로도 정리됩니다).
 - 키워드 검색의 한국어 형태소 분석은 사전 기반이라, 사전에 없는 신조어나 붙여 쓴 복합어는 다르게 나뉠 수 있습니다.
-- 스캔(이미지) PDF는 OCR을 하지 않으므로 수집되지 않습니다.
+- 마크다운(`.md`)만 수집합니다. PDF 등 다른 형식은 마크다운으로 바꿔서 넣어야 합니다.
 - 하이브리드 검색의 `score`는 RRF 결합 점수라서, 코사인 유사도처럼 임계값을 정하는 데 쓸 수 없습니다.
 - 같은 서버에서는 rag-mcp를 하나만 실행할 수 있습니다. Qdrant 포트(6333, 6334)가 systemd 유닛에 고정되어
   있기 때문입니다.
@@ -1082,7 +1080,7 @@ curl -s http://localhost:6333/collections/rag_kb | grep -o '"size":[0-9]*'
 | 경로 | 내용 |
 |------|------|
 | [`tools/server.py`](tools/server.py) | FastMCP 서버. 읽기 도구 6개(검색 3개, 상태 확인 2개, 문서 목록)와 선택적 쓰기 도구 2개를 제공 |
-| [`tools/ingest.py`](tools/ingest.py) | 마크다운/PDF 문서를 읽어 청크로 나누고 임베딩해 Qdrant에 업서트 (`rag-ingest`) |
+| [`tools/ingest.py`](tools/ingest.py) | 마크다운 문서를 읽어 청크로 나누고 임베딩해 Qdrant에 업서트 (`rag-ingest`) |
 | [`tools/documents.py`](tools/documents.py) | 문서 디렉터리 로직: 문서 목록, MCP 쓰기 도구의 추가·삭제, `rag-promote`의 목록·승격 |
 | [`tools/promote.py`](tools/promote.py) | 초안 승격 명령 `rag-promote` (사람 전용, MCP 도구 아님) |
 | [`tools/embeddings.py`](tools/embeddings.py) | OpenAI 호환 임베딩 호출, 비대칭 모델 접두사 처리 |

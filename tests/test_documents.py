@@ -18,7 +18,7 @@
   - 초안 승격(rag-promote): draft/<경로> → official/<경로> 로 옮겨 색인하고 초안을 정리, official/ 의 기존 문서는
     --overwrite 로만 바꿈, 색인 실패 시 official/ 을 되돌림, 목록에는 draft/ 문서만 나옴, MCP 도구로는 노출되지 않음
   - 도구 등록: RAG_MCP_WRITE 가 꺼져 있으면 쓰기 도구(추가·삭제)가 MCP 도구 목록에 없음
-  - 문서 목록(rag_list_documents): official/ 또는 draft/ 의 .md/.pdf 만 source 순으로, 제목·유형·색인된 청크 수와 함께
+  - 문서 목록(rag_list_documents): official/ 또는 draft/ 의 .md 만 source 순으로, 제목·유형·색인된 청크 수와 함께
     돌려줌. subdir·limit 처리, official/ 밖 거부, Qdrant 실패 시에도 목록은 돌려줌(chunks=None), 항상 등록됨.
     초안에는 promote_to, draft/ 가 없으면 빈 목록, official·draft 외 folder 는 거부
 
@@ -385,8 +385,9 @@ def _official(tmp_path):
     docs = {
         "official/a.md": "---\ntitle: 문서 A\ntype: legacy\n---\nbody\n",  # type 은 무시됨
         "official/team-a/b.md": "---\ntitle: 문서 B\n---\nbody\n",
-        "official/c.pdf": "%PDF-1.4",
+        "official/c.md": "body without front matter\n",  # 제목은 파일 이름
         "official/notes.txt": "x",
+        "official/old.pdf": "%PDF-1.4",  # .md 가 아니므로 제외
         "draft/d.md": "---\ntitle: 초안 D\n---\nbody\n",
     }
     for rel, text in docs.items():
@@ -401,18 +402,18 @@ def test_list_documents_lists_documents_with_index_state(monkeypatch, tmp_path):
     out = documents.list_documents(client=q)
     assert out["status"] == "ok" and out["folder"] == "official/"
     assert out["total"] == 3 and out["truncated"] is False
-    # .md/.pdf 만, source 순. draft/ 와 다른 확장자는 없음.
+    # .md 만, source 순. draft/ 와 다른 확장자는 없음.
     rows = [(d["source"], d["title"], d["doc_type"], d["chunks"]) for d in out["documents"]]
     assert rows == [
         ("official/a.md", "문서 A", "official", 4),       # 유형은 폴더 이름 (front matter type 무시)
-        ("official/c.pdf", "c", "official", 0),            # 색인 전 → 0
+        ("official/c.md", "c", "official", 0),             # 색인 전 → 0
         ("official/team-a/b.md", "문서 B", "official", 0),  # 하위 폴더여도 official
     ]
     assert all(d["size_bytes"] > 0 and d["modified"].endswith("+00:00") for d in out["documents"])
     # 청크 수는 목록에 나온 source 만 대상으로 한 번에 셉니다.
     key, limit, flt = q.calls[0]
     assert key == "source" and limit == 3 and len(q.calls) == 1
-    assert sorted(flt.must[0].match.any) == ["official/a.md", "official/c.pdf", "official/team-a/b.md"]
+    assert sorted(flt.must[0].match.any) == ["official/a.md", "official/c.md", "official/team-a/b.md"]
 
 
 def test_list_documents_subdir_and_limit(monkeypatch, tmp_path):
