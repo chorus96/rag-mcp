@@ -2,8 +2,8 @@
 # rag-mcp.service — rag-mcp MCP 서버 (systemctl --user)
 # =============================================================================
 # 검색 도구를 http://<서버 주소>:${MCP_PORT}/mcp (streamable-http)로 제공합니다.
-# 도구는 모두 읽기 전용입니다. 서버는 rag-ingest 가 색인한 내용(Qdrant)만 검색하고, 문서 디렉터리
-# (RAG_KNOWLEDGE_DIR)는 읽지도 쓰지도 않습니다.
+# 도구는 모두 읽기 전용입니다. 서버는 문서 디렉터리(RAG_KNOWLEDGE_DIR)를 사용하지 않습니다. 검색은
+# rag-ingest 가 만든 Qdrant 색인만 쓰며, 검색 결과의 본문도 색인에 저장된 사본입니다.
 #
 # 설치 위치: ~/.config/systemd/user/rag-mcp.service  (deploy/install.sh가 복사)
 # 관리:      systemctl --user status rag-mcp / journalctl --user -u rag-mcp -f

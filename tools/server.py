@@ -9,8 +9,9 @@
   - MCP 도구: rag_search, rag_collections, rag_health
 
 문서 디렉터리 (RAG_KNOWLEDGE_DIR)
-  사람이 관리하는 문서를 official/ 아래에 둡니다. 서버는 문서 디렉터리를 읽지도 쓰지도 않고 Qdrant만
-  검색합니다. 결과의 source(예: official/foo.md)가 원본 문서의 경로입니다.
+  사람이 관리하는 문서를 official/ 아래에 둡니다. 서버는 문서 디렉터리를 사용하지 않습니다. 검색은
+  rag-ingest 가 만든 Qdrant 색인만 쓰며, 검색 결과의 본문도 색인에 저장된 사본입니다. 결과의
+  source(예: official/foo.md)가 원본 문서의 경로입니다.
 
 설계 원칙
   - 읽기 전용: MCP 도구는 검색만 합니다. 모델은 지식 베이스를 바꿀 수 없고, 기록은 사람이 rag-ingest
