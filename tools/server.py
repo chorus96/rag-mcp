@@ -5,7 +5,7 @@
   MCP(streamable-http)로 제공합니다.
 
 구성
-  - 공통 검색 경로 `_search`: 질의 임베딩 → 하이브리드 검색 → (선택) 리랭킹 → 응답 구성
+  - 검색 경로 `_search` (rag_search): 질의 임베딩 → 하이브리드 검색 → (선택) 리랭킹 → 응답 구성
   - MCP 도구: rag_search, rag_collections, rag_health
 
 문서 디렉터리 (RAG_KNOWLEDGE_DIR)
