@@ -877,9 +877,10 @@ ERROR rag-ingest not ingesting: re-saving chunks without keyword vectors would d
   다시 만든 뒤 rag-mcp를 재시작하세요.
 - 반대로 키워드 벡터 없이 만든 컬렉션에 하이브리드로 수집하려 해도 멈춥니다. 이때는 `rag-ingest --recreate`로
   키워드 벡터와 함께 다시 만드세요.
-- `--recreate`는 컬렉션을 새로 만들므로 이 검사를 하지 않습니다. Kiwi를 불러오지 못한 채 `--recreate`하면
-  키워드 벡터 없는 컬렉션이 만들어지고, Kiwi가 정상인 서버로 검색하면 위 표의 `bm25` 오류가 납니다.
-  `--recreate` 전에는 수집 로그의 첫 줄 근처에 `hybrid search enabled`가 나오는지 확인하세요.
+- **컬렉션을 새로 만들 때는 이 검사를 하지 않습니다**(`--recreate`, 또는 처음 수집이라 컬렉션이 없을 때). Kiwi를
+  불러오지 못한 채 새로 만들면 키워드 벡터 없는 컬렉션이 만들어지고, 나중에 Kiwi가 정상인 서버로 검색하면 위 표의
+  `bm25` 오류가 납니다. 컬렉션을 새로 만들 때는 수집 로그에 `hybrid search enabled`(또는
+  `created collection ... hybrid=True`)가 나오는지 확인하세요.
 
 ### 개념 정리
 
