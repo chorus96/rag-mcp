@@ -805,6 +805,94 @@ systemctl --user restart rag-mcp
 - 프록시(`HTTPS_PROXY`/`NO_PROXY`)와 사설 CA(`SSL_CERT_FILE`) 설정은 임베딩 서버와 같이 적용됩니다
   ([설정 예시](#설정-예시) ③, ⑥).
 
+### 리랭커 설정 예시
+
+모두 설정 파일 `~/.config/rag-mcp/rag-mcp.env`에 적고, 바꾼 뒤에는 `systemctl --user restart rag-mcp`로 재시작합니다.
+리랭커는 질의할 때만 쓰므로 `rag-ingest`는 다시 실행하지 않아도 됩니다. 같은 줄 끝에 주석을 달지 마세요.
+
+**① 기본 — 인증 없는 사내 리랭커**
+
+```bash
+RERANK_BASE_URL=http://rerank.internal.example:8080
+RERANK_API_KEY=
+RERANK_MODEL=bge-reranker-v2-m3
+```
+
+요청 주소: `http://rerank.internal.example:8080/v1/rerank`
+
+**② API 게이트웨이 경로 아래에 있고 토큰 인증을 쓰는 리랭커**
+
+```bash
+# 주소가 /v1 로 끝나면 /rerank 만 붙습니다
+RERANK_BASE_URL=https://ai-gateway.internal.example/rerank/v1
+# Authorization: Bearer <토큰> 으로 보냅니다
+RERANK_API_KEY=사내-발급-토큰
+RERANK_MODEL=bge-reranker-v2-m3
+```
+
+요청 주소: `https://ai-gateway.internal.example/rerank/v1/rerank`. 토큰이 들어 있으므로 설정 파일 권한(`600`)을 그대로
+두세요. 임베딩 서버와 같은 게이트웨이를 쓰더라도 토큰은 `EMBEDDINGS_API_KEY`와 따로 적어야 합니다.
+
+**③ `/v1` 없이 `/rerank` 경로만 제공하는 리랭커**
+
+```bash
+# 주소가 /rerank 로 끝나면 아무것도 붙이지 않고 그대로 씁니다
+RERANK_BASE_URL=http://rerank.internal.example:7997/rerank
+RERANK_MODEL=BAAI/bge-reranker-v2-m3
+```
+
+서빙 도구나 설정에 따라 경로(`/rerank`, `/v1/rerank`, `/v2/rerank`)와 모델 이름 표기(`BAAI/...` 포함 여부)가
+다릅니다. 확실하지 않으면 [리랭커 연결 확인](#리랭커-연결-확인)의 curl로 실제 경로와 모델 이름을 먼저 확인하고, 전체
+경로를 그대로 적으세요.
+
+**④ 사내 인증서(사설 CA)를 쓰는 HTTPS 리랭커**
+
+```bash
+RERANK_BASE_URL=https://rerank.internal.example
+RERANK_MODEL=bge-reranker-v2-m3
+# 임베딩 서버와 같은 설정입니다. 두 서버의 인증서를 발급한 CA가 모두 들어 있어야 합니다
+SSL_CERT_FILE=/etc/pki/tls/certs/internal-ca-bundle.pem
+```
+
+**⑤ 응답이 느린 리랭커 — 후보 수와 대기 시간 조절**
+
+```bash
+RERANK_BASE_URL=http://rerank.internal.example:8080
+RERANK_MODEL=bge-reranker-v2-m3
+# 질의마다 보내는 후보 수 (기본 30). 줄이면 빨라지지만 리랭커가 고를 후보도 줄어듭니다
+RERANK_CANDIDATES=15
+# 이 시간이 지나면 리랭킹을 포기하고 원래 순서로 돌려줍니다 (기본 30초)
+RERANK_TIMEOUT=5
+```
+
+리랭킹 시간만큼 모든 검색이 늦어집니다. 리랭커가 느리거나 자주 멈춘다면 `RERANK_TIMEOUT`을 짧게 잡아, 실패해도
+검색 응답이 오래 걸리지 않게 하세요. `RERANK_CANDIDATES`는 `limit`(기본 5, 최대 20)보다 크게 두어야 리랭킹의
+효과가 있습니다.
+
+**⑥ 임베딩 서버와 리랭커를 함께 쓰는 전체 예**
+
+```bash
+EMBEDDINGS_BASE_URL=http://ai.internal.example:8000
+EMBEDDINGS_MODEL=bge-m3
+RERANK_BASE_URL=http://ai.internal.example:8001
+RERANK_MODEL=bge-reranker-v2-m3
+HTTPS_PROXY=http://proxy.internal.example:3128
+# 사내 서버와 같은 서버의 Qdrant는 프록시를 거치지 않게 합니다
+NO_PROXY=localhost,127.0.0.1,.internal.example
+```
+
+임베딩과 리랭커는 주소·토큰·모델을 각각 따로 설정합니다. 두 서버가 같은 호스트에 있어도 포트나 경로가 다르면
+각자 적어야 합니다. 프록시와 인증서 설정은 두 서버에 함께 적용됩니다.
+
+**⑦ 리랭킹 끄기**
+
+```bash
+# 비우거나 줄을 지우면 꺼집니다 (RERANK_MODEL 등 나머지 값은 무시됨)
+RERANK_BASE_URL=
+```
+
+재시작하면 시작 로그에 `rerank=off`가 나오고, 검색 결과는 하이브리드 검색 순서 그대로 나옵니다.
+
 ### 리랭커 연결 확인
 
 ```bash
