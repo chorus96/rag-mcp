@@ -588,9 +588,9 @@ journalctl --user -u rag-mcp | grep -E 'sparse model|hybrid'
 | 리랭커 (reranker) | `(질의, 청크)` 쌍의 순서를 다시 매기는 크로스 인코더 | 사내 리랭커 (`bge-reranker-v2-m3` 등) |
 | 비대칭 접두사 | 질의와 문서에 서로 다른 작업 태그를 붙이는 방식 | e5·nomic 계열은 필요, bge-m3는 불필요 |
 
-> ℹ️ **임베딩 모델은 여러분의 데이터로 학습되지 않습니다.** 사전 학습된 모델이 일반적인 의미 지식으로
-> 텍스트를 숫자로 바꿀 뿐입니다. 조직이나 업계 고유의 맥락은 Qdrant에 수집한 **문서**와
-> 리랭커에서 나옵니다.
+> ℹ️ **임베딩 모델과 리랭커는 여러분의 데이터로 학습되지 않습니다.** 사전 학습된 모델이 일반적인 의미
+> 지식으로 텍스트를 숫자로 바꾸거나 순서를 매길 뿐입니다. 조직이나 업계 고유의 맥락은 Qdrant에 수집한
+> **문서**에서 나옵니다.
 
 ## 사내 임베딩 서버 연결
 
@@ -911,6 +911,12 @@ curl -s http://rerank.internal.example:8080/v1/rerank \
 | `EMBEDDINGS_API_KEY` | _(미설정)_ | 사내 임베딩 서버 인증 토큰 (`Authorization: Bearer`로 보냄, 비워 두면 보내지 않음) |
 | `EMBEDDINGS_MODEL` | `bge-m3` | 임베딩 모델 이름 (사내 서버가 쓰는 이름에 맞춤) |
 | `EMBED_QUERY_PREFIX` / `EMBED_DOC_PREFIX` | 자동 (nomic → `search_query: `/`search_document: `, 그 외 → 빈 값) | 자동 감지가 놓치는 비대칭 모델에만 지정 (e5 등 → `query: `/`passage: `) |
+| **리랭킹** | | |
+| `RERANK_BASE_URL` | _(없음, 필수)_ | 사내 리랭커 주소. 뒤에 `/v1/rerank`가 자동으로 붙음 (`/v1`·`/v2`로 끝나면 `/rerank`만, `/rerank`로 끝나면 그대로) |
+| `RERANK_MODEL` | `bge-reranker-v2-m3` | 사내 리랭커의 모델 이름 |
+| `RERANK_API_KEY` | _(미설정)_ | 사내 리랭커 인증 토큰 (`Authorization: Bearer`로 보냄, 비워 두면 보내지 않음) |
+| `RERANK_CANDIDATES` | `30` | 리랭킹 전에 가져오는 후보 수 |
+| `RERANK_TIMEOUT` | `30` | 리랭커 HTTP 타임아웃 (초) |
 | **수집** | | |
 | `RAG_KNOWLEDGE_DIR` | `~/.local/share/rag-mcp/data/knowledge` | 문서 디렉터리 (`official/`). `rag-ingest`가 수집 (설치 스크립트가 실제 경로로 바꿔 넣음) |
 | `CHUNK_SIZE` / `CHUNK_OVERLAP` | `1500` / `100` | 청크 크기와 겹침 (글자 수) |
@@ -920,12 +926,6 @@ curl -s http://rerank.internal.example:8080/v1/rerank \
 | `RAG_HYBRID` | `true` | 하이브리드 검색(밀집 + BM25). 바꾸면 `--recreate` 필요 |
 | `RAG_DEFAULT_LIMIT` / `RAG_MAX_LIMIT` | `5` / `20` | 검색 결과 기본 개수 / 최대 개수 |
 | `RAG_SNIPPET_CHARS` | `1200` | 결과마다 반환하는 텍스트의 최대 글자 수 (넘으면 `truncated: true`) |
-| **리랭킹** | | |
-| `RERANK_BASE_URL` | _(없음 — 필수)_ | 사내 리랭커 주소. 뒤에 `/v1/rerank`가 자동으로 붙음 (`/v1`·`/v2`로 끝나면 `/rerank`만, `/rerank`로 끝나면 그대로) |
-| `RERANK_MODEL` | `bge-reranker-v2-m3` | 사내 리랭커의 모델 이름 |
-| `RERANK_API_KEY` | _(미설정)_ | 인증 토큰 (`Authorization: Bearer`로 보냄) |
-| `RERANK_CANDIDATES` | `30` | 리랭킹 전에 가져오는 후보 수 |
-| `RERANK_TIMEOUT` | `30` | 리랭커 HTTP 타임아웃 (초) |
 
 > 설정 파일에서는 `KEY=value  # 주석`처럼 같은 줄 끝에 주석을 달지 마세요. systemd의 `EnvironmentFile`은
 > 주석까지 값으로 읽습니다. 주석은 항상 별도 줄에 쓰세요.
