@@ -45,6 +45,7 @@ import uuid
 from pathlib import Path
 
 from qdrant_client import QdrantClient
+from qdrant_client.http.exceptions import ApiException, ResponseHandlingException
 from qdrant_client.models import (
     FieldCondition,
     Filter,
@@ -253,7 +254,12 @@ def ingest_file(client: QdrantClient, file: Path, root: Path, *, ensure: bool = 
     언제 수집하든 같은 포인트 ID를 갖습니다. `ensure`가 참이면 컬렉션이
     없을 때 만들고, `recreate`가 참이면 기존 컬렉션을 지우고 새로 만듭니다.
     """
-    body = file.read_text(encoding="utf-8").strip()
+    try:
+        body = file.read_text(encoding="utf-8").strip()
+    except (OSError, UnicodeDecodeError) as exc:
+        # 파일 하나를 읽지 못했다고 전체 수집을 멈추지 않습니다(빈 파일처럼 건너뜀).
+        log.warning("skipping unreadable file %s (%s)", file, exc)
+        return 0
     if not body:
         log.warning("skipping empty file %s", file)
         return 0
@@ -305,8 +311,12 @@ def ingest(path: Path, recreate: bool) -> None:
         except Exception as exc:  # noqa: BLE001 - 어느 파일에서 멈췄는지 알리고 종료 코드 1로 끝냄
             # 임베딩 서버나 Qdrant 장애: 이 파일에서 멈춥니다. 앞선 파일은 이미 저장됐으므로,
             # 원인을 고친 뒤 rag-ingest 를 다시 실행하면 됩니다(멱등).
-            what, fix = (("embedding", "the embeddings server") if isinstance(exc, embeddings.EmbeddingError)
-                         else ("qdrant", "Qdrant"))
+            if isinstance(exc, embeddings.EmbeddingError):
+                what, fix = "embedding", "the embeddings server"
+            elif isinstance(exc, (ApiException, ResponseHandlingException)):
+                what, fix = "qdrant", "Qdrant"
+            else:
+                what, fix = "ingest", "the problem"
             log.error("%s failed for %s: %s", what, file.relative_to(path), exc)
             log.error("stopped after %d of %d file(s); fix %s and run rag-ingest again%s",
                       done, len(files), fix, " (with --recreate)" if recreate else "")

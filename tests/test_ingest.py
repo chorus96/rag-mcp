@@ -222,8 +222,10 @@ def test_ingest_stops_cleanly_on_qdrant_error(monkeypatch, tmp_path, caplog):
     (tmp_path / "official").mkdir()
     (tmp_path / "official" / "a.md").write_text("# a", encoding="utf-8")
 
+    from qdrant_client.http.exceptions import ResponseHandlingException
+
     def fake_ingest_file(client, file, root, **kw):
-        raise ConnectionRefusedError("[Errno 111] Connection refused")
+        raise ResponseHandlingException(ConnectionRefusedError("[Errno 111] Connection refused"))
 
     monkeypatch.setattr(ingest, "ingest_file", fake_ingest_file)
     monkeypatch.setattr(ingest, "QdrantClient", lambda **kw: object())
@@ -232,3 +234,27 @@ def test_ingest_stops_cleanly_on_qdrant_error(monkeypatch, tmp_path, caplog):
         ingest.ingest(tmp_path, recreate=True)
     assert "qdrant failed for official/a.md" in caplog.text
     assert "stopped after 0 of 1 file(s); fix Qdrant and run rag-ingest again (with --recreate)" in caplog.text
+
+
+def test_unreadable_file_is_skipped(monkeypatch, tmp_path, caplog):
+    doc = tmp_path / "official" / "bad.md"
+    doc.parent.mkdir()
+    doc.write_bytes(b"\xff\xfe# bad")                 # UTF-8 이 아님
+    assert ingest.ingest_file(object(), doc, tmp_path, ensure=False) == 0
+    assert "skipping unreadable file" in caplog.text
+
+
+def test_other_errors_are_not_labelled_qdrant(monkeypatch, tmp_path, caplog):
+    (tmp_path / "official").mkdir()
+    (tmp_path / "official" / "a.md").write_text("# a", encoding="utf-8")
+
+    def boom(*a, **kw):
+        raise ValueError("unexpected")
+
+    monkeypatch.setattr(ingest, "ingest_file", boom)
+    monkeypatch.setattr(ingest, "QdrantClient", lambda **kw: object())
+    import pytest
+    with pytest.raises(SystemExit):
+        ingest.ingest(tmp_path, recreate=False)
+    assert "ingest failed for official/a.md: unexpected" in caplog.text
+    assert "fix the problem and run rag-ingest again" in caplog.text
