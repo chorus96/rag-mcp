@@ -5,7 +5,7 @@
   MCP(streamable-http)로 제공합니다.
 
 구성
-  - 검색 경로 `_search` (rag_search): 질의 임베딩 → 하이브리드 검색 → (선택) 리랭킹 → 응답 구성
+  - 검색 경로 `_search` (rag_search): 질의 임베딩 → 하이브리드 검색 → 사내 리랭커로 리랭킹 → 응답 구성
   - MCP 도구: rag_search, rag_collections, rag_health
 
 문서 디렉터리 (RAG_KNOWLEDGE_DIR)
@@ -72,15 +72,18 @@ def _clamp_limit(limit: int) -> int:
 
 
 def _search(query: str, limit: int) -> dict[str, Any]:
-    """rag_search 의 검색 경로: 질의 임베딩 → 하이브리드 검색 → (선택) 리랭킹 → 응답 구성."""
+    """rag_search 의 검색 경로: 질의 임베딩 → 하이브리드 검색 → 리랭킹 → 응답 구성."""
     query = (query or "").strip()
     if not query:
         return {"status": "error", "error": "query must be a non-empty string"}
+    # 사내 리랭커는 필수입니다. 설정이 빠졌으면 임베딩 서버 주소처럼 오류로 알립니다.
+    if not reranker.configured():
+        return {"status": "error", "error": reranker.NOT_CONFIGURED}
 
     limit = _clamp_limit(limit)
-    # 리랭커가 켜져 있으면 후보를 넉넉히 가져오고(밀집 검색의 재현율), 최종 상위
-    # `limit`개는 크로스 인코더가 고르게 합니다(정밀도). 꺼져 있으면 정확히 limit개만 가져옵니다.
-    fetch = max(limit, reranker.CANDIDATES) if reranker.enabled() else limit
+    # 후보를 넉넉히 가져오고(하이브리드 검색의 재현율), 최종 상위 `limit`개는 리랭커가 고르게
+    # 합니다(정밀도).
+    fetch = max(limit, reranker.CANDIDATES)
 
     try:
         vector = embeddings.embed(query, "query")
@@ -107,11 +110,11 @@ def _search(query: str, limit: int) -> dict[str, Any]:
         return {"status": "error", "error": f"qdrant error: {exc}"}
     except Exception as exc:  # noqa: BLE001
         return {"status": "error", "error": f"qdrant search failed: {exc}"}
-    # 후보를 (스니펫이 아닌) 청크 전체 텍스트로 리랭킹합니다. 최선형(best-effort):
-    # 어떤 실패든 밀집 검색 순서로 되돌아가므로 검색이 깨지지 않습니다.
+    # 후보를 (스니펫이 아닌) 청크 전체 텍스트로 리랭킹합니다. 리랭커 호출이 실패하면(서버 중단 등)
+    # 경고를 남기고 하이브리드 검색 순서로 돌려주므로, 리랭커 장애로 검색이 멈추지 않습니다.
     rerank_scores: list[float | None] = [None] * len(points)
     reranked = False
-    if reranker.enabled() and len(points) > 1:
+    if points:
         docs = [(p.payload or {}).get("text", "") for p in points]
         try:
             order = reranker.rerank(query, docs)
@@ -201,7 +204,7 @@ def rag_collections() -> dict[str, Any]:
 
 @mcp.tool()
 def rag_health() -> dict[str, Any]:
-    """의존성(Qdrant, 사내 임베딩 서버, 켜져 있으면 사내 리랭커)의 접근 가능 여부를 확인합니다.
+    """의존성(Qdrant, 사내 임베딩 서버, 사내 리랭커)의 접근 가능 여부를 확인합니다.
 
     의존성별 상태를 반환합니다. 검색이 실패하거나 결과가 이상하면 먼저 이 도구를 호출해 문제가 벡터
     DB인지, 임베딩 서버인지, 리랭커인지 구분하세요.
@@ -223,18 +226,13 @@ def rag_health() -> dict[str, Any]:
         health["status"] = "degraded"
         health["embeddings"] = {"reachable": False, **emb, "error": str(exc)}
 
-    # 리랭킹은 선택 사항입니다. 켜져 있으면 실제로 한 번 호출해 봅니다. 실패해도 검색은 원래 순서로
-    # 동작하지만(최선형), 설정한 리랭커가 쓰이지 않는 상태이므로 degraded로 알립니다.
     rr = reranker.describe()
-    if reranker.enabled():
-        try:
-            reranker.rerank("healthcheck", ["healthcheck"])
-            health["reranker"] = {"reachable": True, **rr}
-        except Exception as exc:  # noqa: BLE001
-            health["status"] = "degraded"
-            health["reranker"] = {"reachable": False, **rr, "error": str(exc)}
-    else:
-        health["reranker"] = rr
+    try:
+        reranker.rerank("healthcheck", ["healthcheck"])
+        health["reranker"] = {"reachable": True, **rr}
+    except Exception as exc:  # noqa: BLE001
+        health["status"] = "degraded"
+        health["reranker"] = {"reachable": False, **rr, "error": str(exc)}
     health["retrieval"] = vectorstore.describe()  # 하이브리드 켜짐/꺼짐 + 키워드 벡터 방식(kiwi-bm25)
 
     return health
@@ -250,8 +248,10 @@ def main() -> None:
         MCP_HOST, MCP_PORT, QDRANT_URL, COLLECTION,
         emb["model"], emb["base_url"],
         vectorstore.sparse_available(),  # 시작 시 BM25를 로드 (빠른 실패)
-        f"{rr['model']}@{rr['base_url']}" if rr["enabled"] else "off",
+        f"{rr['model']}@{rr['base_url']}" if rr["base_url"] else "NOT SET",
     )
+    if not rr["base_url"]:
+        log.warning("%s; rag_search will return an error until it is set", reranker.NOT_CONFIGURED)
     mcp.run(transport="streamable-http")
 
 

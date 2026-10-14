@@ -12,7 +12,7 @@ agentic retrieval).
   합니다.
 - **하이브리드 검색** — 의미 기반 밀집(dense) 벡터와 BM25 키워드 희소(sparse) 벡터를 Reciprocal Rank
   Fusion(RRF)으로 결합합니다. `CrashLoopBackOff` 같은 에러 문자열이나 리소스 이름도 정확히 찾습니다.
-- **선택적 리랭킹** — 사내 리랭커(크로스 인코더, Cohere 호환 `/rerank`)로 결과 순서를 다시 매겨 정밀도를 높입니다.
+- **리랭킹** — 사내 리랭커(크로스 인코더, Cohere 호환 `/rerank`)로 결과 순서를 다시 매겨 정밀도를 높입니다.
 - **사내 임베딩 서버 연결** — 사내에서 운영 중인 OpenAI 호환 `/v1/embeddings` 서버에 연결합니다. 임베딩 모델을
   rag-mcp가 직접 실행하지 않으므로 모델 파일을 준비할 필요가 없습니다.
 - **한국어 지원** — 기본 임베딩 모델은 다국어 모델 `bge-m3`, 키워드 검색(BM25)은 한국어 형태소 분석기 Kiwi로
@@ -38,7 +38,7 @@ agentic retrieval).
 | **Qdrant** | 문서 청크의 벡터를 저장하는 벡터 DB (`127.0.0.1:6333`) |
 | **rag-ingest** (`tools/ingest.py`) | 문서를 청크로 나누고 임베딩해 Qdrant에 기록하는 수집 명령 |
 | **사내 임베딩 서버** | 텍스트를 벡터로 바꾸는 OpenAI 호환 서버 — **rag-mcp에 포함되지 않음, 사내 서버에 연결** |
-| **사내 리랭커** (선택) | 검색 후보의 순서를 다시 매기는 크로스 인코더 서버(Cohere 호환 `/rerank`) — **rag-mcp에 포함되지 않음, 사내 서버에 연결** |
+| **사내 리랭커** | 검색 후보의 순서를 다시 매기는 크로스 인코더 서버(Cohere 호환 `/rerank`) — **rag-mcp에 포함되지 않음, 사내 서버에 연결** |
 | **Claude Code 플러그인** (`plugins/rag-mcp`) | Claude Code에서 rag-mcp 서버에 연결하고, 도구 사용법을 스킬로 안내 |
 
 ## 아키텍처
@@ -79,8 +79,8 @@ agentic retrieval).
   │   rag_search          rag_collections       │  beds   │
   │   rag_health                                │◄────────┘
   │                                             │  the
-  │   (+ optional step 3: cross-encoder rerank  │  query
-  │     by the in-house reranker, /v1/rerank)   │
+  │   3. cross-encoder rerank of the candidates │  query
+  │      via the in-house reranker (/v1/rerank) │
   └──▲──────────────────────────────────────────┘
      │
      │  MCP streamable-http
@@ -96,7 +96,7 @@ agentic retrieval).
 - **쓰기 경로:** `rag-ingest`가 문서 디렉터리(`official/`)의 문서를 읽어 청크로 나누고, 사내 임베딩 서버로
   벡터를 만들어 Qdrant에 저장합니다. BM25 희소 벡터는 rag-mcp가 직접(Kiwi 형태소 분석) 계산합니다.
 - **읽기 경로:** MCP 클라이언트가 검색 도구를 호출하면, rag-mcp가 **같은 사내 임베딩 서버**로 질의를
-  벡터로 바꾸고 Qdrant에서 하이브리드 검색한 뒤 (선택적으로 리랭킹해) 결과를 돌려줍니다.
+  벡터로 바꾸고 Qdrant에서 하이브리드 검색한 뒤 **사내 리랭커**로 순서를 다시 매겨 결과를 돌려줍니다.
 - **쓰기 경로는 사람만:** MCP 도구는 모두 읽기 전용입니다. 모델은 지식 베이스를 바꿀 수 없습니다.
 
 ## 빠른 시작
@@ -108,6 +108,8 @@ agentic retrieval).
 - `curl`, `tar`
 - **사내 임베딩 서버** — OpenAI 호환 `/v1/embeddings`를 제공하는 서버의 주소, 인증 정보, 모델 이름
   ([사내 임베딩 서버 연결](#사내-임베딩-서버-연결) 참고)
+- **사내 리랭커** — Cohere 호환 `/rerank`를 제공하는 서버의 주소, 인증 정보, 모델 이름
+  ([사내 리랭커 연결](#사내-리랭커-연결) 참고)
 
 ### 1. 설치
 
@@ -121,15 +123,18 @@ git clone https://github.com/chorus96/rag-mcp.git && cd rag-mcp
 `rag-ingest` 명령은 `~/.local/bin`에 설치됩니다. 이 경로가 PATH에 없으면 설치 스크립트가 알려
 줍니다.
 
-### 2. 사내 임베딩 서버 지정
+### 2. 사내 임베딩 서버와 리랭커 지정
 
-설정 파일에서 사내 임베딩 서버를 지정하고 서버를 재시작합니다.
+설정 파일에서 사내 임베딩 서버와 사내 리랭커를 지정하고 서버를 재시작합니다. 둘 다 필수입니다.
 
 ```bash
 vi ~/.config/rag-mcp/rag-mcp.env
 #   EMBEDDINGS_BASE_URL=http://embedding.internal.example:8080   (사내 임베딩 서버)
 #   EMBEDDINGS_API_KEY=
 #   EMBEDDINGS_MODEL=bge-m3
+#   RERANK_BASE_URL=http://rerank.internal.example:8080          (사내 리랭커)
+#   RERANK_API_KEY=
+#   RERANK_MODEL=bge-reranker-v2-m3
 systemctl --user restart rag-mcp
 ```
 
@@ -291,9 +296,9 @@ RAG_MCP_URL=http://10.0.0.5:8084/mcp claude
 
 | 도구 | 용도 |
 |------|---------|
-| `rag_search(query, limit?)` | 지식 베이스에 대한 시맨틱 검색 (하이브리드, 선택적 리랭킹) |
+| `rag_search(query, limit?)` | 지식 베이스에 대한 시맨틱 검색 (하이브리드 검색 + 리랭킹) |
 | `rag_collections()` | 컬렉션 목록과 포인트 수 (지식 베이스가 채워졌는지 확인) |
-| `rag_health()` | Qdrant, 사내 임베딩 서버, (켜져 있으면) 사내 리랭커 접근 가능 여부와 하이브리드 설정 |
+| `rag_health()` | Qdrant, 사내 임베딩 서버, 사내 리랭커 접근 가능 여부와 하이브리드 설정 |
 
 도구는 모두 **읽기 전용**입니다. 지식 베이스를 바꾸는 도구는 없습니다.
 
@@ -335,7 +340,8 @@ Claude Code에서는 자연어로 물으면 플러그인의 `rag-knowledge` 스�
 ```
 
 - `score`는 하이브리드 검색에서 RRF 결합 점수라 작은 값으로 나옵니다([쉬운 설명](#쉬운-설명-질의-하나가-처리되는-과정)).
-  리랭킹이 켜져 있으면 `reranked: true`와 함께 결과마다 `rerank_score`가 붙습니다.
+  리랭킹된 결과에는 `reranked: true`와 함께 결과마다 `rerank_score`가 붙습니다. 리랭커 호출이 실패하면
+  `reranked: false`로 하이브리드 검색 순서 그대로 돌려줍니다.
 - `text`는 `RAG_SNIPPET_CHARS`(기본 1200자)까지만 돌려주고, 잘렸으면 `truncated: true`입니다.
 - 결과가 없으면 `count: 0`, `results: []`입니다. 표현을 바꾼 질의로 다시 찾아보세요.
 
@@ -457,8 +463,8 @@ Qdrant 컬렉션 하나(기본 이름 `rag_kb`)에 모든 문서를 저장합니
 1. **질의 임베딩** — 질의 텍스트를 사내 임베딩 서버로 밀집 벡터로 바꿉니다.
 2. **하이브리드 검색 (재현율)** — Qdrant Query API에서 밀집 검색과 BM25 검색을 동시에 실행하고
    (`Prefetch` 두 개), Reciprocal Rank Fusion(RRF)으로 결합합니다. BM25가 없으면 밀집 검색만 합니다.
-3. **리랭킹 (정밀도, 선택 사항)** — 켜져 있으면 후보를 `RERANK_CANDIDATES`개(기본 30)까지 넉넉히
-   가져와 크로스 인코더로 순서를 다시 매기고, 상위 `limit`개만 남깁니다.
+3. **리랭킹 (정밀도)** — 후보를 `RERANK_CANDIDATES`개(기본 30)까지 넉넉히 가져와 사내 리랭커(크로스
+   인코더)로 순서를 다시 매기고, 상위 `limit`개만 남깁니다.
 4. **응답 구성** — 각 결과의 텍스트를 `RAG_SNIPPET_CHARS`(기본 1200자)까지 잘라 돌려줍니다. 잘렸으면
    `truncated: true`로 표시합니다.
 
@@ -477,9 +483,9 @@ Qdrant 컬렉션 하나(기본 이름 `rag_kb`)에 모든 문서를 저장합니
 상위권에 오른 청크가 높은 결합 점수(`score ≈ Σ 1/(60 + rank)`)를 받습니다. 그래서 하이브리드 검색의
 `score`는 코사인 유사도가 아니라 작은 결합 수치입니다.
 
-리랭커가 켜져 있으면, 결합된 후보를 사내 리랭커(크로스 인코더)에 보내 `(질의, 청크)` 쌍마다 점수를
+그다음 결합된 후보를 사내 리랭커(크로스 인코더)에 보내 `(질의, 청크)` 쌍마다 점수를
 다시 매깁니다. 밀집 검색은 *재현율*은 좋지만 *순서*가 약한데, 리랭커가 그 순서를 바로잡습니다.
-리랭킹이 실패하면 결합된 순서를 그대로 씁니다.
+리랭커 호출이 실패하면 결합된 순서를 그대로 씁니다.
 
 ### 키워드 검색(BM25)과 한국어
 
@@ -579,11 +585,11 @@ journalctl --user -u rag-mcp | grep -E 'sparse model|hybrid'
 | 희소 벡터 (sparse vector) | 정확한 단어 / 키워드 | Kiwi 형태소 + BM25 → `{term_id: weight}` |
 | HNSW | 근사 최근접 이웃 그래프 인덱스 | 빠른 코사인 검색, 거의 정확한 top-k |
 | RRF | 두 순위 목록을 위치 기준으로 합치는 방법 | 밀집 + 희소 결과를 결합 |
-| 리랭커 (reranker) | `(질의, 청크)` 쌍의 순서를 다시 매기는 크로스 인코더 | 사내 리랭커 (선택 사항) |
+| 리랭커 (reranker) | `(질의, 청크)` 쌍의 순서를 다시 매기는 크로스 인코더 | 사내 리랭커 (`bge-reranker-v2-m3` 등) |
 | 비대칭 접두사 | 질의와 문서에 서로 다른 작업 태그를 붙이는 방식 | e5·nomic 계열은 필요, bge-m3는 불필요 |
 
 > ℹ️ **임베딩 모델은 여러분의 데이터로 학습되지 않습니다.** 사전 학습된 모델이 일반적인 의미 지식으로
-> 텍스트를 숫자로 바꿀 뿐입니다. 조직이나 업계 고유의 맥락은 Qdrant에 수집한 **문서**와 (선택적으로)
+> 텍스트를 숫자로 바꿀 뿐입니다. 조직이나 업계 고유의 맥락은 Qdrant에 수집한 **문서**와
 > 리랭커에서 나옵니다.
 
 ## 사내 임베딩 서버 연결
@@ -744,17 +750,17 @@ curl -s http://localhost:6333/collections/rag_kb | grep -o '"size":[0-9]*'
 - **키워드 검색도 한국어를 이해합니다.** 한국어 형태소 분석기 Kiwi가 조사·어미를 떼어 "볼륨이"와 "볼륨을"을
   같은 단어로 맞춥니다([키워드 검색(BM25)과 한국어](#키워드-검색bm25과-한국어)).
 - **리랭커도 다국어 모델을 쓰세요.** 기본 모델 이름 `bge-reranker-v2-m3`는 한국어를 포함한 다국어 리랭커입니다.
-  사내 리랭커의 모델 이름에 맞춰 `RERANK_MODEL`을 지정하세요([사내 리랭커 연결](#사내-리랭커-연결-선택)).
+  사내 리랭커의 모델 이름에 맞춰 `RERANK_MODEL`을 지정하세요([사내 리랭커 연결](#사내-리랭커-연결)).
 - **청크 크기.** 기본 `CHUNK_SIZE=1500`자는 bge-m3의 최대 입력 길이보다 훨씬 작아 그대로 써도 됩니다. 사내 서버의
   모델이 입력 길이가 짧다면 `CHUNK_SIZE`를 그에 맞게 줄이세요.
 - **속도.** 수집 속도는 사내 서버의 처리량에 달려 있습니다. 서버가 허용하는 범위에서 `EMBED_BATCH_SIZE`를 늘리면
   빨라집니다.
 
-## 사내 리랭커 연결 (선택)
+## 사내 리랭커 연결
 
 리랭커는 검색 후보의 순서를 다시 매겨 상위 결과의 정밀도를 높입니다([검색 파이프라인](#검색-파이프라인)). 임베딩과
-마찬가지로 rag-mcp는 리랭커 모델을 직접 실행하지 않고 **사내 리랭커**에 요청합니다. 기본으로 꺼져 있고,
-`RERANK_BASE_URL`을 지정하면 켜집니다.
+마찬가지로 rag-mcp는 리랭커 모델을 직접 실행하지 않고 **사내 리랭커**에 요청합니다. 사내 임베딩 서버와 함께
+**필수**이며, `RERANK_BASE_URL`이 비어 있으면 검색이 오류를 돌려줍니다.
 
 ```bash
 # ~/.config/rag-mcp/rag-mcp.env
@@ -769,7 +775,7 @@ RERANK_MODEL=bge-reranker-v2-m3
 systemctl --user restart rag-mcp
 ```
 
-질의할 때만 쓰므로 켜고 끌 때 `rag-ingest`는 다시 실행하지 않아도 됩니다.
+질의할 때만 쓰므로 리랭커 설정을 바꿔도 `rag-ingest`는 다시 실행하지 않아도 됩니다.
 
 ### 사내 리랭커가 갖춰야 할 조건
 
@@ -782,10 +788,12 @@ systemctl --user restart rag-mcp
 | 요청 크기 | 질의마다 후보 `RERANK_CANDIDATES`개(기본 30)의 청크 전체 텍스트를 한 번에 보냅니다 |
 | 응답 시간 | 기본 30초(`RERANK_TIMEOUT`)까지 기다립니다. 리랭킹 시간만큼 검색 응답이 늦어집니다 |
 
-- **`RERANK_BASE_URL`에는 기본값이 없습니다.** 비어 있으면 리랭킹이 꺼져 있고, 검색 후보가 어디로도 전송되지
-  않습니다.
-- **실패해도 검색은 됩니다.** 연결 실패, HTTP 오류, 형식이 다른 응답이면 경고 로그(`rerank failed`)를 남기고
-  원래 검색 순서로 돌려줍니다. 이때 응답은 `reranked: false`입니다.
+- **`RERANK_BASE_URL`에는 기본값이 없습니다.** 설정을 빠뜨렸을 때 검색 후보가 의도하지 않은 곳으로 전송되지
+  않도록, 운영자가 사내 리랭커 주소를 명시해야 합니다. 비어 있으면 `rag_search`가
+  `RERANK_BASE_URL is not set` 오류를 돌려주고, 시작 로그에 `rerank=NOT SET` 경고가 나옵니다.
+- **리랭커 장애로 검색이 멈추지는 않습니다.** 설정은 되어 있는데 연결 실패, HTTP 오류, 형식이 다른 응답이 오면
+  경고 로그(`rerank failed`)를 남기고 하이브리드 검색 순서로 돌려줍니다. 이때 응답은 `reranked: false`이고,
+  `rag_health()`는 `degraded`입니다.
 - 프록시(`HTTPS_PROXY`/`NO_PROXY`)와 사설 CA(`SSL_CERT_FILE`) 설정은 임베딩 서버와 같이 적용됩니다
   ([설정 예시](#설정-예시) ③, ⑥).
 
@@ -868,15 +876,6 @@ NO_PROXY=localhost,127.0.0.1,.internal.example
 임베딩과 리랭커는 주소·토큰·모델을 각각 따로 설정합니다. 두 서버가 같은 호스트에 있어도 포트나 경로가 다르면
 각자 적어야 합니다. 프록시와 인증서 설정은 두 서버에 함께 적용됩니다.
 
-**⑦ 리랭킹 끄기**
-
-```bash
-# 비우거나 줄을 지우면 꺼집니다 (RERANK_MODEL 등 나머지 값은 무시됨)
-RERANK_BASE_URL=
-```
-
-재시작하면 시작 로그에 `rerank=off`가 나오고, 검색 결과는 하이브리드 검색 순서 그대로 나옵니다.
-
 ### 리랭커 연결 확인
 
 ```bash
@@ -887,9 +886,9 @@ curl -s http://rerank.internal.example:8080/v1/rerank \
 
 응답에 `"results": [{"index": 0, "relevance_score": ...}, ...]`이 보이면 됩니다. rag-mcp를 재시작한 뒤 확인합니다.
 
-- 시작 로그에 `rerank=<모델>@<주소>`가 나옵니다(꺼져 있으면 `rerank=off`).
-- MCP 도구 `rag_health()`의 `reranker.reachable`이 `true`인지 봅니다. 실패하면 `status: degraded`와 함께 오류가
-  나옵니다.
+- 시작 로그에 `rerank=<모델>@<주소>`가 나옵니다(설정이 비어 있으면 `rerank=NOT SET`과 경고).
+- MCP 도구 `rag_health()`의 `reranker.reachable`이 `true`인지 봅니다. 실패하거나 설정이 비어 있으면
+  `status: degraded`와 함께 오류가 나옵니다.
 - 검색 응답에 `reranked: true`가 있고 결과마다 `rerank_score`가 붙습니다.
 
 ## 설정
@@ -922,7 +921,7 @@ curl -s http://rerank.internal.example:8080/v1/rerank \
 | `RAG_DEFAULT_LIMIT` / `RAG_MAX_LIMIT` | `5` / `20` | 검색 결과 기본 개수 / 최대 개수 |
 | `RAG_SNIPPET_CHARS` | `1200` | 결과마다 반환하는 텍스트의 최대 글자 수 (넘으면 `truncated: true`) |
 | **리랭킹** | | |
-| `RERANK_BASE_URL` | _(없음 — 비우면 리랭킹 꺼짐)_ | 사내 리랭커 주소. 지정하면 리랭킹이 켜지고, 뒤에 `/v1/rerank`가 자동으로 붙음 (`/v1`·`/v2`로 끝나면 `/rerank`만, `/rerank`로 끝나면 그대로) |
+| `RERANK_BASE_URL` | _(없음 — 필수)_ | 사내 리랭커 주소. 뒤에 `/v1/rerank`가 자동으로 붙음 (`/v1`·`/v2`로 끝나면 `/rerank`만, `/rerank`로 끝나면 그대로) |
 | `RERANK_MODEL` | `bge-reranker-v2-m3` | 사내 리랭커의 모델 이름 |
 | `RERANK_API_KEY` | _(미설정)_ | 인증 토큰 (`Authorization: Bearer`로 보냄) |
 | `RERANK_CANDIDATES` | `30` | 리랭킹 전에 가져오는 후보 수 |
@@ -949,7 +948,7 @@ curl -s http://rerank.internal.example:8080/v1/rerank \
 | [`tools/embeddings.py`](tools/embeddings.py) | OpenAI 호환 임베딩 호출, 비대칭 모델 접두사 처리 |
 | [`tools/vectorstore.py`](tools/vectorstore.py) | Qdrant 컬렉션 스키마, BM25 희소 벡터, 하이브리드 질의 |
 | [`tools/kiwi_bm25.py`](tools/kiwi_bm25.py) | 한국어 형태소 분석(Kiwi) 기반 BM25 희소 벡터 |
-| [`tools/reranker.py`](tools/reranker.py) | 사내 리랭커(Cohere 호환 `/rerank`) 호출 (선택 사항) |
+| [`tools/reranker.py`](tools/reranker.py) | 사내 리랭커(Cohere 호환 `/rerank`) 호출 |
 | `requirements.txt` | Python 의존성 |
 | `deploy/` | 설치·제거 스크립트, systemd 유닛, `rag-ingest` 명령 템플릿 |
 | `knowledge/official/` | 샘플 문서 |

@@ -1,7 +1,7 @@
 """tools/reranker.py 테스트 — 리랭킹.
 
 확인하는 것
-  - 기본값은 꺼짐(RERANK_BASE_URL 없음)이며, 꺼져 있으면 어디로도 요청하지 않음
+  - 필수 설정: RERANK_BASE_URL 에 기본값이 없고, 비어 있으면 어디로도 요청하지 않고 RerankError
   - 사내 리랭커 주소 구성: 기본 /v1/rerank, /v1·/v2 로 끝나면 /rerank, 이미 완성된 주소는 그대로
   - 요청 형식: model / query / documents (Cohere 호환), 토큰이 있으면 Bearer 헤더
   - 응답 처리: 관련도 순으로 정렬, 범위를 벗어난 인덱스는 버림, 빈 입력은 호출 없이 빈 결과
@@ -23,23 +23,23 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
 import reranker  # noqa: E402
 
 
-# --- 활성화 여부 --------------------------------------------------------------
+# --- 필수 설정 ----------------------------------------------------------------
 
-def test_disabled_by_default():
-    # 기본 환경에서는 RERANK_BASE_URL이 설정되지 않음 -> 꺼짐.
-    assert reranker.enabled() is False
+def test_base_url_has_no_default():
+    # 기본 환경에서는 RERANK_BASE_URL이 설정되지 않음 -> 설정 안 됨.
+    assert reranker.configured() is False
     assert reranker.describe()["base_url"] is None
 
 
-def test_enabled_when_base_url_set(monkeypatch):
+def test_configured_when_base_url_set(monkeypatch):
     monkeypatch.setattr(reranker, "BASE_URL", "http://rerank.internal:8080")
-    assert reranker.enabled() is True
+    assert reranker.configured() is True
 
 
-def test_rerank_raises_when_disabled(monkeypatch):
+def test_rerank_raises_when_not_configured(monkeypatch):
     monkeypatch.setattr(reranker, "BASE_URL", "")
     monkeypatch.setattr(reranker.httpx, "post", _boom)  # 어디로도 요청하면 안 됨
-    with pytest.raises(reranker.RerankError):
+    with pytest.raises(reranker.RerankError, match="RERANK_BASE_URL is not set"):
         reranker.rerank("q", ["a", "b"])
 
 

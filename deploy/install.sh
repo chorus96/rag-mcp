@@ -214,8 +214,9 @@ cat <<EOF
 설치가 끝났습니다.
 
 다음 단계:
-  1. 사내 임베딩 서버(OpenAI 호환)를 설정 파일에 지정한 뒤 재시작:
+  1. 사내 임베딩 서버(OpenAI 호환)와 사내 리랭커(Cohere 호환)를 설정 파일에 지정한 뒤 재시작:
        (EMBEDDINGS_BASE_URL / EMBEDDINGS_API_KEY / EMBEDDINGS_MODEL)
+       (RERANK_BASE_URL / RERANK_API_KEY / RERANK_MODEL)
        \${EDITOR:-vi} $ENV_FILE
        systemctl --user restart rag-mcp
   2. 문서 색인 (문서는 $KNOWLEDGE_DIR/official/ 에 넣습니다):
