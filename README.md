@@ -416,7 +416,6 @@ cluster: prod-eu      # 선택: 필터용
 - **`title`:** 생략하면 파일 이름을 씁니다.
 - **`component`, `cluster`:** `rag_search`의 필터(`component`는 하드, `cluster`는 소프트)가 되는, 형식이 정해지지
   않은 레이블입니다. 환경, 고객, 제품, 팀 등 도메인에 맞게 쓰거나 생략해도 됩니다.
-- **`severity`:** 청크 페이로드에 저장만 되고, 검색 필터나 검색 결과에는 쓰이지 않습니다.
 
 ## 데이터 모델
 
@@ -430,7 +429,7 @@ Qdrant 컬렉션 하나(기본 이름 `rag_kb`)에 모든 문서를 저장합니
 - 벡터 차원은 수집할 때 실제 임베딩 길이로 정해지므로, 모델을 바꿔도 코드를 고칠 필요가 없습니다.
 - IDF는 컬렉션의 `Modifier.IDF`로 서버 측에서 계산하므로, 질의 쪽은 단어 존재 여부만 보내면 됩니다.
 - **포인트(청크):** ID는 `uuid5(source#chunk)`이고, 페이로드는 `text`, `title`, `source`, `tags`, `chunk`,
-  그리고 front matter의 `component`/`severity`/`cluster`입니다. ID가 문서 경로와 청크 번호에서 결정되므로, 같은
+  그리고 front matter의 `component`/`cluster`입니다. ID가 문서 경로와 청크 번호에서 결정되므로, 같은
   문서를 다시 수집하면 중복이 생기지 않고 기존 포인트를 덮어씁니다.
 - **페이로드 인덱스:** 필터링을 빠르게 하려고 `component`, `cluster`, `source`에 키워드 인덱스를
   만듭니다(`source`는 오래된 청크 정리용).

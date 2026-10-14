@@ -287,7 +287,7 @@ def ingest_file(client: QdrantClient, file: Path, root: Path, *, ensure: bool = 
         _ensure_collection(client, len(dense[0]), recreate)
 
     # front matter의 선택적 메타데이터를 필터용 페이로드로 그대로 넘깁니다.
-    extra = {k: meta[k] for k in ("component", "severity", "cluster") if meta.get(k)}
+    extra = {k: meta[k] for k in ("component", "cluster") if meta.get(k)}
     points = [
         PointStruct(
             id=str(uuid.uuid5(_ID_NAMESPACE, f"{source}#{i}")),
