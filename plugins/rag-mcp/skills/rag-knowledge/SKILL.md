@@ -22,7 +22,7 @@ description: 조직의 지식 베이스(마크다운 문서)를 rag MCP 서버�
 |------|------|
 | `rag_search(query, cluster?, component?, limit?)` | 지식 베이스 검색 — 관련 문서를 찾을 때 |
 | `rag_collections()` | 결과가 계속 비어 있을 때 — 지식 베이스가 채워졌는지 확인 |
-| `rag_health()` | 도구 호출이 실패할 때 — Qdrant와 사내 임베딩 서버 상태 확인 |
+| `rag_health()` | 도구 호출이 실패할 때 — Qdrant, 사내 임베딩 서버, (켜져 있으면) 사내 리랭커 상태 확인 |
 
 `limit`의 기본값은 5, 최대 20입니다.
 
@@ -70,6 +70,7 @@ description: 조직의 지식 베이스(마크다운 문서)를 rag MCP 서버�
 | `collection ... not found` 오류 | 지식 베이스가 아직 만들어지지 않았습니다. 서버 관리자에게 `rag-ingest` 실행을 안내하세요. |
 | 결과가 항상 비어 있음 | `rag_collections()`로 포인트 수를 확인하세요. 0이면 문서가 수집되지 않은 것입니다. |
 | 임베딩 관련 오류 (`EMBEDDINGS_BASE_URL is not set`, 연결 실패, HTTP 401/404 등) | `rag_health()`로 확인한 뒤, rag-mcp 서버의 사내 임베딩 서버 연결 설정(주소·토큰·모델 이름) 문제임을 사용자에게 알리세요. |
+| 리랭커가 켜져 있는데 `reranked: false` | 사내 리랭커 호출이 실패해 원래 순서로 돌려준 것입니다. 결과는 그대로 쓸 수 있습니다. `rag_health()`의 `reranker` 항목을 확인해 서버 관리자에게 알리세요. |
 | 도구 자체가 보이지 않거나 연결 실패 | 서버 주소(환경 변수 `RAG_MCP_URL`이 있으면 그 값, 없으면 플러그인의 `server_url` 설정)와 rag-mcp 서버 실행 여부를 확인하도록 안내하세요 (`/plugin configure rag-mcp@rag-mcp`, `/mcp`). |
 
 ## 문서 추가·수정 요청

@@ -266,10 +266,10 @@ def rag_collections() -> dict[str, Any]:
 
 @mcp.tool()
 def rag_health() -> dict[str, Any]:
-    """두 의존성 Qdrant와 임베딩 모델의 접근 가능 여부를 확인합니다.
+    """의존성(Qdrant, 사내 임베딩 서버, 켜져 있으면 사내 리랭커)의 접근 가능 여부를 확인합니다.
 
-    의존성별 상태를 반환합니다. 검색이 실패하면 먼저 이 도구를 호출해 문제가 벡터
-    DB인지 임베딩 모델인지 구분하세요.
+    의존성별 상태를 반환합니다. 검색이 실패하거나 결과가 이상하면 먼저 이 도구를 호출해 문제가 벡터
+    DB인지, 임베딩 서버인지, 리랭커인지 구분하세요.
     """
     health: dict[str, Any] = {"status": "ok"}
 
@@ -288,8 +288,18 @@ def rag_health() -> dict[str, Any]:
         health["status"] = "degraded"
         health["embeddings"] = {"reachable": False, **emb, "error": str(exc)}
 
-    # 리랭킹은 선택 사항이며 최선형입니다. 설정만 보고합니다 (실제 호출 확인 없음).
-    health["reranker"] = reranker.describe()
+    # 리랭킹은 선택 사항입니다. 켜져 있으면 실제로 한 번 호출해 봅니다. 실패해도 검색은 원래 순서로
+    # 동작하지만(최선형), 설정한 리랭커가 쓰이지 않는 상태이므로 degraded로 알립니다.
+    rr = reranker.describe()
+    if reranker.enabled():
+        try:
+            reranker.rerank("healthcheck", ["healthcheck"])
+            health["reranker"] = {"reachable": True, **rr}
+        except Exception as exc:  # noqa: BLE001
+            health["status"] = "degraded"
+            health["reranker"] = {"reachable": False, **rr, "error": str(exc)}
+    else:
+        health["reranker"] = rr
     health["retrieval"] = vectorstore.describe()  # 하이브리드 켜짐/꺼짐 + 키워드 벡터 방식(kiwi-bm25)
 
     return health
@@ -305,7 +315,7 @@ def main() -> None:
         MCP_HOST, MCP_PORT, QDRANT_URL, COLLECTION,
         emb["provider"], emb["model"], emb["base_url"],
         vectorstore.sparse_available(),  # 시작 시 BM25를 로드 (빠른 실패)
-        f"{rr['provider']}:{rr['model']}" if rr["enabled"] else "off",
+        f"{rr['model']}@{rr['base_url']}" if rr["enabled"] else "off",
     )
     mcp.run(transport="streamable-http")
 
