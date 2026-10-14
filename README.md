@@ -700,23 +700,131 @@ HTTPS_PROXY=http://proxy.internal.example:3128
 NO_PROXY=localhost,127.0.0.1
 ```
 
-### 연결 확인
+### 임베딩 서버 연결 확인
 
-rag-mcp에 연결하기 전에, 사내 서버가 OpenAI 호환 형식으로 응답하는지 확인합니다.
+설정을 바꾼 뒤에는 아래 순서로 확인합니다. ①은 사내 임베딩 서버 자체를, ②~⑤는 rag-mcp가 임베딩 서버를 제대로
+쓰는지를 확인합니다.
+
+**① 사내 임베딩 서버에 직접 요청 (rag-mcp 서버에서 실행)**
+
+rag-mcp와 같은 서버에서 실행해야 방화벽·프록시·인증서 문제까지 함께 확인됩니다. 주소는 설정 파일의
+`EMBEDDINGS_BASE_URL`에 `/v1/embeddings`를 붙인 값입니다(주소가 `/v1`로 끝나면 `/embeddings`만).
 
 ```bash
 curl -s http://embedding.internal.example:8080/v1/embeddings \
   -H "Authorization: Bearer <사내-서버-토큰>" -H "Content-Type: application/json" \
-  -d '{"model": "bge-m3", "input": ["테스트"]}' | head -c 200
+  -d '{"model": "bge-m3", "input": ["볼륨이 attaching 에서 멈춤"]}' | head -c 300
 ```
 
-응답에 `"embedding": [...]`이 보이면 됩니다. rag-mcp를 재시작한 뒤 MCP 도구 `rag_health()`에서
-`embeddings.reachable: true`와 모델 이름을 확인하고, 수집 후 컬렉션 차원이 모델과 맞는지 봅니다.
+정상 응답 예 (`data[].embedding`에 숫자 목록이 있어야 합니다):
+
+```json
+{"object": "list", "data": [{"object": "embedding", "index": 0, "embedding": [-0.0213, 0.0457, 0.0081, ...]}], "model": "bge-m3", ...}
+```
+
+벡터 길이(차원)도 확인해 두세요. 이 값이 컬렉션의 차원이 됩니다(bge-m3는 1024).
 
 ```bash
-# 컬렉션 차원 확인 → bge-m3 라면 "size":1024
+curl -s http://embedding.internal.example:8080/v1/embeddings \
+  -H "Content-Type: application/json" -d '{"model": "bge-m3", "input": ["테스트"]}' \
+  | python3 -c 'import json,sys; print(len(json.load(sys.stdin)["data"][0]["embedding"]))'
+```
+
+- 사설 인증서(HTTPS)를 쓰면 `--cacert /etc/pki/tls/certs/internal-ca-bundle.pem`처럼 설정 파일의
+  `SSL_CERT_FILE`과 같은 파일을 지정해 확인하세요.
+- 프록시를 거쳐야 하면 설정 파일과 같은 `HTTPS_PROXY`·`NO_PROXY`를 셸에 지정한 뒤 실행하세요.
+
+**② 시작 로그**
+
+```bash
+systemctl --user restart rag-mcp
+journalctl --user -u rag-mcp --since "5 min ago" | grep "starting rag-mcp"
+```
+
+```text
+starting rag-mcp on 0.0.0.0:8084 (qdrant=http://localhost:6333, collection=rag_kb, embed=bge-m3@http://embedding.internal.example:8080, hybrid=True, rerank=bge-reranker-v2-m3@http://rerank.internal.example:8080)
+```
+
+`embed=` 뒤의 모델 이름과 주소가 설정한 값과 같은지 봅니다. 시작 로그는 설정만 보여 주므로, 실제 연결은 ③에서
+확인합니다.
+
+**③ `rag_health()`**
+
+MCP 클라이언트에서 `rag_health()`를 호출합니다. 임베딩 서버에 짧은 요청을 한 번 보내 확인합니다. 아래는 응답 중
+임베딩 부분입니다.
+
+```json
+{
+  "status": "ok",
+  "embeddings": {
+    "reachable": true,
+    "model": "bge-m3",
+    "base_url": "http://embedding.internal.example:8080",
+    "asymmetric": "False"
+  }
+}
+```
+
+실패하면 `status`가 `degraded`가 되고 `embeddings`에 `reachable: false`와 `error`가 붙습니다.
+
+```json
+{
+  "status": "degraded",
+  "embeddings": {
+    "reachable": false,
+    "model": "bge-m3",
+    "base_url": "http://embedding.internal.example:8080",
+    "asymmetric": "False",
+    "error": "embeddings server HTTP 401 — {\"error\":\"invalid api key\"}"
+  }
+}
+```
+
+**④ 수집 (`rag-ingest`)**
+
+```bash
+rag-ingest
+```
+
+```text
+INFO rag-ingest ingesting from /home/<사용자>/.local/share/rag-mcp/data/knowledge -> qdrant=http://localhost:6333 collection=rag_kb embed=bge-m3@http://embedding.internal.example:8080
+INFO rag-ingest ingested official/longhorn-volume-attach.md (5 chunk(s))
+INFO rag-ingest done: 1 file(s), 5 chunk(s) into 'rag_kb'
+```
+
+수집이 끝나면 컬렉션의 차원이 ①에서 확인한 벡터 길이와 같은지 봅니다.
+
+```bash
+# bge-m3 라면 "size":1024
 curl -s http://localhost:6333/collections/rag_kb | grep -o '"size":[0-9]*'
 ```
+
+**⑤ 검색**
+
+`rag_search(query="Longhorn 볼륨이 attaching 상태에서 멈춤")`이 `status: ok`와 결과를 돌려주면 질의 임베딩까지
+정상입니다. 임베딩에 실패하면 검색은 결과 없이 오류를 돌려줍니다(리랭커와 달리 대체 동작이 없습니다).
+
+```json
+{"status": "error", "error": "embeddings server connection failed: [Errno 111] Connection refused"}
+```
+
+**자주 나오는 오류**
+
+`rag_search`·`rag_health()`의 `error`, 또는 `rag-ingest` 실행 중 나오는 메시지입니다.
+
+| 오류 메시지 | 원인 | 조치 |
+|------|------|------|
+| `EMBEDDINGS_BASE_URL is not set: ...` | 설정 파일에 임베딩 서버 주소가 없음 | `EMBEDDINGS_BASE_URL`을 지정하고 재시작 |
+| `embeddings server connection failed: [Errno 111] Connection refused` | 주소·포트가 틀렸거나 임베딩 서버가 꺼져 있음 | ①의 curl로 주소와 서버 상태 확인 |
+| `embeddings server connection failed: timed out` | 응답이 `RAG_TIMEOUT_SECONDS`(임베딩 기본 60초)보다 느림 | 서버 부하 확인, 수집 중이면 `EMBED_BATCH_SIZE`를 줄이거나 `RAG_TIMEOUT_SECONDS` 조정([설정 예시](#설정-예시) ⑤) |
+| `embeddings server connection failed: [SSL: CERTIFICATE_VERIFY_FAILED] ...` | 사설 인증서를 신뢰하지 못함 | `SSL_CERT_FILE`에 사내 CA 지정([설정 예시](#설정-예시) ③) |
+| `embeddings server HTTP 404 — ...` | 경로(`/v1/embeddings`)가 서버와 다름 | ①의 curl로 실제 경로 확인, `/v1` 포함 여부에 맞게 `EMBEDDINGS_BASE_URL` 수정 |
+| `embeddings server HTTP 400 — ... model ... does not exist` (서버마다 문구 다름) | 모델 이름이 서버와 다름 | 사내 서버의 모델 이름으로 `EMBEDDINGS_MODEL` 수정 |
+| `embeddings server HTTP 401 — ...` / `403` | 토큰이 없거나 틀림 | `EMBEDDINGS_API_KEY` 확인 |
+| `embeddings server HTTP 413 — ...` / `400` (수집 중) | 한 요청에 보낸 청크가 너무 많거나 큼 | `EMBED_BATCH_SIZE`를 줄이고, 모델 입력이 짧으면 `CHUNK_SIZE`도 줄임 |
+| `embeddings server response is not in the OpenAI format (data[].embedding): ...` | 응답이 OpenAI 호환 형식이 아님(JSON이 아니거나 `data[].embedding`이 없음) | OpenAI 호환 `/v1/embeddings`를 제공하는 주소인지 ①로 확인 |
+| `embeddings server returned 0 embeddings for 1 input(s)` | 요청한 개수만큼 벡터가 오지 않음 | 서버 응답을 ①로 확인 |
+| `qdrant error: ... Vector dimension error: expected dim: 1024, got 768` | 모델(차원)이 바뀌었는데 컬렉션을 다시 만들지 않음 | `rag-ingest --recreate`로 재구축([일관성 규칙](#일관성-규칙)) |
 
 ### 비대칭 모델 접두사
 

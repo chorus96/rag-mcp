@@ -136,8 +136,13 @@ def _embed_openai(texts: list[str]) -> list[list[float]]:
         raise EmbeddingError(f"embeddings server connection failed: {exc}") from exc
 
     # `index`로 다시 정렬 — API가 요청 순서와 다르게 항목을 반환할 수 있습니다.
-    data = sorted(resp.json().get("data") or [], key=lambda d: d.get("index", 0))
-    vectors = [item["embedding"] for item in data]
+    try:
+        data = sorted(resp.json().get("data") or [], key=lambda d: d.get("index", 0))
+        vectors = [item["embedding"] for item in data]
+    except Exception as exc:  # noqa: BLE001 - JSON이 아니거나 OpenAI 형식이 아닌 응답
+        raise EmbeddingError(
+            f"embeddings server response is not in the OpenAI format (data[].embedding): {exc!r}"
+        ) from exc
     if len(vectors) != len(texts):
         raise EmbeddingError(
             f"embeddings server returned {len(vectors)} embeddings for {len(texts)} input(s)"
