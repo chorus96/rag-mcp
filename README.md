@@ -979,7 +979,7 @@ journalctl --user -u rag-mcp --since "10 min ago" | grep "rerank failed"
 ```
 
 ```text
-WARNING rag-mcp rerank failed (could not reach the in-house reranker at http://rerank.internal.example:8080/v1/rerank ([Errno 111] Connection refused)); falling back to dense order
+WARNING rag-mcp rerank failed (could not reach the in-house reranker at http://rerank.internal.example:8080/v1/rerank ([Errno 111] Connection refused)); returning search order
 ```
 
 **자주 나오는 오류**

@@ -122,7 +122,7 @@ def _search(query: str, limit: int) -> dict[str, Any]:
             rerank_scores = [s for _, s in order]
             reranked = True
         except reranker.RerankError as exc:
-            log.warning("rerank failed (%s); falling back to dense order", exc)
+            log.warning("rerank failed (%s); returning search order", exc)
             rerank_scores = [None] * len(points)
 
     points = points[:limit]
