@@ -107,6 +107,8 @@ def rerank(query: str, documents: list[str]) -> list[tuple[int, float]]:
 
     ranked: list[tuple[int, float]] = []
     for item in results:
+        if not isinstance(item, dict):
+            continue
         idx = item.get("index")
         score = item.get("relevance_score", item.get("score"))
         if isinstance(idx, int) and 0 <= idx < len(documents) and score is not None:

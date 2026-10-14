@@ -101,6 +101,23 @@ def test_reranks_candidates_and_keeps_top_limit(monkeypatch):
     assert [(h["source"], h["rerank_score"]) for h in out["results"]] == [("c", 0.9), ("a", 0.4)]
 
 
+def test_reranker_failure_returns_search_order(monkeypatch):
+    pts = [_point({"text": t, "source": t}, score=0.5) for t in ("a", "b", "c")]
+    _patch_search(monkeypatch, pts)                    # 기본: 리랭커 호출 실패
+    out = server._search("q", 2)
+    assert out["status"] == "ok" and out["reranked"] is False
+    assert [h["source"] for h in out["results"]] == ["a", "b"]
+    assert all("rerank_score" not in h for h in out["results"])
+
+
+def test_reranker_subset_keeps_only_returned(monkeypatch):
+    # 리랭커가 일부(top_n)만 돌려주면 돌려준 것만 결과에 남습니다.
+    pts = [_point({"text": t, "source": t}, score=0.5) for t in ("a", "b", "c")]
+    _patch_search(monkeypatch, pts, rerank=lambda q, docs: [(1, 0.8)])
+    out = server._search("q", 5)
+    assert [h["source"] for h in out["results"]] == ["b"]
+
+
 def test_missing_reranker_is_error(monkeypatch):
     rec = _patch_search(monkeypatch, [_point()])
     monkeypatch.setattr(server.reranker, "BASE_URL", "")

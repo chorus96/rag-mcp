@@ -96,6 +96,20 @@ def test_rerank_ignores_out_of_range_indices(monkeypatch):
     assert order == [(0, 0.3)]                        # 인덱스 5는 버려짐
 
 
+def test_rerank_skips_non_object_items(monkeypatch):
+    monkeypatch.setattr(reranker, "BASE_URL", "http://rerank.internal:8080")
+    payload = {"results": [0.9, "x", {"index": 0, "relevance_score": 0.3}]}
+    monkeypatch.setattr(reranker.httpx, "post", _fake_post(payload))
+    assert reranker.rerank("q", ["a"]) == [(0, 0.3)]
+
+
+def test_rerank_only_non_object_items_raises(monkeypatch):
+    monkeypatch.setattr(reranker, "BASE_URL", "http://rerank.internal:8080")
+    monkeypatch.setattr(reranker.httpx, "post", _fake_post({"results": [0.9, 0.1]}))
+    with pytest.raises(reranker.RerankError, match="no usable results"):
+        reranker.rerank("q", ["a", "b"])
+
+
 def test_rerank_empty_docs_returns_empty(monkeypatch):
     monkeypatch.setattr(reranker, "BASE_URL", "http://rerank.internal:8080")
     monkeypatch.setattr(reranker.httpx, "post", _boom)
