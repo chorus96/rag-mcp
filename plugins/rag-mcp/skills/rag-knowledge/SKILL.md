@@ -61,6 +61,7 @@ description: 조직의 지식 베이스(마크다운 문서)를 rag MCP 서버�
 | 결과가 항상 비어 있음 | `rag_collections()`로 포인트 수를 확인하세요. 0이면 문서가 수집되지 않은 것입니다. |
 | 임베딩 관련 오류 (`EMBEDDINGS_BASE_URL is not set`, 연결 실패, HTTP 401/404 등) | `rag_health()`로 확인한 뒤, rag-mcp 서버의 사내 임베딩 서버 연결 설정(주소·토큰·모델 이름) 문제임을 사용자에게 알리세요. |
 | `RERANK_BASE_URL is not set` | rag-mcp 서버에 사내 리랭커 주소가 설정되지 않아 검색할 수 없습니다. 서버 관리자에게 리랭커 설정(주소·토큰·모델 이름)을 요청하도록 안내하세요. |
+| ``Vector with name `bm25` is not configured`` 오류 | 서버의 검색 설정과 색인 구조가 맞지 않습니다. 서버 관리자에게 `rag-ingest --recreate`로 색인을 다시 만들도록 안내하세요. |
 | 결과가 있는데 `reranked: false` | 사내 리랭커 호출이 실패해 원래 순서로 돌려준 것입니다. 결과는 그대로 쓸 수 있습니다. `rag_health()`의 `reranker` 항목을 확인해 서버 관리자에게 알리세요. |
 | 도구 자체가 보이지 않거나 연결 실패 | 서버 주소(환경 변수 `RAG_MCP_URL`이 있으면 그 값, 없으면 플러그인의 `server_url` 설정)와 rag-mcp 서버 실행 여부를 확인하도록 안내하세요 (`/plugin configure rag-mcp@rag-mcp`, `/mcp`). |
 

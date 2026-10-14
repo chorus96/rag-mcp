@@ -156,7 +156,8 @@ journalctl --user -u rag-mcp -f              # 서버 로그
 ```
 
 자세한 확인 방법과 자주 나오는 오류는 [Qdrant 연결 확인](#qdrant-연결-확인),
-[임베딩 서버 연결 확인](#임베딩-서버-연결-확인), [리랭커 연결 확인](#리랭커-연결-확인)에 있습니다. MCP 클라이언트를
+[임베딩 서버 연결 확인](#임베딩-서버-연결-확인), [리랭커 연결 확인](#리랭커-연결-확인),
+[Kiwi BM25 동작 확인](#kiwi-bm25-동작-확인)에 있습니다. MCP 클라이언트를
 연결한 뒤에는 `rag_health()` 하나로 Qdrant·임베딩 서버·리랭커 상태를 한 번에 볼 수 있습니다.
 
 > 키워드(BM25) 검색에 쓰는 한국어 형태소 분석기 Kiwi는 설치 때 `pip`로 함께 설치되며(약 100MB), 실행 중에
@@ -690,11 +691,7 @@ rag-ingest --recreate
 journalctl --user -u rag-mcp | grep -E 'sparse model|hybrid'
 ```
 
-- **확인 방법:** MCP 도구 `rag_health()` 응답의 `retrieval`에 `hybrid`(키워드 검색 동작 여부)와 `sparse_model`
-  (`kiwi-bm25`)이 나옵니다. Kiwi를 불러오지 못하면 시작 로그에 `sparse model ... unavailable` 경고가 남고 의미
-  검색만으로 동작합니다.
-- **이전 버전에서 업그레이드했다면** 설정을 바꾸지 않았더라도 한 번 `rag-ingest --recreate`를 실행하세요. 키워드
-  벡터를 만드는 방식이 Kiwi 형태소 분석으로 바뀌어, 기존 색인의 키워드가 새 질의와 맞지 않습니다.
+- **확인 방법:** 아래 [Kiwi BM25 동작 확인](#kiwi-bm25-동작-확인)을 보세요.
 
 #### Kiwi BM25 동작 확인
 
