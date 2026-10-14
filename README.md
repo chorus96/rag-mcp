@@ -17,7 +17,7 @@ agentic retrieval).
   rag-mcp가 직접 실행하지 않으므로 모델 파일을 준비할 필요가 없습니다.
 - **한국어 지원** — 기본 임베딩 모델은 다국어 모델 `bge-m3`, 키워드 검색(BM25)은 한국어 형태소 분석기 Kiwi로
   조사·어미를 떼어 단어를 맞추고, 리랭커 기본 모델 이름도 다국어 모델(`bge-reranker-v2-m3`)입니다.
-- **마크다운 수집** — YAML front matter, 헤딩 기준 청킹, 멱등(idempotent) 재실행을 지원합니다.
+- **마크다운 수집** — 일반 마크다운을 헤딩 기준으로 청킹하고, 멱등(idempotent) 재실행을 지원합니다.
 - **간단한 설치** — Linux + systemd 서버에 스크립트 하나로 설치합니다. root 권한이 필요 없습니다.
 - **Claude Code 플러그인** — 이 저장소 자체가 플러그인 마켓플레이스입니다.
 
@@ -47,13 +47,13 @@ agentic retrieval).
                        WRITE PATH — populate the KB
   ┌───────────────────────────┐
   │       knowledge/**        │   your markdown docs,
-  │         official/         │   optional YAML front matter
+  │         official/         │   (plain .md, no metadata)
   └─────────────┬─────────────┘
                 │
                 ▼
   ┌───────────────────────────┐   embed    ┌─────────────────────────────┐
   │        rag-ingest         │  chunks    │  in-house embedding server  │
-  │  · parses front matter    │───────────►│      OpenAI-compatible      │
+  │  · reads plain markdown   │───────────►│      OpenAI-compatible      │
   │  · heading-aware chunks   │            │        /v1/embeddings       │
   │  · Kiwi BM25 vectors      │◄───────────│    (not part of rag-mcp)    │
   │  · idempotent upserts,    │  vectors   └──────────────▲──────────────┘
@@ -291,7 +291,7 @@ RAG_MCP_URL=http://10.0.0.5:8084/mcp claude
 
 | 도구 | 용도 |
 |------|---------|
-| `rag_search(query, cluster?, component?, limit?)` | 지식 베이스에 대한 시맨틱 검색 (하이브리드, 선택적 리랭킹) |
+| `rag_search(query, limit?)` | 지식 베이스에 대한 시맨틱 검색 (하이브리드, 선택적 리랭킹) |
 | `rag_collections()` | 컬렉션 목록과 포인트 수 (지식 베이스가 채워졌는지 확인) |
 | `rag_health()` | Qdrant, 사내 임베딩 서버, (켜져 있으면) 사내 리랭커 접근 가능 여부와 하이브리드 설정 |
 
@@ -304,11 +304,14 @@ RAG_MCP_URL=http://10.0.0.5:8084/mcp claude
 
 Claude Code에서는 자연어로 물으면 플러그인의 `rag-knowledge` 스킬이 알맞은 호출을 고릅니다.
 
-| 요청 예 | 도구 호출 | 검색 대상 |
-|------|------|------|
-| "Longhorn 볼륨이 attaching에서 멈췄을 때 어떻게 해?" | `rag_search(query="Longhorn 볼륨이 attaching 상태에서 멈춤")` | 전체 |
-| "longhorn 관련 문서만 찾아 줘" | `rag_search(query="볼륨 복구", component="longhorn")` | `component: longhorn`인 문서 |
-| "prod-01 클러스터 기준으로 찾아 줘" | `rag_search(query="볼륨 복구", cluster="prod-01")` | `cluster`는 소프트 필터 |
+| 요청 예 | 도구 호출 |
+|------|------|
+| "Longhorn 볼륨이 attaching에서 멈췄을 때 어떻게 해?" | `rag_search(query="Longhorn 볼륨이 attaching 상태에서 멈춤")` |
+| "longhorn 볼륨 복구 문서 10개까지 찾아 줘" | `rag_search(query="Longhorn 볼륨 복구 절차", limit=10)` |
+| "prod-01에서 노드 재부팅 뒤 생긴 문제 사례 있어?" | `rag_search(query="prod-01 노드 재부팅 후 볼륨 attach 실패")` |
+
+검색 범위를 좁히는 필터는 없습니다. 컴포넌트·환경 이름처럼 좁히고 싶은 단어를 질의에 함께 쓰면, 키워드
+검색(BM25)이 그 단어가 들어 있는 문서를 위로 올립니다.
 
 응답 예 (`rag_search(query="볼륨이 attaching 에서 멈춤", limit=1)`):
 
@@ -317,17 +320,13 @@ Claude Code에서는 자연어로 물으면 플러그인의 `rag-knowledge` 스�
   "status": "ok",
   "collection": "rag_kb",
   "query": "볼륨이 attaching 에서 멈춤",
-  "cluster": null,
-  "cluster_narrowed": null,
-  "component": null,
   "reranked": false,
   "count": 1,
   "results": [
     {
       "score": 0.0328,
-      "title": "Longhorn 볼륨이 attaching 상태에서 멈춤",
+      "title": "longhorn-volume-attach",
       "source": "official/longhorn-volume-attach.md",
-      "tags": ["longhorn", "storage"],
       "text": "# 증상\n노드 재부팅 후 ...",
       "truncated": false
     }
@@ -339,22 +338,6 @@ Claude Code에서는 자연어로 물으면 플러그인의 `rag-knowledge` 스�
   리랭킹이 켜져 있으면 `reranked: true`와 함께 결과마다 `rerank_score`가 붙습니다.
 - `text`는 `RAG_SNIPPET_CHARS`(기본 1200자)까지만 돌려주고, 잘렸으면 `truncated: true`입니다.
 - 결과가 없으면 `count: 0`, `results: []`입니다. 표현을 바꾼 질의로 다시 찾아보세요.
-
-### 필터의 의미
-
-| 필터 | 종류 | 결과가 비었을 때 |
-|------|------|------|
-| `component` | 하드 | 그대로 빈 결과 |
-| `cluster` | **소프트** | 클러스터 조건만 빼고 전체 범위로 다시 검색 |
-
-`cluster`를 소프트 필터로 둔 이유는, 새 클러스터에서 증상이 처음 나타났을 때 다른 클러스터의 선례가
-가려지지 않게 하기 위해서입니다. 응답의 `cluster_narrowed`로 어떤 경우인지 알 수 있습니다.
-
-| `cluster_narrowed` | 의미 |
-|------|------|
-| `None` | 클러스터를 지정하지 않음 |
-| `true` | 지정한 클러스터 안에서 결과를 찾음 |
-| `false` | 같은 클러스터에는 없어서 전체 범위 결과를 돌려줌 (응답에 `note` 포함) |
 
 ## 문서 디렉터리
 
@@ -401,22 +384,25 @@ rag-ingest --recreate           # 컬렉션을 지우고 전체 재구축
 
 ### 문서 형식
 
-마크다운(`.md`) 파일만 수집합니다. 선택적인 YAML front matter를 지원합니다. 다른 형식(PDF, Word 등)은
-마크다운으로 바꿔서 넣으세요.
+마크다운(`.md`) 파일만 수집합니다. 다른 형식(PDF, Word 등)은 마크다운으로 바꿔서 넣으세요. 메타데이터 없이
+일반 마크다운으로 쓰면 됩니다.
 
 ```markdown
----
-title: Longhorn 볼륨이 attaching 상태에서 멈춤
-tags: [longhorn, storage]
-component: longhorn   # 선택: 필터용
-cluster: prod-eu      # 선택: 필터용
----
-# 본문...
+# Longhorn 볼륨이 attaching 상태에서 멈춤
+
+## 증상
+...
+
+## 조치
+...
 ```
 
-- **`title`:** 생략하면 파일 이름을 씁니다.
-- **`component`, `cluster`:** `rag_search`의 필터(`component`는 하드, `cluster`는 소프트)가 되는, 형식이 정해지지
-  않은 레이블입니다. 환경, 고객, 제품, 팀 등 도메인에 맞게 쓰거나 생략해도 됩니다.
+- **제목(`title`)은 파일 이름입니다**(확장자 제외). 검색 결과와 답변의 출처에 쓰이므로, 내용을 알 수 있는 파일
+  이름을 붙이세요(예: `longhorn-volume-attach.md`).
+- **헤딩으로 섹션을 나누세요.** 헤딩 단위로 청크를 나누고 각 청크 앞에 헤딩을 붙이므로, 구조가 분명할수록 잘
+  찾힙니다([청킹](#청킹)).
+- **YAML front matter 같은 메타데이터는 해석하지 않습니다.** 파일 맨 앞에 `---`로 감싼 블록이 있어도 본문
+  텍스트로 색인됩니다.
 
 ## 데이터 모델
 
@@ -429,11 +415,9 @@ Qdrant 컬렉션 하나(기본 이름 `rag_kb`)에 모든 문서를 저장합니
 
 - 벡터 차원은 수집할 때 실제 임베딩 길이로 정해지므로, 모델을 바꿔도 코드를 고칠 필요가 없습니다.
 - IDF는 컬렉션의 `Modifier.IDF`로 서버 측에서 계산하므로, 질의 쪽은 단어 존재 여부만 보내면 됩니다.
-- **포인트(청크):** ID는 `uuid5(source#chunk)`이고, 페이로드는 `text`, `title`, `source`, `tags`, `chunk`,
-  그리고 front matter의 `component`/`cluster`입니다. ID가 문서 경로와 청크 번호에서 결정되므로, 같은
+- **포인트(청크):** ID는 `uuid5(source#chunk)`이고, 페이로드는 `text`, `title`(파일 이름), `source`, `chunk`입니다. ID가 문서 경로와 청크 번호에서 결정되므로, 같은
   문서를 다시 수집하면 중복이 생기지 않고 기존 포인트를 덮어씁니다.
-- **페이로드 인덱스:** 필터링을 빠르게 하려고 `component`, `cluster`, `source`에 키워드 인덱스를
-  만듭니다(`source`는 오래된 청크 정리용).
+- **페이로드 인덱스:** 오래된 청크 정리(`source` 기준 삭제)를 빠르게 하려고 `source`에 키워드 인덱스를 만듭니다.
 
 ## 수집 과정
 

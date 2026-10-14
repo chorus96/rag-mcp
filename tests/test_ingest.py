@@ -3,6 +3,7 @@
 확인하는 것
   - 파일 탐색: official/ 아래에서 .md 만 찾고 나머지 확장자(.pdf 등)는 무시. official/ 밖의 문서는
     수집하지 않고 건너뛴 개수를 경고로 알림
+  - 페이로드: 파일 전체가 본문(front matter 해석 없음), 제목은 파일 이름, 페이로드는 text/title/source/chunk 뿐
   - 임베딩 배치: EMBED_BATCH_SIZE 단위로 요청하고, 벡터 순서가 청크 순서와 같음
   - 업서트 배치: 요청당 UPSERT_BATCH_SIZE 포인트를 넘지 않음
   - 오래된 청크 정리: 문서가 줄어들면 남은 뒷부분 청크만 지우고, 실패해도 수집을 멈추지 않음
@@ -167,3 +168,26 @@ def test_delete_orphan_chunks_survives_qdrant_error(caplog):
 
     assert client.deletes == []
     assert "stale-chunk cleanup failed" in caplog.text
+
+
+# --- 파일 하나 색인 (페이로드) --------------------------------------------------
+
+def test_ingest_file_payload_has_no_metadata(monkeypatch, tmp_path):
+    doc = tmp_path / "official" / "longhorn-volume-attach.md"
+    doc.parent.mkdir()
+    # front matter처럼 생긴 줄도 해석하지 않고 본문으로 둡니다.
+    doc.write_text("---\ncomponent: longhorn\n---\n# 증상\n볼륨이 멈춤\n", encoding="utf-8")
+    monkeypatch.setattr(ingest, "_embed_batch", lambda texts: [[0.1, 0.2] for _ in texts])
+    monkeypatch.setattr(ingest.vectorstore, "embed_documents_sparse", lambda texts: [None] * len(texts))
+    saved = []
+    monkeypatch.setattr(ingest, "_upsert_points", lambda client, points: saved.extend(points))
+    monkeypatch.setattr(ingest, "_delete_orphan_chunks", lambda *a: None)
+
+    n = ingest.ingest_file(object(), doc, tmp_path, ensure=False)
+
+    assert n == len(saved) >= 1
+    payload = saved[0].payload
+    assert set(payload) == {"text", "title", "source", "chunk"}
+    assert payload["title"] == "longhorn-volume-attach"
+    assert payload["source"] == "official/longhorn-volume-attach.md"
+    assert "component: longhorn" in "\n".join(p.payload["text"] for p in saved)

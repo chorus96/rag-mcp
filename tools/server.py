@@ -33,7 +33,6 @@ from typing import Any
 from mcp.server.fastmcp import FastMCP
 from qdrant_client import QdrantClient
 from qdrant_client.http.exceptions import UnexpectedResponse
-from qdrant_client.models import FieldCondition, Filter, MatchValue
 
 import embeddings
 import reranker
@@ -65,43 +64,18 @@ mcp = FastMCP("rag", host=MCP_HOST, port=MCP_PORT)
 _qdrant = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY, timeout=HTTP_TIMEOUT)
 
 
-# --- 공통 검색 경로 -----------------------------------------------------------
+# --- 검색 경로 -----------------------------------------------------------
 def _clamp_limit(limit: int) -> int:
     if limit < 1:
         return 1
     return min(limit, MAX_LIMIT)
 
 
-def _build_conditions(component: str | None, cluster: str | None) -> list[Any]:
-    """하드 필터와 (선택적) 클러스터 범위 제한을 위한 Qdrant 페이로드 조건.
-    `component`는 하드 필터입니다: 빈 결과는 그대로 비어 있습니다.
-    `cluster`는 호출자가 소프트 필터로 넘기며, 대체 재시도에서는 빠집니다
-    (`_search` 참고)."""
-    conditions = []
-    if component:
-        conditions.append(FieldCondition(key="component", match=MatchValue(value=component)))
-    if cluster:
-        conditions.append(FieldCondition(key="cluster", match=MatchValue(value=cluster)))
-    return conditions
-
-
-def _search(query: str, cluster: str | None, component: str | None,
-            limit: int) -> dict[str, Any]:
-    """rag_search 의 검색 경로.
-
-    `component`는 하드 필터입니다. `cluster`는 소프트 필터입니다:
-    클러스터로 한정한 검색 결과가 비어 있으면 (하드 필터는 유지한 채) 전체 범위로
-    다시 검색하므로, 새 클러스터에서 증상이 처음 나타났을 때도 다른 클러스터의
-    실제 선례가 가려지지 않습니다 — 에이전트 프롬프트가 Kubernetes/Prometheus에
-    적용하는 빈 결과 자기 보정과 같은 방식입니다. 응답에 `cluster_narrowed`를
-    포함해, 호출자가 "이 클러스터에는 선례 없음"과 "어디에도 선례 없음"을 구분할
-    수 있게 합니다.
-    """
+def _search(query: str, limit: int) -> dict[str, Any]:
+    """rag_search 의 검색 경로: 질의 임베딩 → 하이브리드 검색 → (선택) 리랭킹 → 응답 구성."""
     query = (query or "").strip()
     if not query:
         return {"status": "error", "error": "query must be a non-empty string"}
-    cluster = (cluster or "").strip() or None
-    component = (component or "").strip() or None
 
     limit = _clamp_limit(limit)
     # 리랭커가 켜져 있으면 후보를 넉넉히 가져오고(밀집 검색의 재현율), 최종 상위
@@ -115,28 +89,12 @@ def _search(query: str, cluster: str | None, component: str | None,
     except Exception as exc:  # noqa: BLE001 - 어떤 임베딩 실패든 그대로 드러냄
         return {"status": "error", "error": f"embedding failed: {exc}"}
 
-    def _run(narrow_cluster: str | None) -> list[Any]:
-        conditions = _build_conditions(component, narrow_cluster)
-        query_filter = Filter(must=conditions) if conditions else None
-        # 하이브리드가 켜져 있으면 하이브리드(밀집 + BM25 희소, RRF 결합), 아니면 밀집 전용.
-        return list(vectorstore.query(
-            _qdrant, COLLECTION, vector, query,
-            query_filter=query_filter, limit=fetch,
-        ))
-
     try:
-        points = _run(cluster)
-        # None = 클러스터를 요청하지 않음; True = 해당 클러스터로 한정됨; False =
-        # 소프트 필터의 전체 범위 대체 검색이 실행됨.
-        cluster_narrowed: bool | None = None
-        if cluster is not None:
-            cluster_narrowed = True
-            if not points:
-                # 소프트 필터: 같은 클러스터 결과가 없음 — "이전 발생 없음"이라고
-                # 답하기 전에 전체 범위로 다시 검색 (새 클러스터에서 증상이 처음
-                # 나타났을 때도 전체 범위의 선례가 보여야 함).
-                points = _run(None)
-                cluster_narrowed = False
+        # 하이브리드가 켜져 있으면 하이브리드(밀집 + BM25 희소, RRF 결합), 아니면 밀집 전용.
+        points = list(vectorstore.query(
+            _qdrant, COLLECTION, vector, query,
+            query_filter=None, limit=fetch,
+        ))
     except UnexpectedResponse as exc:
         if exc.status_code == 404:
             return {
@@ -175,7 +133,6 @@ def _search(query: str, cluster: str | None, component: str | None,
             "score": round(point.score, 4),
             "title": payload.get("title"),
             "source": payload.get("source"),
-            "tags": payload.get("tags"),
             "text": text[:SNIPPET_CHARS],
             "truncated": len(text) > SNIPPET_CHARS,
         }
@@ -183,33 +140,19 @@ def _search(query: str, cluster: str | None, component: str | None,
             hit["rerank_score"] = round(rr, 4)
         hits.append(hit)
 
-    response: dict[str, Any] = {
+    return {
         "status": "ok",
         "collection": COLLECTION,
         "query": query,
-        "cluster": cluster,
-        "cluster_narrowed": cluster_narrowed,
-        "component": component,
         "reranked": reranked,
         "count": len(hits),
         "results": hits,
     }
-    if cluster is not None and cluster_narrowed is False:
-        response["note"] = (
-            f"no matching knowledge tagged cluster={cluster!r}; expanded the search "
-            f"across all clusters"
-        )
-    return response
 
 
 # --- MCP 도구 (LLM에 노출됨) --------------------------------------------------
 @mcp.tool()
-def rag_search(
-    query: str,
-    cluster: str | None = None,
-    component: str | None = None,
-    limit: int = DEFAULT_LIMIT,
-) -> dict[str, Any]:
+def rag_search(query: str, limit: int = DEFAULT_LIMIT) -> dict[str, Any]:
     """지식 베이스 전체에 대한 시맨틱 검색.
 
     질문이나 작업과 관련된 문서를 가져올 때 호출하세요. 키워드가 아니라 의미로 검색하므로
@@ -219,17 +162,9 @@ def rag_search(
     Args:
         query: 찾고 있는 내용 (자연어). 예:
             '노드 재부팅 후 Longhorn 볼륨이 attaching 상태에서 멈춤'.
-        cluster: 선택적 소프트 필터 — 이 클러스터 태그(예: 'prod-01')가 붙은 지식으로
-            한정합니다. 클러스터로 한정한 검색 결과가 비어 있으면 서버가 (다른 필터는
-            유지한 채) 모든 클러스터를 대상으로 다시 검색하고 `cluster_narrowed: false`를
-            보고하므로, 같은 클러스터 결과가 비었다고 전체 범위의 선례가 가려지지
-            않습니다. 전체 범위로 검색하려면 생략하세요.
-        component: 선택적 하드 필터 — 이 컴포넌트 태그(예: 'longhorn')가 붙은 지식으로
-            한정합니다. `cluster`와 달리 빈 결과일 때 대체 검색이 없습니다: 비어 있으면
-            이 태그가 붙은 지식이 없다는 뜻입니다.
         limit: 반환할 최대 결과 수 (1-20). 기본값 5.
     """
-    return _search(query, cluster, component, limit)
+    return _search(query, limit)
 
 
 @mcp.tool()

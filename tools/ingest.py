@@ -18,19 +18,13 @@
 
 처리 과정
   1. 파일 탐색 (.md)
-  2. 파싱: YAML front matter 분리
-  3. 청킹: 헤딩 기준 섹션 → 크면 문단 단위로 나눔 (각 청크 앞에 헤딩을 붙임)
-  4. 임베딩(EMBED_BATCH_SIZE 단위) + BM25 희소 벡터
-  5. 업서트(QDRANT_UPSERT_BATCH 단위) → 줄어든 문서의 남은 청크 삭제
+  2. 청킹: 헤딩 기준 섹션 → 크면 문단 단위로 나눔 (각 청크 앞에 헤딩을 붙임)
+  3. 임베딩(EMBED_BATCH_SIZE 단위) + BM25 희소 벡터
+  4. 업서트(QDRANT_UPSERT_BATCH 단위) → 줄어든 문서의 남은 청크 삭제
 
-문서 형식 (front matter는 선택)
-    ---
-    title: Longhorn 볼륨이 attaching 상태에서 멈춤
-    tags: [longhorn, storage, node-reboot]
-    ---
-    # 본문 마크다운...
-
-  front matter에 title 이 없으면 제목은 파일 이름에서 가져옵니다.
+문서 형식
+  일반 마크다운입니다. 파일 전체를 본문으로 읽고(YAML front matter 등 메타데이터는 해석하지 않음),
+  제목(title)은 파일 이름(확장자 제외)입니다.
 
 멱등성
   청크 ID가 (source, chunk index)에서 정해지므로 다시 실행해도 중복이 생기지 않습니다. 문서를
@@ -45,9 +39,7 @@ import os
 import sys
 import uuid
 from pathlib import Path
-from typing import Any
 
-import yaml
 from qdrant_client import QdrantClient
 from qdrant_client.models import (
     FieldCondition,
@@ -62,12 +54,12 @@ import embeddings
 import vectorstore
 
 # --- 설정 ---------------------------------------------------------------------
-# 사전 필터링을 위해 키워드 인덱스를 만들 페이로드 필드. 이미 있는 인덱스를 다시 만드는 것은
+# 키워드 인덱스를 만들 페이로드 필드. 이미 있는 인덱스를 다시 만드는 것은
 # vectorstore.ensure_collection에서 무시됩니다.
 # `source`는 질의 필터가 아니라 오래된 청크 정리 필터를 위해 색인합니다.
-_INDEXED_FIELDS = ("component", "cluster", "source")
+_INDEXED_FIELDS = ("source",)
 
-# 수집기가 이해하는 파일 형식: 마크다운(front matter 인식, 섹션 청킹). 나머지는 모두 건너뜁니다.
+# 수집기가 이해하는 파일 형식: 마크다운(헤딩 기준 섹션 청킹). 나머지는 모두 건너뜁니다.
 _SUPPORTED_SUFFIXES = (".md",)
 
 logging.basicConfig(
@@ -102,20 +94,6 @@ _ID_NAMESPACE = uuid.UUID("6f3a9c1e-9b2d-5a44-8c11-a1b2c3d4e5f6")
 
 
 # --- 문서 파싱과 청킹 ---------------------------------------------------------
-def _parse_front_matter(raw: str) -> tuple[dict[str, Any], str]:
-    """선택적 YAML front matter를 본문과 분리합니다. (meta, body)를 반환합니다."""
-    if raw.startswith("---"):
-        parts = raw.split("---", 2)
-        if len(parts) == 3:
-            try:
-                meta = yaml.safe_load(parts[1]) or {}
-            except yaml.YAMLError:
-                meta = {}
-            if isinstance(meta, dict):
-                return meta, parts[2].strip()
-    return {}, raw.strip()
-
-
 def _chunk(text: str, size: int, overlap: int) -> list[str]:
     """겹침이 있는 문단 인식 문자 단위 청킹. 크기에 맞으면 문단을 통째로 유지하고,
     너무 큰 문단은 강제로 나눕니다."""
@@ -269,15 +247,13 @@ def ingest_file(client: QdrantClient, file: Path, root: Path, *, ensure: bool = 
     언제 수집하든 같은 포인트 ID를 갖습니다. `ensure`가 참이면 컬렉션이
     없을 때 만들고, `recreate`가 참이면 기존 컬렉션을 지우고 새로 만듭니다.
     """
-    raw = file.read_text(encoding="utf-8")
-    meta, body = _parse_front_matter(raw)
+    body = file.read_text(encoding="utf-8").strip()
     if not body:
         log.warning("skipping empty file %s", file)
         return 0
 
     source = str(file.relative_to(root)).replace(os.sep, "/")
-    title = meta.get("title") or file.stem
-    tags = meta.get("tags") or []
+    title = file.stem
 
     chunks = _chunk_document(body)
     dense = _embed_batch(chunks)
@@ -286,8 +262,6 @@ def ingest_file(client: QdrantClient, file: Path, root: Path, *, ensure: bool = 
     if ensure:
         _ensure_collection(client, len(dense[0]), recreate)
 
-    # front matter의 선택적 메타데이터를 필터용 페이로드로 그대로 넘깁니다.
-    extra = {k: meta[k] for k in ("component", "cluster") if meta.get(k)}
     points = [
         PointStruct(
             id=str(uuid.uuid5(_ID_NAMESPACE, f"{source}#{i}")),
@@ -296,9 +270,7 @@ def ingest_file(client: QdrantClient, file: Path, root: Path, *, ensure: bool = 
                 "text": chunk,
                 "title": title,
                 "source": source,
-                "tags": tags,
                 "chunk": i,
-                **extra,
             },
         )
         for i, (chunk, d, s) in enumerate(zip(chunks, dense, sparse))
