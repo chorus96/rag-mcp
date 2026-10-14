@@ -78,8 +78,8 @@ done
 
 # --- 3. 설정과 문서의 환경 변수 -----------------------------------------------------------
 section "3. 환경 변수"
-# 코드가 읽는 변수 (EMBEDDINGS_PROVIDER는 지원 값이 하나뿐이라 문서화하지 않음)
-code_vars=$(grep -ohE 'os\.environ\.get\("[A-Z_]+' tools/*.py | sed 's/.*"//' | sort -u | grep -vx EMBEDDINGS_PROVIDER)
+# 코드가 읽는 변수
+code_vars=$(grep -ohE 'os\.environ\.get\("[A-Z_]+' tools/*.py | sed 's/.*"//' | sort -u)
 missing_env=""; missing_doc=""
 for v in $code_vars; do
     grep -qE "^#? ?$v=" .env.example || missing_env="$missing_env $v"

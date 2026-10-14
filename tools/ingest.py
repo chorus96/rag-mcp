@@ -324,8 +324,8 @@ def main() -> None:
 
     emb = embeddings.describe()
     log.info(
-        "ingesting from %s -> qdrant=%s collection=%s embed=%s:%s@%s",
-        root, QDRANT_URL, COLLECTION, emb["provider"], emb["model"], emb["base_url"],
+        "ingesting from %s -> qdrant=%s collection=%s embed=%s@%s",
+        root, QDRANT_URL, COLLECTION, emb["model"], emb["base_url"],
     )
     ingest(root, args.recreate)
 

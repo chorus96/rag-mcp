@@ -159,17 +159,13 @@ def query(
     query_text: str,
     *,
     limit: int,
-    hybrid: bool = True,
 ):
     """`limit`개의 포인트를 가져옵니다.
 
-    hybrid=True (기본값): 희소 벡터를 쓸 수 있으면 밀집 + BM25 희소를 RRF로 결합 —
-    재현율이 가장 좋음; `point.score`는 (작은) RRF 결합 점수입니다.
-    hybrid=False: 일반 밀집 검색 — `point.score`는 코사인 유사도입니다. 호출자가
-    코사인 값으로 임계값을 판단할 때 사용하세요. 결합 점수는
-    척도가 다르기 때문입니다.
-    희소 벡터를 쓸 수 없으면 항상 밀집 전용으로 대체됩니다."""
-    sparse = embed_query_sparse(query_text) if (hybrid and query_text) else None
+    희소 벡터를 쓸 수 있으면 밀집 + BM25 희소를 RRF로 결합합니다(하이브리드). 이때 `point.score`는
+    (작은) RRF 결합 점수입니다. 희소 벡터를 쓸 수 없으면(RAG_HYBRID=false, Kiwi 없음, 빈 질의)
+    밀집 검색만 하며 `point.score`는 코사인 유사도입니다."""
+    sparse = embed_query_sparse(query_text) if query_text else None
 
     if sparse is not None:
         result = client.query_points(

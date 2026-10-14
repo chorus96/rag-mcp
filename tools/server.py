@@ -245,10 +245,10 @@ def main() -> None:
     emb = embeddings.describe()
     rr = reranker.describe()
     log.info(
-        "starting rag-mcp on %s:%s (qdrant=%s, collection=%s, embed=%s:%s@%s, "
+        "starting rag-mcp on %s:%s (qdrant=%s, collection=%s, embed=%s@%s, "
         "hybrid=%s, rerank=%s)",
         MCP_HOST, MCP_PORT, QDRANT_URL, COLLECTION,
-        emb["provider"], emb["model"], emb["base_url"],
+        emb["model"], emb["base_url"],
         vectorstore.sparse_available(),  # 시작 시 BM25를 로드 (빠른 실패)
         f"{rr['model']}@{rr['base_url']}" if rr["enabled"] else "off",
     )

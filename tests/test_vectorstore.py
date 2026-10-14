@@ -2,8 +2,7 @@
 
 확인하는 것
   - 명명된 벡터: 밀집 벡터만, 또는 밀집 + 희소 벡터를 올바른 이름으로 담음
-  - 질의 경로: 희소 벡터가 있으면 prefetch 두 개 + RRF 결합(하이브리드),
-    없거나 hybrid=False 이면 밀집 검색만 함 (hybrid=False 이면 희소 벡터를 계산조차 안 함)
+  - 질의 경로: 희소 벡터가 있으면 prefetch 두 개 + RRF 결합(하이브리드), 없으면 밀집 검색만 함
   - 대체 동작: Kiwi BM25를 불러올 수 없으면 희소 관련 함수가 None 을 돌려줌 (밀집 전용으로 동작)
 
 방법
@@ -74,17 +73,6 @@ def test_query_hybrid_uses_prefetch_and_fusion(monkeypatch):
     assert len(call["prefetch"]) == 2                      # 밀집 + 희소
     assert isinstance(call["query"], FusionQuery)          # RRF 결합
     assert call["limit"] == 7
-
-
-def test_query_hybrid_false_forces_dense(monkeypatch):
-    # hybrid=False이면 희소 벡터를 아예 계산하지 않아야 합니다.
-    def _boom(_t):
-        raise AssertionError("sparse must not be embedded when hybrid=False")
-
-    monkeypatch.setattr(vectorstore, "embed_query_sparse", _boom)
-    client = _FakeClient()
-    vectorstore.query(client, "kb", [0.1], "q", limit=3, hybrid=False)
-    assert client.calls[0]["using"] == vectorstore.DENSE
 
 
 # --- BM25 모델이 없을 때 ------------------------------------------------------
