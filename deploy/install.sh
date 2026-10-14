@@ -220,7 +220,7 @@ cat <<EOF
        (EMBEDDINGS_BASE_URL / EMBEDDINGS_API_KEY / EMBEDDINGS_MODEL)
        \${EDITOR:-vi} $ENV_FILE
        systemctl --user restart rag-mcp
-  2. 문서 색인 (정식 문서는 $KNOWLEDGE_DIR/official/ 에 넣습니다):
+  2. 문서 색인 (문서는 $KNOWLEDGE_DIR/official/ 에 넣습니다):
        rag-ingest
   3. 상태 확인:
        systemctl --user status qdrant rag-mcp
