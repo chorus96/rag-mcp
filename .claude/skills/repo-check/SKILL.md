@@ -18,7 +18,7 @@ bash .claude/skills/repo-check/scripts/check.sh
 | 구역 | 확인하는 것 |
 |------|------|
 | 1. 파이썬 | `tools/*.py` 문법, `tests/` 테스트 (테스트 패키지가 없으면 `.venv/`에 자동 설치) |
-| 2. 배포 스크립트 | `install.sh`·`uninstall.sh`·`rag-ingest`·`rag-promote` 문법, `install.sh`의 복사 목록과 `tools/*.py` 일치, 두 명령 템플릿의 자리 표시자(`@...@`)를 `install.sh`가 모두 채우는지 |
+| 2. 배포 스크립트 | `install.sh`·`uninstall.sh`·`rag-ingest` 문법, `install.sh`의 복사 목록과 `tools/*.py` 일치, 명령 템플릿의 자리 표시자(`@...@`)를 `install.sh`가 모두 채우는지 |
 | 3. 환경 변수 | 코드가 읽는 변수가 `.env.example`과 README의 설정 표에 모두 있는지, `.env.example`에 같은 줄 끝 주석이 없는지(systemd 규칙), `RAG_KNOWLEDGE_DIR=` 줄이 정확히 1개인지 |
 | 4. 플러그인 | 마켓플레이스·플러그인 JSON 형식, `claude plugin validate --strict`, 플러그인을 고쳤는데 `version`을 올리지 않았는지 |
 | 5. 문서 링크 | README, 플러그인 스킬의 상대 경로 링크와 `#섹션` 링크가 실제로 있는지 |
@@ -45,8 +45,8 @@ bash .claude/skills/repo-check/scripts/check.sh
 - **코드를 고쳤다면**
   - 검색 도구(`@mcp.tool()`)의 docstring은 LLM에 보이는 도구 설명입니다. 동작이 바뀌었으면 설명도
     맞게 고쳤는지 확인하세요.
-  - 모델에게 노출되는 쓰기 도구는 `rag_add_document`, `rag_delete_document`뿐이고, `RAG_MCP_WRITE`가 꺼져
-    있으면(기본값) 둘 다 등록되지 않는지 확인하세요. 쓰기 도구가 문서 디렉터리의 `draft/` 밖을 건드리지 않는지도 보세요. 그 밖의 쓰기는 `rag-ingest`와 사람 전용 명령 `rag-promote`로만 합니다.
+  - MCP 도구는 모두 읽기 전용이어야 합니다. 새 도구가 Qdrant나 문서 디렉터리에 쓰지 않는지 확인하세요.
+    지식 베이스 기록은 사람이 실행하는 `rag-ingest`로만 합니다.
   - 새 환경 변수를 추가했다면 `.env.example`과 README의 설정 표에 함께 넣었는지 확인하세요.
 - **설치 구조를 고쳤다면** (`deploy/`)
   - `install.sh`와 `uninstall.sh`의 경로가 서로 같은지, systemd 유닛(`deploy/systemd/`)의 `%h` 경로와도

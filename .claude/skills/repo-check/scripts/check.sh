@@ -57,7 +57,7 @@ section "2. 배포 스크립트"
 for f in deploy/install.sh deploy/uninstall.sh; do
     if bash -n "$f" 2>/dev/null; then pass "$f 문법"; else fail "$f 문법 오류"; fi
 done
-for f in deploy/rag-ingest deploy/rag-promote; do
+for f in deploy/rag-ingest; do
     if sh -n "$f" 2>/dev/null; then pass "$f 문법"; else fail "$f 문법 오류"; fi
 done
 
@@ -70,8 +70,8 @@ else
     fail "install.sh 복사 목록과 tools/*.py 가 다름 (install.sh: $(echo $listed) / tools: $(echo $actual))"
 fi
 
-# 명령 템플릿(rag-ingest, rag-promote)의 자리 표시자를 install.sh가 모두 채우는지
-for ph in $(cat deploy/rag-ingest deploy/rag-promote | grep -oE '@[A-Z_]+@' | sort -u); do
+# 명령 템플릿(rag-ingest)의 자리 표시자를 install.sh가 모두 채우는지
+for ph in $(grep -oE '@[A-Z_]+@' deploy/rag-ingest | sort -u); do
     if grep -q "s|$ph|" deploy/install.sh; then pass "명령 템플릿 자리 표시자 $ph 처리됨"
     else fail "명령 템플릿 자리 표시자 $ph 를 install.sh가 채우지 않음"; fi
 done

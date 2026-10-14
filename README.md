@@ -8,8 +8,8 @@ agentic retrieval).
 
 ## 특징
 
-- **기본은 읽기 전용** — 기본 설정에서 모델은 *검색*과 *문서 목록 조회*만 할 수 있습니다. 문서 기록은 수집
-  명령(`rag-ingest`)으로 이루어집니다. 원하면 모델이 초안(`draft/`)을 추가·삭제하는 쓰기 도구를 켤 수 있습니다.
+- **읽기 전용** — 모델은 *검색*만 할 수 있습니다. 지식 베이스 기록은 사람이 수집 명령(`rag-ingest`)으로
+  합니다.
 - **하이브리드 검색** — 의미 기반 밀집(dense) 벡터와 BM25 키워드 희소(sparse) 벡터를 Reciprocal Rank
   Fusion(RRF)으로 결합합니다. `CrashLoopBackOff` 같은 에러 문자열이나 리소스 이름도 정확히 찾습니다.
 - **선택적 리랭킹** — Cohere/Jina 호환 크로스 인코더로 결과 순서를 다시 매겨 정밀도를 높입니다.
@@ -25,7 +25,7 @@ agentic retrieval).
 
 | 원칙 | 내용 |
 |------|------|
-| **기본은 읽기 전용** | 기본 설정에서 MCP 도구는 검색과 문서 목록 조회만 합니다. 지식 베이스 기록은 수집 명령(`rag-ingest`)으로 이루어집니다. 모델이 문서를 추가·삭제하는 쓰기 도구는 운영자가 `RAG_MCP_WRITE=true`로 켤 때만 등록됩니다. |
+| **읽기 전용** | MCP 도구는 검색만 합니다. 모델은 지식 베이스를 바꿀 수 없고, 기록은 사람이 수집 명령(`rag-ingest`)으로 합니다. 서버는 문서 디렉터리를 읽거나 쓰지 않습니다. |
 | **벤더 중립** | 채팅 LLM은 연결하는 MCP 클라이언트가 정합니다. 임베딩은 사내 서버의 OpenAI 호환 `/v1/embeddings`로 요청하므로 특정 모델이나 제품에 묶이지 않습니다. |
 | **수집과 질의의 일관성** | 수집과 질의가 같은 임베딩 코드와 설정을 공유하도록 만들어, 벡터가 어긋날 여지를 없앴습니다. |
 | **실패해도 검색은 유지** | 리랭킹, BM25, 오래된 청크 정리 같은 부가 기능은 실패하면 조용히 건너뛰고, 기본 검색은 계속 동작합니다(최선형, best-effort). |
@@ -37,7 +37,6 @@ agentic retrieval).
 | **rag-mcp 서버** (`tools/server.py`) | MCP 도구를 `http://<서버>:8084/mcp`(streamable-http)로 제공 |
 | **Qdrant** | 문서 청크의 벡터를 저장하는 벡터 DB (`127.0.0.1:6333`) |
 | **rag-ingest** (`tools/ingest.py`) | 문서를 청크로 나누고 임베딩해 Qdrant에 기록하는 수집 명령 |
-| **rag-promote** (`tools/promote.py`) | 검토한 초안(`draft/`)을 정식 문서(`official/`)로 올리는 사람 전용 명령 |
 | **사내 임베딩 서버** | 텍스트를 벡터로 바꾸는 OpenAI 호환 서버 — **rag-mcp에 포함되지 않음, 사내 서버에 연결** |
 | **Claude Code 플러그인** (`plugins/rag-mcp`) | Claude Code에서 rag-mcp 서버에 연결하고, 도구 사용법을 스킬로 안내 |
 
@@ -47,7 +46,7 @@ agentic retrieval).
                        WRITE PATH — populate the KB
   ┌───────────────────────────┐
   │       knowledge/**        │   your markdown docs,
-  │    official/ · draft/     │   optional YAML front matter
+  │         official/         │   optional YAML front matter
   └─────────────┬─────────────┘
                 │
                 ▼
@@ -74,15 +73,13 @@ agentic retrieval).
                 │                                         │
   ┌─────────────┴───────────────────────────────┐         │
   │            rag-mcp     :8084/mcp            │         │
-  │   FastMCP server — read tools               │         │
+  │   FastMCP server — read-only tools          │         │
   │                                             │  2. em- │
   │   rag_search          search_official       │  beds   │
-  │   search_draft        rag_collections       │◄────────┘
-  │   rag_health          rag_list_documents    │  the
+  │   rag_collections     rag_health            │◄────────┘
+  │                                             │  the
   │   (+ optional step 3: cross-encoder rerank  │  query
   │     via a Cohere/Jina-compatible /rerank)   │
-  │   (+ opt-in write tools, draft/ only:       │
-  │     rag_add_document · rag_delete_document) │
   └──▲──────────────────────────────────────────┘
      │
      │  MCP streamable-http
@@ -95,12 +92,11 @@ agentic retrieval).
   └──────────────────────┘
 ```
 
-- **쓰기 경로:** `rag-ingest`가 문서 디렉터리(`official/`, `draft/`)의 문서를 읽어 청크로 나누고, 사내 임베딩 서버로
+- **쓰기 경로:** `rag-ingest`가 문서 디렉터리(`official/`)의 문서를 읽어 청크로 나누고, 사내 임베딩 서버로
   벡터를 만들어 Qdrant에 저장합니다. BM25 희소 벡터는 rag-mcp가 직접(Kiwi 형태소 분석) 계산합니다.
 - **읽기 경로:** MCP 클라이언트가 검색 도구를 호출하면, rag-mcp가 **같은 사내 임베딩 서버**로 질의를
   벡터로 바꾸고 Qdrant에서 하이브리드 검색한 뒤 (선택적으로 리랭킹해) 결과를 돌려줍니다.
-- **(선택) MCP 쓰기 도구:** 설정으로 켜면 모델이 `draft/` 아래에 초안 문서를 추가·삭제할 수 있습니다.
-  정식 문서로 올리는 것은 사람이 `rag-promote` 명령으로 합니다.
+- **쓰기 경로는 사람만:** MCP 도구는 모두 읽기 전용입니다. 모델은 지식 베이스를 바꿀 수 없습니다.
 
 ## 빠른 시작
 
@@ -121,7 +117,7 @@ git clone https://github.com/chorus96/rag-mcp.git && cd rag-mcp
 ./deploy/install.sh             # Qdrant + rag-mcp 설치, systemd 사용자 서비스로 시작
 ```
 
-`rag-ingest`·`rag-promote` 명령은 `~/.local/bin`에 설치됩니다. 이 경로가 PATH에 없으면 설치 스크립트가 알려
+`rag-ingest` 명령은 `~/.local/bin`에 설치됩니다. 이 경로가 PATH에 없으면 설치 스크립트가 알려
 줍니다.
 
 ### 2. 사내 임베딩 서버 지정
@@ -173,11 +169,10 @@ Claude Code라면 [플러그인](#claude-code-플러그인-권장)으로 연결�
 | `~/.local/share/rag-mcp/app`, `~/.local/share/rag-mcp/venv` | 애플리케이션 코드와 Python 가상환경 |
 | `~/.local/share/rag-mcp/qdrant/qdrant` | Qdrant 바이너리 (기본 `v1.12.4`, `127.0.0.1`에만 바인드) |
 | `~/.config/rag-mcp/rag-mcp.env` | 설정 파일 ([.env.example](.env.example) 복사본, 권한 600) |
-| `~/.local/share/rag-mcp/data/knowledge` | [문서 디렉터리](#문서-디렉터리): `official/`(정식 문서, 샘플 포함), `draft/`(모델이 만든 초안) |
+| `~/.local/share/rag-mcp/data/knowledge` | [문서 디렉터리](#문서-디렉터리): `official/`(사람이 관리하는 문서, 샘플 포함) |
 | `~/.local/share/rag-mcp/data/qdrant` | Qdrant 데이터 |
 | `~/.config/systemd/user/{qdrant,rag-mcp}.service` | systemd 사용자 서비스 ([`deploy/systemd/`](deploy/systemd), 경로는 `%h`) |
 | `~/.local/bin/rag-ingest` | 문서 수집 명령 |
-| `~/.local/bin/rag-promote` | 초안(`draft/`) 승격 명령 |
 
 ### 운영 명령
 
@@ -187,7 +182,6 @@ Claude Code라면 [플러그인](#claude-code-플러그인-권장)으로 연결�
 | 로그 | `journalctl --user -u rag-mcp -f` |
 | 설정 적용 | `systemctl --user restart rag-mcp` |
 | 문서 수집 | `rag-ingest [--recreate]` |
-| 초안 목록 / 승격 | `rag-promote` / `rag-promote <source> [--overwrite]` |
 | 업그레이드 | `./deploy/install.sh` |
 | 제거 (설정·데이터 유지) | `./deploy/uninstall.sh` |
 | 제거 (모두 삭제) | `./deploy/uninstall.sh --purge` |
@@ -215,7 +209,7 @@ Claude Code라면 [플러그인](#claude-code-플러그인-권장)으로 연결�
 - **systemd 샌드박스 옵션(`ProtectSystem` 등)은 쓰지 않습니다.** 사용자 systemd에서는 배포판에 따라 이
   옵션들이 동작하지 않거나 서비스 시작을 막을 수 있습니다. 대신 데이터와 설정 디렉터리를 본인만 접근할 수
   있게(`700`/`600`) 만듭니다.
-- **`rag-ingest`·`rag-promote`는 깨끗한 환경에서 실행합니다.** 호출한 셸의 환경 변수를 넘기지 않고 설정
+- **`rag-ingest`는 깨끗한 환경에서 실행합니다.** 호출한 셸의 환경 변수를 넘기지 않고 설정
   파일만으로 환경을 만들어, 서비스와 같은 조건으로 색인합니다.
 
 ## MCP 클라이언트 연결
@@ -230,7 +224,7 @@ Claude Code라면 [플러그인](#claude-code-플러그인-권장)으로 연결�
 
 | 스킬 | 내용 |
 |------|------|
-| `rag-knowledge` | 언제 어떤 도구를 쓸지 안내 (검색, 문서 목록, 쓰기 도구를 켰을 때의 초안 추가·삭제) |
+| `rag-knowledge` | 언제 어떤 검색 도구를 쓸지, 결과를 어떻게 인용할지 안내 |
 
 ```text
 /plugin marketplace add chorus96/rag-mcp
@@ -296,39 +290,35 @@ RAG_MCP_URL=http://10.0.0.5:8084/mcp claude
 
 | 도구 | 용도 |
 |------|---------|
-| `rag_search(query, doc_type?, cluster?, component?, limit?)` | 지식 베이스 전체에 대한 시맨틱 검색 (`doc_type`: `official` 또는 `draft`) |
-| `search_official(query, cluster?, component?, limit?)` | 정식 문서(`official/`)만 검색 — `doc_type=official`로 고정 |
-| `search_draft(query, cluster?, component?, limit?)` | 초안(`draft/`)만 검색 — `doc_type=draft`로 고정 |
+| `rag_search(query, doc_type?, cluster?, component?, limit?)` | 지식 베이스 전체에 대한 시맨틱 검색 |
+| `search_official(query, cluster?, component?, limit?)` | `official/` 문서만 검색 — `doc_type=official`로 고정 |
 | `rag_collections()` | 컬렉션 목록과 포인트 수 (지식 베이스가 채워졌는지 확인) |
 | `rag_health()` | Qdrant와 사내 임베딩 서버 접근 가능 여부, 리랭커·하이브리드 설정 |
-| `rag_list_documents(folder?, subdir?, limit?)` | 문서 파일 목록 — [문서 목록 보기](#문서-목록-보기-rag_list_documents) |
-| `rag_add_document(title, content, tags?, component?, cluster?, overwrite?)` | (선택) `draft/`에 문서 추가 — [쓰기 도구와 초안 승격](#쓰기-도구와-초안-승격) |
-| `rag_delete_document(source)` | (선택) `draft/` 문서 삭제 — 파일과 청크를 함께 삭제 |
+
+도구는 모두 **읽기 전용**입니다. 지식 베이스를 바꾸는 도구는 없습니다.
 
 검색 도구의 `limit`은 1부터 `RAG_MAX_LIMIT`(기본 20) 사이로 제한되며, 생략하면 `RAG_DEFAULT_LIMIT`(기본 5)입니다.
-결과의 `source`가 `official/`로 시작하면 정식 문서, `draft/`로 시작하면 아직 검토하지 않은 초안입니다.
+결과의 `source`는 원본 문서의 경로(예: `official/longhorn-volume-attach.md`)입니다.
 
-### 정식 문서·초안 검색 (`search_official`, `search_draft`)
+### 검색 사용 예
 
-세 검색 도구는 같은 검색 경로를 쓰고, 어느 폴더의 문서를 대상으로 하는지만 다릅니다. Claude Code에서는 자연어로 물으면
-플러그인의 `rag-knowledge` 스킬이 알맞은 도구를 고릅니다(검토된 정식 문서부터 찾고, 없으면 초안을 봅니다).
+Claude Code에서는 자연어로 물으면 플러그인의 `rag-knowledge` 스킬이 알맞은 도구를 고릅니다.
 
 | 요청 예 | 도구 호출 | 검색 대상 |
 |------|------|------|
-| "Longhorn 볼륨이 attaching에서 멈췄을 때 어떻게 해?" | `search_official(query="Longhorn 볼륨이 attaching 상태에서 멈춤")` | `official/`만 |
-| "longhorn 관련 정식 문서만 찾아 줘" | `search_official(query="볼륨 복구", component="longhorn")` | `official/` 중 `component: longhorn` |
-| "최근에 추가된 초안 중에 볼륨 복구 내용 있어?" | `search_draft(query="볼륨 복구 절차")` | `draft/`만 |
-| "prod-01 클러스터 기준으로 초안까지 다 찾아 줘" | `rag_search(query="볼륨 복구", cluster="prod-01")` | 둘 다 (`cluster`는 소프트 필터) |
-| — | `rag_search(query="볼륨 복구", doc_type="draft")` | `search_draft`와 같음 |
+| "Longhorn 볼륨이 attaching에서 멈췄을 때 어떻게 해?" | `rag_search(query="Longhorn 볼륨이 attaching 상태에서 멈춤")` | 전체 |
+| "longhorn 관련 문서만 찾아 줘" | `rag_search(query="볼륨 복구", component="longhorn")` | `component: longhorn`인 문서 |
+| "prod-01 클러스터 기준으로 찾아 줘" | `rag_search(query="볼륨 복구", cluster="prod-01")` | `cluster`는 소프트 필터 |
+| — | `search_official(query="볼륨 복구")` | `rag_search(..., doc_type="official")`과 같음 |
 
-응답 예 (`search_draft(query="볼륨 복구 절차", limit=1)`):
+응답 예 (`rag_search(query="볼륨이 attaching 에서 멈춤", limit=1)`):
 
 ```json
 {
   "status": "ok",
   "collection": "rag_kb",
-  "query": "볼륨 복구 절차",
-  "doc_type": "draft",
+  "query": "볼륨이 attaching 에서 멈춤",
+  "doc_type": null,
   "cluster": null,
   "cluster_narrowed": null,
   "component": null,
@@ -337,24 +327,22 @@ RAG_MCP_URL=http://10.0.0.5:8084/mcp claude
   "results": [
     {
       "score": 0.0328,
-      "doc_type": "draft",
-      "title": "Longhorn 볼륨 복구 절차",
-      "source": "draft/longhorn-볼륨-복구.md",
-      "tags": ["longhorn"],
-      "text": "# 절차\n1. 볼륨을 detach 합니다 ...",
+      "doc_type": "official",
+      "title": "Longhorn 볼륨이 attaching 상태에서 멈춤",
+      "source": "official/longhorn-volume-attach.md",
+      "tags": ["longhorn", "storage"],
+      "text": "# 증상\n노드 재부팅 후 ...",
       "truncated": false
     }
   ]
 }
 ```
 
-- `doc_type`은 결과마다 `official` 또는 `draft`이고, `source`의 맨 앞 폴더와 같습니다. 초안을 근거로 답할 때는
-  검토 전이라는 점을 밝히세요.
+- `doc_type`은 `source`의 맨 앞 폴더 이름(`official`)입니다.
 - `score`는 하이브리드 검색에서 RRF 결합 점수라 작은 값으로 나옵니다([쉬운 설명](#쉬운-설명-질의-하나가-처리되는-과정)).
   리랭킹이 켜져 있으면 `reranked: true`와 함께 결과마다 `rerank_score`가 붙습니다.
 - `text`는 `RAG_SNIPPET_CHARS`(기본 1200자)까지만 돌려주고, 잘렸으면 `truncated: true`입니다.
-- 결과가 없으면 `count: 0`, `results: []`입니다. 정식 문서에서 찾지 못하면 `search_draft`나 표현을 바꾼 질의로
-  다시 찾아보세요.
+- 결과가 없으면 `count: 0`, `results: []`입니다. 표현을 바꾼 질의로 다시 찾아보세요.
 
 ### 필터의 의미
 
@@ -373,105 +361,32 @@ RAG_MCP_URL=http://10.0.0.5:8084/mcp claude
 | `true` | 지정한 클러스터 안에서 결과를 찾음 |
 | `false` | 같은 클러스터에는 없어서 전체 범위 결과를 돌려줌 (응답에 `note` 포함) |
 
-### 문서 목록 보기 (`rag_list_documents`)
-
-검색이 "어떤 내용이 있나"에 답한다면, 이 도구는 문서 디렉터리에 "어떤 파일이 있나"에 답합니다. 읽기 전용이라
-항상 켜져 있습니다. Claude Code에서는 "어떤 문서가 있어?", "검토할 초안은?"처럼 자연어로 물으면 모델이 알맞은
-호출을 고릅니다.
-
-| 요청 예 | 도구 호출 | 결과 |
-|------|------|------|
-| "지식 베이스에 어떤 문서가 있어?" | `rag_list_documents()` | `official/` 전체 |
-| "official/team-a 폴더 문서만 보여 줘" | `rag_list_documents(subdir="team-a")` | `official/team-a/` 아래만 |
-| "검토할 초안 목록 보여 줘" | `rag_list_documents(folder="draft")` | `draft/` 전체 (항목마다 `promote_to` 포함) |
-| "색인 안 된 문서 있어?" | `rag_list_documents()` | `chunks`가 0인 항목 확인 |
-| — | `rag_list_documents(limit=500)` | 최대 500개까지 (기본 100) |
-| — | `rag_list_documents(folder="team-a")` | 오류 — `folder`는 `official`/`draft`만 |
-| — | `rag_list_documents(subdir="../draft")` | 오류 — `folder` 밖을 가리킴 |
-
-응답 예 (`rag_list_documents(folder="draft")`):
-
-```json
-{
-  "status": "ok",
-  "folder": "draft/",
-  "total": 1,
-  "returned": 1,
-  "truncated": false,
-  "documents": [
-    {
-      "source": "draft/longhorn-볼륨-복구.md",
-      "title": "Longhorn 볼륨 복구 절차",
-      "doc_type": "draft",
-      "size_bytes": 1532,
-      "modified": "2026-10-07T05:12:40+00:00",
-      "chunks": 2,
-      "promote_to": "official/longhorn-볼륨-복구.md"
-    }
-  ]
-}
-```
-
-| 필드 | 의미 |
-|------|------|
-| `source`, `title`, `doc_type` | 문서 경로, 제목, 유형 (`doc_type`은 폴더 이름 `official`/`draft`로, 검색 필터 값과 같음) |
-| `size_bytes`, `modified` | 파일 크기, 마지막 수정 시각 (UTC) |
-| `chunks` | 색인된 청크 수. **0이면 파일은 있지만 아직 `rag-ingest` 전이라 검색되지 않음.** Qdrant에 연결하지 못하면 `null` |
-| `promote_to` | (초안만) `rag-promote <source>`로 승격하면 옮겨질 위치 |
-| `total`, `returned`, `truncated` | 전체 개수, 돌려준 개수(기본 100, 최대 500), 잘렸는지. `draft/`가 아직 없으면 빈 목록 |
-
-처리 과정과 설계 (`documents.list_documents`):
-
-1. `folder`가 `official`/`draft`인지, `subdir`를 정규화했을 때 그 폴더 안인지 확인합니다.
-2. 폴더 아래의 `.md`를 경로 순으로 모으고, 앞에서부터 `limit`개만 자세히 읽습니다.
-3. front matter에서 `title`을 읽고, `doc_type`은 수집과 같은 규칙(`ingest._doc_type`, 폴더 이름)으로
-   정합니다.
-4. 돌려줄 `source`들로 Qdrant **facet**(`source` 키, `MatchAny` 필터)을 한 번 호출해 문서별 청크 수를 셉니다.
-
-- **목록은 파일에서, 색인 상태는 Qdrant에서 가져옵니다.** 원본은 문서 디렉터리이므로 파일을 기준으로 해야 아직
-  색인하지 않은 문서(`chunks: 0`)도 보입니다.
-- **청크 수는 요청 한 번으로 셉니다.** 문서마다 `count`를 호출하면 목록 길이만큼 요청이 늘어납니다. `source`는
-  이미 키워드 인덱스가 있으므로 facet으로 한 번에 셀 수 있습니다.
-- **Qdrant가 실패해도 목록은 돌려줍니다.** 그때 `chunks`는 `null`(알 수 없음)이고, 0(색인 전)과 구분됩니다.
-- **본문은 돌려주지 않습니다.** 응답을 작게 유지하고, 내용 확인은 검색 도구로 하게 합니다.
-
 ## 문서 디렉터리
 
 지식 베이스의 **원본은 문서 디렉터리**입니다. 기본 위치는 `~/.local/share/rag-mcp/data/knowledge`이고, 설정 파일의
 `RAG_KNOWLEDGE_DIR`로 바꿀 수 있습니다. Qdrant의 포인트는 이 디렉터리의 파일에서 만든 사본이므로, 언제든
-`rag-ingest --recreate`로 다시 만들 수 있습니다. MCP 쓰기 도구로 추가한 문서도 먼저 파일로 저장한 뒤 색인합니다.
+`rag-ingest --recreate`로 다시 만들 수 있습니다. MCP 서버는 이 디렉터리를 읽거나 쓰지 않습니다.
 
 ### 폴더 구조
 
 ```text
 knowledge/
-├── official/                  정식 문서 — 사람이 관리
-│   ├── longhorn-volume-attach.md      → source: official/longhorn-volume-attach.md
-│   └── team-a/...                     (선택) 하위 폴더로 나눠도 됨
-└── draft/                     초안 — 모델이 MCP 쓰기 도구로 만듦
-    └── longhorn-볼륨-복구.md          → source: draft/longhorn-볼륨-복구.md
+└── official/                  사람이 관리하는 문서
+    ├── longhorn-volume-attach.md      → source: official/longhorn-volume-attach.md
+    └── team-a/...                     (선택) 하위 폴더로 나눠도 됨
 ```
 
-| 폴더 | 쓰는 주체 | 들어오는 경로 | 나가는 경로 | 검색 |
-|------|------|------|------|------|
-| `official/` | 사람 | 파일 복사 + `rag-ingest`, 또는 `rag-promote` 승격 | 사람이 파일 삭제 후 `--recreate` | `rag-ingest` 후 |
-| `draft/` | 모델 (`RAG_MCP_WRITE=true`일 때만) | `rag_add_document` | `rag_delete_document`, 또는 `rag-promote`로 `official/`에 승격 | 저장 즉시 |
-
-- **문서의 흐름은 모델이 `draft/`에 작성 → 사람이 검토 → `rag-promote`로 `official/`에 승격입니다.** 설치
-  스크립트가 두 폴더를 만들고, 샘플 문서를 `official/`에 넣어 둡니다.
-- **문서는 두 폴더 안에만 두세요.** 문서 디렉터리 바로 아래나 다른 폴더에 둔 문서는 `rag-ingest`가 수집하지 않고,
-  건너뛴 개수를 경고로 알려 줍니다(`ingest._discover_files`).
-- **두 폴더 모두 검색 대상입니다.** 초안은 저장 즉시 검색되고, 검토 여부는 `source`로 구분합니다.
-- **폴더가 곧 문서 유형입니다.** `official/` 아래 문서는 `doc_type=official`, `draft/` 아래 문서는 `doc_type=draft`로
-  색인되고, `search_official`·`search_draft`와 `rag_search`의 `doc_type` 필터가 이 값을 씁니다. 그래서 승격은
-  `draft/<경로>` → `official/<경로>`로 맨 앞 폴더만 바꾸는 이동이면 되고, 승격하면 유형도 함께 바뀝니다.
+- **문서는 `official/` 안에만 두세요.** 문서 디렉터리 바로 아래나 다른 폴더에 둔 문서는 `rag-ingest`가 수집하지
+  않고, 건너뛴 개수를 경고로 알려 줍니다(`ingest._discover_files`). 설치 스크립트가 `official/`을 만들고 샘플
+  문서를 넣어 둡니다.
+- **폴더가 곧 문서 유형입니다.** `official/` 아래 문서는 `doc_type=official`로 색인되고, `search_official`과
+  `rag_search`의 `doc_type` 필터가 이 값을 씁니다.
 - **`source`는 문서 디렉터리 기준 상대 경로입니다.** 포인트 ID(`uuid5(source#chunk)`)와 오래된 청크 정리의 기준이
   되고, 검색 결과에도 그대로 나옵니다.
-- **권한 경계는 디렉터리 하나로 판단합니다.** MCP 쓰기 도구는 경로를 정규화한 뒤 `draft/` 안인지만 확인하므로
-  (`documents._resolve_source`), `official/`을 비롯한 그 밖의 경로는 모델이 만들거나 지울 수 없습니다.
-- **서버가 문서 디렉터리를 읽는 것은 `rag_list_documents`뿐입니다.** 검색은 Qdrant만 씁니다.
+- **문서를 바꾸는 것은 사람뿐입니다.** 파일을 넣거나 고치거나 지운 뒤 `rag-ingest`(지우거나 이름을 바꿨다면
+  `--recreate`)를 실행합니다. MCP 서버는 이 디렉터리를 읽거나 쓰지 않습니다.
 
-### 정식 문서 추가하기
+### 문서 추가하기
 
 `official/`에 마크다운(`.md`) 파일을 넣고 수집 명령을 실행합니다. 서버 재시작은 필요 없습니다.
 
@@ -483,7 +398,7 @@ rag-ingest --recreate           # 컬렉션을 지우고 전체 재구축
 
 - `rag-ingest`는 서버와 같은 설정 파일을 읽으므로, 서버와 정확히 같은 임베딩 설정을 사용합니다.
 - 요약 줄 `done: N file(s), M chunk(s)`가 예상과 맞는지 확인하세요. 문서가 빠졌다면 그 위의 로그에
-  이유(두 폴더 밖의 문서, 지원하지 않는 확장자, 빈 파일)가 나옵니다.
+  이유(`official/` 밖의 문서, 지원하지 않는 확장자, 빈 파일)가 나옵니다.
 - 정기적으로 수집하려면 cron이나 systemd 타이머에 등록하세요.
 
 ```cron
@@ -508,167 +423,10 @@ cluster: prod-eu      # 선택: 필터용
 
 - **`title`:** 생략하면 파일 이름을 씁니다.
 - **문서 유형(`doc_type`):** front matter로 정하지 않습니다. 맨 앞 폴더 이름이 유형이 됩니다
-  (`official/…` → `official`, `draft/…` → `draft`, `ingest._doc_type`). 하위 폴더 이름이나 front matter의
+  (`official/…` → `official`, `ingest._doc_type`). 하위 폴더 이름이나 front matter의
   `type`은 유형에 영향을 주지 않습니다.
 - **`component`, `cluster`, `severity`:** 검색 필터가 되지만 형식이 정해지지 않은 레이블입니다. 환경, 고객, 제품,
   팀 등 도메인에 맞게 쓰거나 생략해도 됩니다.
-
-## 쓰기 도구와 초안 승격
-
-기본 설정에서 지식 베이스에 문서를 넣는 길은 `official/`과 `rag-ingest`뿐입니다. 여기에 더해, 운영자가 켜면
-모델이 대화 중에 초안을 추가·삭제할 수 있고, 사람이 그 초안을 검토해 정식 문서로 올릴 수 있습니다.
-
-### 대화로 문서 추가·삭제하기 (MCP 쓰기 도구)
-
-설정 파일에서 쓰기 도구를 켜면, Claude Code 같은 MCP 클라이언트에서 대화로 문서를 추가하거나 삭제할 수 있습니다.
-
-```bash
-# ~/.config/rag-mcp/rag-mcp.env 에 추가한 뒤 재시작
-RAG_MCP_WRITE=true
-```
-```bash
-systemctl --user restart rag-mcp
-```
-
-그다음 "방금 정리한 내용을 지식 베이스에 추가해 줘"처럼 요청하면 모델이 `rag_add_document`로
-문서를 저장하고, "그 초안 지워 줘"처럼 요청하면 `rag_delete_document`로 지웁니다. 플러그인의
-`rag-knowledge` 스킬이 저장·삭제 전에 사용자의 확인을 받도록 안내합니다.
-
-> ⚠️ **기본으로 꺼져 있습니다.** 켜면 모델이 대화 중에 지식 베이스에 기록하거나 문서를 지울 수 있어, 잘못된
-> 내용이 쌓이거나 필요한 문서가 사라질 수 있습니다. 신뢰하는 사용자와 클라이언트만 접속하는 서버에서만 켜세요.
-> 꺼져 있으면 도구가 등록되지 않아 모델에게 보이지도 않습니다.
-
-#### `rag_add_document` 사용 예
-
-대화 흐름 예:
-
-1. 사용자: "방금 정리한 Longhorn 볼륨 복구 절차를 지식 베이스에 추가해 줘"
-2. 모델: `search_official`·`search_draft`로 같은 내용의 문서가 있는지 확인합니다.
-3. 모델: 제목·태그·컴포넌트와 본문을 보여 주고 "이대로 저장할까요?"라고 확인을 받습니다.
-4. 모델: `rag_add_document`를 호출하고, 저장된 `source`와 승격 방법을 알려 줍니다.
-
-도구 호출:
-
-```json
-{
-  "title": "Longhorn 볼륨 복구 절차",
-  "content": "# 절차\n1. 볼륨을 detach 합니다.\n2. 노드에 다시 attach 합니다.\n\n# 확인\n파드가 Running 인지 확인합니다.",
-  "tags": ["longhorn", "storage"],
-  "component": "longhorn"
-}
-```
-
-서버에 저장되는 파일 `draft/longhorn-볼륨-복구-절차.md` (인자가 front matter가 됩니다):
-
-```markdown
----
-title: Longhorn 볼륨 복구 절차
-tags:
-- longhorn
-- storage
-component: longhorn
----
-
-# 절차
-1. 볼륨을 detach 합니다.
-2. 노드에 다시 attach 합니다.
-
-# 확인
-파드가 Running 인지 확인합니다.
-```
-
-응답:
-
-```json
-{"status": "ok", "source": "draft/longhorn-볼륨-복구-절차.md", "doc_type": "draft",
- "title": "Longhorn 볼륨 복구 절차", "chunks": 2, "replaced": false}
-```
-
-- 저장 즉시 색인되어 `search_draft`·`rag_search`로 찾을 수 있습니다. `doc_type`은 항상 `draft`입니다.
-- 같은 제목으로 다시 저장하면 `{"status": "error", "source": "draft/...", "error": "a document already exists at ...;
-  pass overwrite=true to replace it"}`가 옵니다. 바꾸려면 `"overwrite": true`를 넘기고, 응답의 `replaced`가 `true`가
-  됩니다.
-- 색인만 실패하면 `"saved": true`와 오류가 함께 오고 파일은 남습니다. 원인을 고친 뒤 `rag-ingest`로 다시 색인하세요.
-- 검토가 끝나면 서버에서 `rag-promote draft/longhorn-볼륨-복구-절차.md`로 `official/`에 올립니다
-  ([초안 승격](#초안-승격-rag-promote)). 필요 없으면 `rag_delete_document`로 지웁니다(아래).
-
-#### `rag_delete_document` 사용 예
-
-대화 흐름 예:
-
-1. 사용자: "아까 저장한 Longhorn 볼륨 복구 초안 지워 줘"
-2. 모델: `rag_list_documents(folder="draft")`나 `search_draft`로 대상의 `source`를 찾습니다.
-3. 모델: `draft/longhorn-볼륨-복구-절차.md` ("Longhorn 볼륨 복구 절차")를 보여 주고 "이 문서가 맞습니까?"라고
-   확인을 받습니다. 삭제는 되돌릴 수 없습니다.
-4. 모델: `rag_delete_document`를 호출하고 결과를 알려 줍니다.
-
-도구 호출과 응답:
-
-```json
-{"source": "draft/longhorn-볼륨-복구-절차.md"}
-```
-
-```json
-{"status": "ok", "source": "draft/longhorn-볼륨-복구-절차.md", "file_deleted": true, "chunks_deleted": 2}
-```
-
-| 경우 | 응답 |
-|------|------|
-| 파일과 청크를 모두 지움 | `"file_deleted": true`, `"chunks_deleted": 2` |
-| 파일은 이미 없고 청크만 남아 있었음 | `"file_deleted": false`, `"chunks_deleted": 2` — 남은 청크를 정리 |
-| 정식 문서를 지정함 (`official/...`) | `{"status": "error", "error": "only documents under draft/ can be deleted via MCP: official/..."}` |
-| 파일도 청크도 없음 | `{"status": "error", "source": "draft/...", "error": "no document found at draft/..."}` |
-| 청크 삭제 실패 | `{"status": "error", ..., "error": "deleting chunks failed: ... (the file was not deleted)"}` — 파일은 그대로 |
-
-정식 문서(`official/`)는 MCP로 지울 수 없습니다. 서버에서 파일을 직접 지운 뒤 `rag-ingest --recreate`로 재구축하세요.
-
-| 항목 | 동작 |
-|------|------|
-| 등록 | `RAG_MCP_WRITE=true`일 때만 서버 시작 시 도구를 등록. 꺼져 있으면 도구 목록에도 없음 |
-| 쓰기 범위 | 문서 디렉터리의 **`draft/` 아래만** 추가·삭제. 사람이 관리하는 정식 문서(`official/`)는 만들거나 지울 수 없음 |
-| 저장 위치 | `<문서 디렉터리>/draft/<제목>.md` (예: `draft/longhorn-볼륨-복구.md`). 폴더가 `draft/`이므로 `doc_type`은 `draft` |
-| 파일 내용 | 인자로 받은 `title`, `tags`, `component`, `cluster`를 front matter로 쓰고 그 아래 본문 |
-| 색인 | 저장 직후 `ingest.ingest_file`로 색인 — `rag-ingest`와 같은 코드라 청크 ID·페이로드가 같음 |
-| 덮어쓰기 | 같은 경로에 파일이 있으면 `overwrite=true`일 때만 바꿈 (청크 수가 줄면 남은 청크도 정리) |
-| 크기 제한 | 본문 `RAG_MAX_DOC_CHARS`자(기본 200000)까지 |
-| 삭제 | `rag_delete_document(source)` — `draft/` 아래 문서 파일과 그 `source`의 청크를 함께 삭제 |
-
-설계상 선택과 그 이유:
-
-- **파일로 먼저 저장합니다.** 파일로 남겨야 `rag-ingest --recreate`로 재구축해도 추가한 문서가 사라지지 않고,
-  사람이 직접 확인·수정·삭제할 수 있습니다.
-- **경로는 서버가 정합니다.** 호출자는 제목만 넘기고, 파일 이름은 제목에서 만든 안전한 이름(글자·숫자·`-`)
-  입니다. 경로에는 `draft/`와 이 파일 이름만 쓰이므로 `draft/` 밖에 쓸 수 없습니다.
-- **색인에 실패해도 파일은 남깁니다.** 응답에 `saved: true`와 오류를 함께 돌려주므로, 원인을 고친 뒤
-  `rag-ingest`로 다시 색인하면 됩니다.
-- **삭제는 파일과 청크를 함께 지웁니다.** 파일이 이미 없고 청크만 남아 있어도 청크를 정리하므로, 파일을 지우거나
-  이름을 바꾼 뒤 남은 청크를 없앨 때도 쓸 수 있습니다.
-- **삭제 범위를 제한합니다.** `source`는 문서 디렉터리 기준 상대 경로여야 하고, 정규화했을 때 `draft/` 안이어야
-  합니다(절대 경로, `draft/` 밖, `..`로 빠져나가는 경로는 거부). `.md` 문서만 지울 수 있습니다.
-- **청크 삭제에 실패하면 파일은 지우지 않습니다.** 파일만 사라지고 청크가 검색에 남는 상태를 피하기 위해서입니다.
-
-### 초안 승격 (`rag-promote`)
-
-모델이 만든 초안을 사람이 검토한 뒤 정식 문서로 올리는 **사람 전용 명령**입니다. MCP 도구가 아니므로 쓰기 도구를
-켜도 모델은 승격할 수 없습니다. 그래서 "모델은 `draft/`에만, 정식 문서는 사람이 검토해서"라는 원칙이 유지됩니다.
-
-```bash
-rag-promote                                    # 초안 목록과 옮겨질 위치
-rag-promote draft/longhorn-볼륨-복구.md         # → official/longhorn-볼륨-복구.md 로 옮기고 색인
-rag-promote --overwrite draft/...              # 정식 위치에 같은 이름의 문서가 있으면 바꾸기
-```
-
-| 단계 | 동작 |
-|------|------|
-| 1. 확인 | `source`가 `draft/` 안의 `.md` 파일인지 확인. 정식 위치에 문서가 있으면 `--overwrite` 없이는 중단 |
-| 2. 복사 | 초안을 정식 위치(`draft/`를 `official/`로 바꾼 같은 경로)에 복사. 덮어쓸 때는 기존 내용을 메모리에 백업 |
-| 3. 색인 | 정식 위치를 `ingest_file`로 색인 (`rag-ingest`와 같은 청크 ID) |
-| 4. 정리 | 초안의 청크와 파일을 삭제 |
-
-- **색인에 실패하면 되돌립니다.** 정식 위치를 원래대로(없던 파일은 삭제, 덮어쓴 파일은 백업 내용으로) 돌리고
-  초안은 그대로 두므로, 실패해도 아무것도 바뀌지 않습니다.
-- **초안 청크 정리에 실패하면** 승격은 끝난 상태로 초안 파일을 남기고 알려 줍니다. `rag-promote --overwrite`로
-  다시 실행하거나 `rag_delete_document`로 초안을 지우면 됩니다.
 
 ## 데이터 모델
 
@@ -685,7 +443,7 @@ Qdrant 컬렉션 하나(기본 이름 `rag_kb`)에 모든 문서를 저장합니
   그리고 front matter의 `component`/`severity`/`cluster`입니다. ID가 문서 경로와 청크 번호에서 결정되므로, 같은
   문서를 다시 수집하면 중복이 생기지 않고 기존 포인트를 덮어씁니다.
 - **페이로드 인덱스:** 필터링을 빠르게 하려고 `doc_type`, `component`, `cluster`, `source`에 키워드 인덱스를
-  만듭니다(`source`는 오래된 청크 정리와 문서 목록의 청크 수 집계용).
+  만듭니다(`source`는 오래된 청크 정리용).
 
 ## 수집 과정
 
@@ -1040,7 +798,7 @@ curl -s http://localhost:6333/collections/rag_kb | grep -o '"size":[0-9]*'
 | `EMBEDDINGS_MODEL` | `bge-m3` | 임베딩 모델 이름 (사내 서버가 쓰는 이름에 맞춤) |
 | `EMBED_QUERY_PREFIX` / `EMBED_DOC_PREFIX` | 자동 (nomic → `search_query: `/`search_document: `, 그 외 → 빈 값) | 자동 감지가 놓치는 비대칭 모델에만 지정 (e5 등 → `query: `/`passage: `) |
 | **수집** | | |
-| `RAG_KNOWLEDGE_DIR` | `~/.local/share/rag-mcp/data/knowledge` | 문서 디렉터리 (`official/`, `draft/`). `rag-ingest`가 수집하고 쓰기 도구·`rag-promote`가 씀 (설치 스크립트가 실제 경로로 바꿔 넣음) |
+| `RAG_KNOWLEDGE_DIR` | `~/.local/share/rag-mcp/data/knowledge` | 문서 디렉터리 (`official/`). `rag-ingest`가 수집 (설치 스크립트가 실제 경로로 바꿔 넣음) |
 | `CHUNK_SIZE` / `CHUNK_OVERLAP` | `1500` / `100` | 청크 크기와 겹침 (글자 수) |
 | `EMBED_BATCH_SIZE` | `32` | 임베딩 요청당 청크 수 |
 | `QDRANT_UPSERT_BATCH` | `64` | Qdrant 업서트 요청당 포인트 수 |
@@ -1055,17 +813,13 @@ curl -s http://localhost:6333/collections/rag_kb | grep -o '"size":[0-9]*'
 | `RERANK_API_KEY` | _(미설정)_ | 리랭커 API 키 |
 | `RERANK_CANDIDATES` | `30` | 리랭킹 전에 가져오는 후보 수 |
 | `RERANK_TIMEOUT` | `30` | 리랭커 HTTP 타임아웃 (초) |
-| **MCP 쓰기 도구** | | |
-| `RAG_MCP_WRITE` | `false` | `true`면 MCP 쓰기 도구 `rag_add_document`, `rag_delete_document`를 등록 (LLM이 문서를 추가·삭제할 수 있음) |
-| `RAG_MAX_DOC_CHARS` | `200000` | `rag_add_document`로 추가할 수 있는 본문의 최대 글자 수 |
 
 > 설정 파일에서는 `KEY=value  # 주석`처럼 같은 줄 끝에 주석을 달지 마세요. systemd의 `EnvironmentFile`은
 > 주석까지 값으로 읽습니다. 주석은 항상 별도 줄에 쓰세요.
 
 ## 알려진 제한
 
-- 문서를 삭제하거나 이름을 바꾸면 이전 청크가 남습니다 → `rag-ingest --recreate`로 재구축하세요(`draft/` 문서라면
-  `rag_delete_document`로도 정리됩니다).
+- 문서를 삭제하거나 이름을 바꾸면 이전 청크가 남습니다 → `rag-ingest --recreate`로 재구축하세요.
 - 키워드 검색의 한국어 형태소 분석은 사전 기반이라, 사전에 없는 신조어나 붙여 쓴 복합어는 다르게 나뉠 수 있습니다.
 - 마크다운(`.md`)만 수집합니다. PDF 등 다른 형식은 마크다운으로 바꿔서 넣어야 합니다.
 - 하이브리드 검색의 `score`는 RRF 결합 점수라서, 코사인 유사도처럼 임계값을 정하는 데 쓸 수 없습니다.
@@ -1076,23 +830,21 @@ curl -s http://localhost:6333/collections/rag_kb | grep -o '"size":[0-9]*'
 
 | 경로 | 내용 |
 |------|------|
-| [`tools/server.py`](tools/server.py) | FastMCP 서버. 읽기 도구 6개(검색 3개, 상태 확인 2개, 문서 목록)와 선택적 쓰기 도구 2개를 제공 |
+| [`tools/server.py`](tools/server.py) | FastMCP 서버. 읽기 전용 도구 4개(검색 2개, 상태 확인 2개)를 제공 |
 | [`tools/ingest.py`](tools/ingest.py) | 마크다운 문서를 읽어 청크로 나누고 임베딩해 Qdrant에 업서트 (`rag-ingest`) |
-| [`tools/documents.py`](tools/documents.py) | 문서 디렉터리 로직: 문서 목록, MCP 쓰기 도구의 추가·삭제, `rag-promote`의 목록·승격 |
-| [`tools/promote.py`](tools/promote.py) | 초안 승격 명령 `rag-promote` (사람 전용, MCP 도구 아님) |
 | [`tools/embeddings.py`](tools/embeddings.py) | OpenAI 호환 임베딩 호출, 비대칭 모델 접두사 처리 |
 | [`tools/vectorstore.py`](tools/vectorstore.py) | Qdrant 컬렉션 스키마, BM25 희소 벡터, 하이브리드 질의 |
 | [`tools/kiwi_bm25.py`](tools/kiwi_bm25.py) | 한국어 형태소 분석(Kiwi) 기반 BM25 희소 벡터 |
 | [`tools/reranker.py`](tools/reranker.py) | Cohere/Jina 호환 크로스 인코더 리랭킹 (선택 사항) |
 | `requirements.txt` | Python 의존성 |
-| `deploy/` | 설치·제거 스크립트, systemd 유닛, `rag-ingest`·`rag-promote` 명령 템플릿 |
+| `deploy/` | 설치·제거 스크립트, systemd 유닛, `rag-ingest` 명령 템플릿 |
 | `knowledge/official/` | 샘플 문서 |
 | `.claude-plugin/marketplace.json` | Claude Code 플러그인 마켓플레이스 정의 |
 | `plugins/rag-mcp/` | Claude Code 플러그인 (MCP 서버 연결 설정, `rag-knowledge` 스킬) |
 | `.claude/skills/repo-check/` | 저장소 점검 스킬 (Claude Code에서 `/repo-check`, 직접 실행: `bash .claude/skills/repo-check/scripts/check.sh`) |
 | `tests/` | 테스트 |
 
-`ingest.py`, `documents.py`, `server.py`는 모두 `vectorstore.py`와 `embeddings.py`를 거칩니다. 그래서
+`ingest.py`와 `server.py`는 모두 `vectorstore.py`와 `embeddings.py`를 거칩니다. 그래서
 쓰기 경로와 읽기 경로 사이에서 컬렉션 스키마, 벡터 이름, 임베딩 설정이 어긋나지 않습니다.
 
 ## 개발

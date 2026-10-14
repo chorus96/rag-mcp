@@ -11,16 +11,16 @@
 #   설치한 사용자로 실행하세요 (root 불필요).
 #
 # 지우는 것
-#   항상:      systemd 사용자 서비스(qdrant, rag-mcp), 명령 rag-ingest·rag-promote,
+#   항상:      systemd 사용자 서비스(qdrant, rag-mcp), 명령 rag-ingest,
 #              애플리케이션·Python 가상환경·Qdrant 바이너리
 #   --purge:   위에 더해 설정 파일(~/.config/rag-mcp)과
 #              데이터(~/.local/share/rag-mcp/data: 기본 문서 디렉터리, Qdrant 저장소)
 #
 # 문서 디렉터리 (설정 파일의 RAG_KNOWLEDGE_DIR)
-#   official/(정식 문서)와 draft/(모델이 만든 초안)가 들어 있는, 지식 베이스의 원본입니다.
+#   official/(사람이 관리하는 문서)이 들어 있는, 지식 베이스의 원본입니다.
 #   - --purge 없이 지우면 그대로 남습니다. 다시 설치하면 같은 문서와 색인을 그대로 씁니다.
-#   - --purge 로 지우면 기본 경로(~/.local/share/rag-mcp/data/knowledge)의 문서는 official/·draft/ 모두
-#     삭제됩니다. 남겨야 할 문서가 있으면 먼저 다른 곳에 복사해 두세요. 검토하지 않은 초안도 함께 사라집니다.
+#   - --purge 로 지우면 기본 경로(~/.local/share/rag-mcp/data/knowledge)의 문서도 삭제됩니다.
+#     남겨야 할 문서가 있으면 먼저 다른 곳에 복사해 두세요.
 #   - RAG_KNOWLEDGE_DIR 을 데이터 디렉터리 밖의 경로로 바꿨다면, --purge 로도 그 문서 디렉터리는 지우지 않고
 #     남겨 둔 경로를 알려 줍니다. 필요 없으면 직접 지우세요.
 #
@@ -54,7 +54,7 @@ SYSTEMCTL=(systemctl --user)
 "${SYSTEMCTL[@]}" disable --now rag-mcp.service qdrant.service 2>/dev/null || true
 rm -f "$UNIT_DIR/rag-mcp.service" "$UNIT_DIR/qdrant.service"
 "${SYSTEMCTL[@]}" daemon-reload 2>/dev/null || true
-rm -f "$BIN_DIR/rag-ingest" "$BIN_DIR/rag-promote"
+rm -f "$BIN_DIR/rag-ingest" "$BIN_DIR/rag-promote"   # rag-promote: 이전 버전이 설치한 명령
 
 # --- 2. 프로그램 (애플리케이션, 가상환경, Qdrant 바이너리) -----------------------------------
 # 데이터가 $PREFIX/data 안에 있으므로 프로그램 부분만 골라 지웁니다.

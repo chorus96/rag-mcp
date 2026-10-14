@@ -6,20 +6,15 @@
 
 구성
   - 공통 검색 경로 `_search`: 질의 임베딩 → 하이브리드 검색 → (선택) 리랭킹 → 응답 구성
-  - MCP 도구: rag_search, search_official, search_draft, rag_collections, rag_health, rag_list_documents
-  - (선택) MCP 쓰기 도구: rag_add_document, rag_delete_document — RAG_MCP_WRITE=true 일 때만 등록,
-    문서 디렉터리의 draft/ 아래만 다룸 (실제 로직은 documents.py)
+  - MCP 도구: rag_search, search_official, rag_collections, rag_health
 
 문서 디렉터리 (RAG_KNOWLEDGE_DIR)
-  official/(사람이 관리하는 정식 문서)와 draft/(모델이 만든 초안)로 나뉩니다. 검색은 Qdrant만 쓰고, 문서
-  디렉터리는 rag_list_documents 가 파일 목록을 만들 때만 읽습니다. 결과의 source(예: official/foo.md, draft/foo.md)로 정식 문서와 초안이 구분됩니다.
-  서버가 문서 디렉터리에 쓰는 것은 쓰기 도구를 켰을 때 draft/ 아래뿐이고, official/ 로의 승격은 사람이
-  rag-promote(promote.py)로 합니다.
+  사람이 관리하는 문서를 official/ 아래에 둡니다. 서버는 문서 디렉터리를 읽지도 쓰지도 않고 Qdrant만
+  검색합니다. 결과의 source(예: official/foo.md)가 원본 문서의 경로입니다.
 
 설계 원칙
-  - 기본은 읽기 전용: MCP 도구는 검색과 목록 조회만 합니다. 지식 베이스 기록은 rag-ingest(ingest.py)로
-    이루어집니다. 모델이 문서를 추가·삭제하는 쓰기 도구는 운영자가 RAG_MCP_WRITE=true로 켤 때만
-    등록되며, 꺼져 있으면 도구 목록에도 나타나지 않습니다.
+  - 읽기 전용: MCP 도구는 검색만 합니다. 모델은 지식 베이스를 바꿀 수 없고, 기록은 사람이 rag-ingest
+    (ingest.py)로 합니다.
   - 벤더 중립: 채팅 LLM은 연결한 MCP 클라이언트가 정하고, 임베딩은 embeddings.py를 거쳐 OpenAI 호환
     엔드포인트를 씁니다.
 
@@ -40,7 +35,6 @@ from qdrant_client import QdrantClient
 from qdrant_client.http.exceptions import UnexpectedResponse
 from qdrant_client.models import FieldCondition, Filter, MatchValue
 
-import documents
 import embeddings
 import reranker
 import vectorstore
@@ -227,14 +221,13 @@ def rag_search(
 
     질문이나 작업과 관련된 문서를 가져올 때 호출하세요. 키워드가 아니라 의미로 검색하므로
     찾는 내용을 문장으로 서술하세요.
-    결과의 `source`가 'official/'로 시작하면 정식 문서, 'draft/'로 시작하면 아직 사람이 검토하지 않은
-    초안입니다. 초안을 근거로 답할 때는 검토 전이라는 점을 밝히세요.
+    결과의 `source`는 원본 문서의 경로(예: 'official/foo.md')입니다. 답할 때 출처로 인용하세요.
 
     Args:
         query: 찾고 있는 내용 (자연어). 예:
             '노드 재부팅 후 Longhorn 볼륨이 attaching 상태에서 멈춤'.
-        doc_type: 선택적 필터 — 'official'(정식 문서) 또는 'draft'(초안). 생략하면 둘 다
-            검색합니다. 한쪽만 볼 때는 search_official / search_draft 를 써도 됩니다.
+        doc_type: 선택적 필터 — 문서 유형(문서 디렉터리의 맨 앞 폴더 이름, 'official').
+            생략하면 전체를 검색합니다.
         cluster: 선택적 소프트 필터 — 이 클러스터 태그(예: 'prod-01')가 붙은 지식으로
             한정합니다. 클러스터로 한정한 검색 결과가 비어 있으면 서버가 (다른 필터는
             유지한 채) 모든 클러스터를 대상으로 다시 검색하고 `cluster_narrowed: false`를
@@ -268,29 +261,6 @@ def search_official(
         limit: 최대 결과 수 (1-20). 기본값 5.
     """
     return _search(query, "official", cluster, component, limit)
-
-
-@mcp.tool()
-def search_draft(
-    query: str,
-    cluster: str | None = None,
-    component: str | None = None,
-    limit: int = DEFAULT_LIMIT,
-) -> dict[str, Any]:
-    """초안(draft/)만 검색합니다 — 모델이 추가했고 아직 사람이 검토하지 않은 문서.
-
-    rag_search(..., doc_type='draft')의 단축 도구입니다. 초안에 무엇이 쌓였는지 확인하거나, 정식
-    문서에서 찾지 못한 내용을 초안에서 찾아볼 때 사용하세요. 초안을 근거로 답할 때는 검토 전이라는
-    점을 밝히세요.
-
-    Args:
-        query: 찾고 있는 내용 (자연어).
-        cluster: 선택적 소프트 필터 — 해당 클러스터 태그가 붙은 초안만 검색하며, 같은
-            클러스터 결과가 비어 있으면 전체 범위로 대체 검색합니다.
-        component: 선택적 하드 필터 — 이 컴포넌트 태그가 붙은 초안만 검색합니다.
-        limit: 최대 결과 수 (1-20). 기본값 5.
-    """
-    return _search(query, "draft", cluster, component, limit)
 
 
 @mcp.tool()
@@ -356,80 +326,17 @@ def rag_health() -> dict[str, Any]:
     return health
 
 
-@mcp.tool()
-def rag_list_documents(folder: str = "official", subdir: str | None = None, limit: int = 100) -> dict[str, Any]:
-    """지식 베이스의 문서 파일 목록을 보여 줍니다 (읽기 전용). 정식 문서(official/) 또는 초안(draft/).
-
-    사용자가 어떤 문서가 있는지, 검토할 초안이 무엇인지 물을 때 사용하세요. 내용 검색이 아니라 파일
-    목록입니다(내용은 rag_search로 찾으세요). 항목마다 source(문서 경로), title, doc_type, size_bytes,
-    modified(UTC), chunks(색인된 청크 수)를 돌려줍니다. chunks가 0이면 파일은 있지만 아직 색인 전이라
-    검색되지 않습니다. 초안에는 승격(rag-promote)하면 옮겨질 위치 promote_to 도 있습니다. 초안은 아직
-    사람이 검토하지 않은 문서입니다.
-
-    Args:
-        folder: 'official'(정식 문서, 기본값) 또는 'draft'(초안).
-        subdir: 선택 — 그 폴더 아래 하위 폴더만 보기 (예: 'team-a'). 생략하면 폴더 전체.
-        limit: 돌려줄 최대 개수. 기본 100, 최대 500. 넘으면 truncated=true.
-    """
-    return documents.list_documents(folder, subdir, limit, client=_qdrant)
-
-
-# --- MCP 쓰기 도구 (선택 — RAG_MCP_WRITE=true 일 때만 LLM에 노출) -------------------
-# 꺼져 있으면 함수 자체를 등록하지 않으므로, 모델은 이 도구가 있는지도 모릅니다.
-if documents.WRITE_ENABLED:
-    @mcp.tool()
-    def rag_add_document(
-        title: str,
-        content: str,
-        tags: list[str] | None = None,
-        component: str | None = None,
-        cluster: str | None = None,
-        overwrite: bool = False,
-    ) -> dict[str, Any]:
-        """지식 베이스에 마크다운 문서를 추가하고 바로 검색할 수 있게 색인합니다.
-
-        사용자가 문서 추가(저장)를 명시적으로 요청했을 때만 사용하세요. 대화 내용을 임의로 저장하지
-        마세요. 문서는 서버의 문서 디렉터리 중 `draft/<제목>.md` 에 초안으로 저장되고 바로
-        검색됩니다. 응답의 `source`가 그 경로입니다. 같은 경로에 문서가 있으면 overwrite=true 일 때만
-        바꿉니다. 사람이 관리하는 정식 문서(official/)는 이 도구로 만들거나 바꿀 수 없습니다.
-
-        Args:
-            title: 문서 제목. 파일 이름도 여기서 만들어집니다.
-            content: 마크다운 본문 (front matter 없이 본문만).
-            tags: 선택 — 태그 목록 (예: ['longhorn', 'storage']).
-            component: 선택 — 컴포넌트 이름 (검색 하드 필터에 쓰임, 예: 'longhorn').
-            cluster: 선택 — 클러스터 이름 (검색 소프트 필터에 쓰임, 예: 'prod-01').
-            overwrite: 같은 경로의 기존 문서를 바꿀지 여부. 기본값 false.
-        """
-        return documents.add_document(title, content, tags, component, cluster, overwrite)
-
-    @mcp.tool()
-    def rag_delete_document(source: str) -> dict[str, Any]:
-        """지식 베이스의 초안 문서(draft/ 아래) 하나를 삭제합니다 (문서 파일과 검색용 청크를 함께 삭제).
-
-        사용자가 삭제를 명시적으로 요청하고, 삭제할 문서를 확인한 뒤에만 사용하세요. 되돌릴 수
-        없습니다. 삭제할 문서는 검색 결과나 rag_add_document 응답의 `source`로 지정합니다.
-        `source`가 'draft/'로 시작하는 문서만 지울 수 있고, 정식 문서는 지울 수 없습니다.
-        파일이 이미 없고 청크만 남아 있어도 청크를 정리합니다.
-
-        Args:
-            source: 문서 디렉터리 기준 문서 경로 (예: 'draft/longhorn-볼륨-복구-절차.md').
-        """
-        return documents.delete_document(source)
-
-
 # --- 실행 ---------------------------------------------------------------------
 def main() -> None:
     emb = embeddings.describe()
     rr = reranker.describe()
     log.info(
         "starting rag-mcp on %s:%s (qdrant=%s, collection=%s, embed=%s:%s@%s, "
-        "hybrid=%s, rerank=%s, write_tool=%s)",
+        "hybrid=%s, rerank=%s)",
         MCP_HOST, MCP_PORT, QDRANT_URL, COLLECTION,
         emb["provider"], emb["model"], emb["base_url"],
         vectorstore.sparse_available(),  # 시작 시 BM25를 로드 (빠른 실패)
         f"{rr['provider']}:{rr['model']}" if rr["enabled"] else "off",
-        "on" if documents.WRITE_ENABLED else "off",
     )
     mcp.run(transport="streamable-http")
 

@@ -14,8 +14,8 @@
 #   2. 애플리케이션 복사, Python 가상환경에 의존성 설치
 #   3. Qdrant 바이너리 설치
 #   4. 설정 파일 rag-mcp.env 생성 (이미 있으면 그대로 둠)
-#   5. 문서 디렉터리 준비: official/·draft/ 폴더 생성, 샘플 문서 복사 (비어 있을 때만)
-#   6. systemd 사용자 서비스(qdrant, rag-mcp) 등록·시작, 명령 rag-ingest·rag-promote 설치
+#   5. 문서 디렉터리 준비: official/ 폴더 생성, 샘플 문서 복사 (비어 있을 때만)
+#   6. systemd 사용자 서비스(qdrant, rag-mcp) 등록·시작, 명령 rag-ingest 설치
 #
 # 설치 위치
 #   앱 / venv    ~/.local/share/rag-mcp/{app,venv}
@@ -23,15 +23,14 @@
 #   설정 파일    ~/.config/rag-mcp/rag-mcp.env
 #   데이터       ~/.local/share/rag-mcp/data/{knowledge,qdrant}
 #   문서         설정 파일의 RAG_KNOWLEDGE_DIR (기본 ~/.local/share/rag-mcp/data/knowledge)
-#                  official/   정식 문서 — 사람이 넣고 rag-ingest 로 색인 (샘플 문서가 여기에 들어감)
-#                  draft/      초안 — MCP 쓰기 도구를 켜면 모델이 여기에만 씀, rag-promote 로 official/ 에 승격
+#                  official/   사람이 관리하는 문서 — 넣고 rag-ingest 로 색인 (샘플 문서가 여기에 들어감)
 #   서비스       ~/.config/systemd/user/{qdrant,rag-mcp}.service
-#   명령         ~/.local/bin/rag-ingest (문서 수집), ~/.local/bin/rag-promote (초안 승격)
+#   명령         ~/.local/bin/rag-ingest (문서 수집)
 #
 # 업그레이드
 #   다시 실행하면 업그레이드로 동작합니다. 코드와 의존성을 갱신하고 서비스를 재시작하며,
 #   설정 파일과 데이터(문서, Qdrant 저장소)는 건드리지 않습니다.
-#   문서 디렉터리에는 official/·draft/ 폴더가 없을 때 빈 폴더만 만들고, 기존 문서는 옮기지 않습니다.
+#   문서 디렉터리에는 official/ 폴더가 없을 때 빈 폴더만 만들고, 기존 문서는 옮기지 않습니다.
 #
 # 옵션 (환경 변수)
 #   PYTHON=python3.12        사용할 Python (3.10 이상, 기본값 python3)
@@ -107,8 +106,10 @@ install -d -m 700 "$DATA_DIR" "$DATA_DIR/qdrant" "$CONF_DIR"
 # --- 2. 애플리케이션 + Python 의존성 -------------------------------------------------
 # 가상환경은 처음 한 번만 만들고, 업그레이드 때는 의존성만 갱신합니다.
 log "애플리케이션 복사 → $PREFIX/app"
-install -m 644 "$SRC_DIR"/tools/{server,ingest,embeddings,documents,promote,reranker,vectorstore,kiwi_bm25}.py \
+install -m 644 "$SRC_DIR"/tools/{server,ingest,embeddings,reranker,vectorstore,kiwi_bm25}.py \
     "$SRC_DIR/requirements.txt" "$PREFIX/app/"
+# 이전 버전에서 업그레이드할 때: 없어진 MCP 쓰기 도구·초안 승격 기능의 파일을 지웁니다.
+rm -f "$PREFIX/app/documents.py" "$PREFIX/app/promote.py" "$BIN_DIR/rag-promote"
 
 if [ ! -x "$PREFIX/venv/bin/python" ]; then
     log "Python 가상환경 생성 → $PREFIX/venv"
@@ -144,14 +145,14 @@ fi
 
 # --- 5. 문서 디렉터리 ----------------------------------------------------------------
 # 위치: 설정 파일의 RAG_KNOWLEDGE_DIR (마지막 줄 기준, 비어 있거나 주석 처리됐으면 기본 경로).
-# 구조: official/ (사람이 관리하는 정식 문서), draft/ (모델이 만든 초안)
+# 구조: official/ (사람이 관리하는 문서)
 KNOWLEDGE_DIR=$(sed -n 's/^RAG_KNOWLEDGE_DIR=//p' "$ENV_FILE" | tail -n 1)
 KNOWLEDGE_DIR=${KNOWLEDGE_DIR%\"}; KNOWLEDGE_DIR=${KNOWLEDGE_DIR#\"}   # 따옴표로 감쌌으면 벗김
 KNOWLEDGE_DIR=${KNOWLEDGE_DIR%\'}; KNOWLEDGE_DIR=${KNOWLEDGE_DIR#\'}
 KNOWLEDGE_DIR=${KNOWLEDGE_DIR:-$DATA_DIR/knowledge}
 case "$KNOWLEDGE_DIR" in
     /*) ;;
-    # ~ 는 서버(Python)와 rag-ingest·rag-promote(셸)가 홈 디렉터리로 풀어 쓰므로 여기서도 같게 풉니다.
+    # ~ 는 서버(Python)와 rag-ingest(셸)가 홈 디렉터리로 풀어 쓰므로 여기서도 같게 풉니다.
     "~"|"~/"*) KNOWLEDGE_DIR=$HOME${KNOWLEDGE_DIR#\~} ;;
     *) die "설정 파일의 RAG_KNOWLEDGE_DIR 은 절대 경로여야 합니다: $KNOWLEDGE_DIR ($ENV_FILE)" ;;
 esac
@@ -163,18 +164,18 @@ if [ -z "$(ls -A "$KNOWLEDGE_DIR")" ]; then
     log "샘플 문서 복사 → $KNOWLEDGE_DIR"
     cp -r "$SRC_DIR/knowledge/." "$KNOWLEDGE_DIR/"
 fi
-# 업그레이드 때도 두 폴더가 없으면 만듭니다. 기존 문서는 옮기지 않습니다(두 폴더 밖의 문서는 수집되지 않음).
-log "문서 디렉터리 → $KNOWLEDGE_DIR/{official,draft}"
-install -d -m 755 "$KNOWLEDGE_DIR/official" "$KNOWLEDGE_DIR/draft"
+# 업그레이드 때도 official/ 이 없으면 만듭니다. 기존 문서는 옮기지 않습니다(official/ 밖의 문서는 수집되지 않음).
+log "문서 디렉터리 → $KNOWLEDGE_DIR/official"
+install -d -m 755 "$KNOWLEDGE_DIR/official"
 
 # --- 6. systemd 서비스 + 수집 명령 ---------------------------------------------------
 log "systemd 사용자 서비스 등록 → $UNIT_DIR"
 install -m 644 "$SRC_DIR/deploy/systemd/qdrant.service" "$UNIT_DIR/qdrant.service"
 install -m 644 "$SRC_DIR/deploy/systemd/rag-mcp.service" "$UNIT_DIR/rag-mcp.service"
 
-# 명령 템플릿(rag-ingest, rag-promote)의 @...@ 자리에 실제 경로를 채워 넣습니다.
+# 명령 템플릿(rag-ingest)의 @...@ 자리에 실제 경로를 채워 넣습니다.
 # 임시 파일에 쓴 뒤 mv로 바꿔, 실행 중인 명령이 반쯤 쓰인 파일을 읽지 않게 합니다.
-for cmd in rag-ingest rag-promote; do
+for cmd in rag-ingest; do
     log "명령 설치 → $BIN_DIR/$cmd"
     sed -e "s|@ENV_FILE@|$ENV_FILE|" \
         -e "s|@APP_DIR@|$PREFIX/app|" \

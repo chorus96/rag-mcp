@@ -2,9 +2,8 @@
 
 역할
   마크다운 문서를 읽어 청크로 나누고, OpenAI 호환 임베딩
-  엔드포인트로 임베딩한 뒤 Qdrant에 업서트합니다. 사람이 관리하는 정식 문서(official/)를 지식 베이스에
-  넣는 정해진 경로입니다. MCP 쓰기 도구(documents.py)와 rag-promote(promote.py)도 파일 하나를 색인할 때
-  이 모듈의 ingest_file 을 그대로 씁니다.
+  엔드포인트로 임베딩한 뒤 Qdrant에 업서트합니다. 지식 베이스에 기록하는 유일한 경로입니다(MCP 도구는
+  읽기 전용).
 
 실행
   설치한 서버에서는 rag-ingest 명령(deploy/rag-ingest)으로 실행합니다. 개발용 직접 실행:
@@ -12,12 +11,11 @@
 
 문서 디렉터리 (--path, 설치본에서는 설정 파일의 RAG_KNOWLEDGE_DIR)
     knowledge/
-    ├── official/     정식 문서 — 사람이 넣고 이 명령으로 색인
-    └── draft/        초안 — MCP 쓰기 도구가 만들고 바로 색인 (이 명령도 함께 다시 색인)
-  - official/·draft/ 아래의 .md 만 수집합니다. 두 폴더 밖의 문서는 건너뛰고 개수를 경고로 알립니다.
+    └── official/     사람이 관리하는 문서 — 넣고 이 명령으로 색인
+  - official/ 아래의 .md 만 수집합니다. 그 밖의 문서는 건너뛰고 개수를 경고로 알립니다.
   - source 는 문서 디렉터리 기준 상대 경로(예: official/foo.md)이고, 포인트 ID와 오래된 청크 정리의
     기준입니다. 그래서 누가 색인하든 root 를 문서 디렉터리로 맞춰야 같은 ID가 나옵니다.
-  - 문서 유형(doc_type)은 맨 앞 폴더 이름입니다: official/ → "official", draft/ → "draft".
+  - 문서 유형(doc_type)은 맨 앞 폴더 이름입니다: official/ → "official".
 
 처리 과정
   1. 파일 탐색 (.md)
@@ -33,8 +31,8 @@
     ---
     # 본문 마크다운...
 
-  doc_type 은 front matter가 아니라 폴더로 정합니다 (_doc_type). 그래서 승격(draft/ → official/)하면 유형도
-  함께 바뀝니다. front matter에 title 이 없으면 제목은 파일 이름에서 가져옵니다.
+  doc_type 은 front matter가 아니라 폴더로 정합니다 (_doc_type). front matter에 title 이 없으면 제목은
+  파일 이름에서 가져옵니다.
 
 멱등성
   청크 ID가 (source, chunk index)에서 정해지므로 다시 실행해도 중복이 생기지 않습니다. 문서를
@@ -175,14 +173,14 @@ def _chunk_document(body: str) -> list[str]:
     return [c for c in chunks if c] or _chunk(body, CHUNK_SIZE, CHUNK_OVERLAP)
 
 
-# 문서 디렉터리의 두 폴더(정식 / 초안). 수집은 이 두 폴더 아래만 하고, 폴더 이름이 곧 문서 유형입니다.
-_STAGE_DIRS = ("official", "draft")
+# 수집하는 문서 디렉터리의 폴더. 수집은 이 폴더 아래만 하고, 폴더 이름이 곧 문서 유형입니다.
+_STAGE_DIRS = ("official",)
 
 
 def _doc_type(file: Path, root: Path) -> str:
-    """문서 유형 = 문서 디렉터리 기준 맨 앞 폴더 이름 ("official" 또는 "draft").
+    """문서 유형 = 문서 디렉터리 기준 맨 앞 폴더 이름 ("official").
 
-    front matter의 type 은 쓰지 않습니다. 두 폴더 밖의 파일은 수집되지 않지만, 직접 호출되면 "unknown"입니다.
+    front matter의 type 은 쓰지 않습니다. official/ 밖의 파일은 수집되지 않지만, 직접 호출되면 "unknown"입니다.
     """
     top = file.relative_to(root).parts[0]
     return top if top in _STAGE_DIRS else "unknown"
@@ -259,9 +257,9 @@ def _ensure_collection(client: QdrantClient, dim: int, recreate: bool) -> None:
 
 # --- 수집 실행 ----------------------------------------------------------------
 def _discover_files(path: Path) -> list[Path]:
-    """`path`의 official/·draft/ 아래 지원되는 (.md) 파일. ID가 안정적이도록 정렬합니다.
+    """`path`의 official/ 아래 지원되는 (.md) 파일. ID가 안정적이도록 정렬합니다.
 
-    두 폴더 밖에 있는 문서는 수집하지 않고, 몇 개를 건너뛰었는지 경고로 알립니다.
+    official/ 밖에 있는 문서는 수집하지 않고, 몇 개를 건너뛰었는지 경고로 알립니다.
     """
     def docs(base: Path) -> list[Path]:
         return [p for p in base.rglob("*") if p.is_file() and p.suffix.lower() in _SUPPORTED_SUFFIXES]
@@ -278,8 +276,8 @@ def ingest_file(client: QdrantClient, file: Path, root: Path, *, ensure: bool = 
                 recreate: bool = False) -> int:
     """파일 하나를 색인하고 저장한 청크 수를 반환합니다 (건너뛰면 0).
 
-    `root`는 문서 디렉터리입니다. source(문서 경로)와 기본 doc_type을 여기서 정하므로, 같은 파일은
-    누가 수집하든(rag-ingest, MCP 쓰기 도구) 같은 포인트 ID를 갖습니다. `ensure`가 참이면 컬렉션이
+    `root`는 문서 디렉터리입니다. source(문서 경로)와 doc_type을 여기서 정하므로, 같은 파일은
+    언제 수집하든 같은 포인트 ID를 갖습니다. `ensure`가 참이면 컬렉션이
     없을 때 만들고, `recreate`가 참이면 기존 컬렉션을 지우고 새로 만듭니다.
     """
     raw = file.read_text(encoding="utf-8")
@@ -327,7 +325,7 @@ def ingest_file(client: QdrantClient, file: Path, root: Path, *, ensure: bool = 
 def ingest(path: Path, recreate: bool) -> None:
     files = _discover_files(path)
     if not files:
-        log.warning("no .md files found under %s/{official,draft}", path)
+        log.warning("no .md files found under %s/official", path)
         return
 
     client = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY, timeout=HTTP_TIMEOUT)
@@ -351,7 +349,7 @@ def main() -> None:
     parser.add_argument(
         "--path",
         default="./knowledge",
-        help="Knowledge directory; .md files under its official/ and draft/ are ingested "
+        help="Knowledge directory; .md files under its official/ are ingested "
              "(default: ./knowledge).",
     )
     parser.add_argument(

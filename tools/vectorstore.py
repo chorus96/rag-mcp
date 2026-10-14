@@ -1,8 +1,8 @@
 """tools/vectorstore.py — Qdrant 컬렉션과 하이브리드 검색.
 
 역할
-  Qdrant 컬렉션 스키마, BM25 희소 벡터 계산, 하이브리드 질의를 한곳에서 다룹니다. ingest.py,
-  server.py, documents.py가 모두 이 모듈을 거치므로, 쓰기 경로와 읽기 경로 사이에서 컬렉션 구조와
+  Qdrant 컬렉션 스키마, BM25 희소 벡터 계산, 하이브리드 질의를 한곳에서 다룹니다. ingest.py와
+  server.py가 모두 이 모듈을 거치므로, 쓰기 경로와 읽기 경로 사이에서 컬렉션 구조와
   벡터 이름이 어긋나지 않습니다.
 
 벡터 구성 (Qdrant 명명된 벡터)
