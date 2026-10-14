@@ -28,7 +28,7 @@ agentic retrieval).
 | **읽기 전용** | MCP 도구는 검색만 합니다. 모델은 지식 베이스를 바꿀 수 없고, 기록은 사람이 수집 명령(`rag-ingest`)으로 합니다. 서버는 문서 디렉터리를 읽거나 쓰지 않습니다. |
 | **벤더 중립** | 채팅 LLM은 연결하는 MCP 클라이언트가 정합니다. 임베딩은 사내 서버의 OpenAI 호환 `/v1/embeddings`로 요청하므로 특정 모델이나 제품에 묶이지 않습니다. |
 | **수집과 질의의 일관성** | 수집과 질의가 같은 임베딩 코드와 설정을 공유하도록 만들어, 벡터가 어긋날 여지를 없앴습니다. |
-| **실패해도 검색은 유지** | 리랭킹, BM25, 오래된 청크 정리 같은 부가 기능은 실패하면 경고 로그만 남기고 건너뛰며, 기본 검색은 계속 동작합니다(최선형, best-effort). |
+| **실패해도 검색은 유지** | 실행 중 리랭커 호출, BM25, 오래된 청크 정리가 실패하면 경고 로그만 남기고 건너뛰며, 하이브리드·의미 검색은 계속 동작합니다(최선형, best-effort). 단, 리랭커 주소를 설정하지 않은 것은 설정 오류로 보고 검색을 막습니다([리랭커 장애 시 동작](#리랭커-장애-시-동작)). |
 
 ## 구성 요소
 
@@ -1347,7 +1347,7 @@ WARNING rag-mcp rerank failed (could not reach the in-house reranker at http://r
 | `in-house reranker returned HTTP 404: ...` | 경로(`/v1/rerank`)나 모델 이름이 서버와 다름 | ①의 curl로 실제 경로를 확인해 `RERANK_BASE_URL`에 전체 경로를 적거나 `RERANK_MODEL` 수정 |
 | `in-house reranker returned HTTP 401: ...` / `403` | 토큰이 없거나 틀림 | `RERANK_API_KEY` 확인 |
 | `rerank response could not be parsed (...)` | 응답 형식이 다름(예: TEI처럼 `results` 없는 목록) | Cohere 호환 `/rerank`를 제공하는 서버로 연결 |
-| `rerank response contained no usable results` | `results`는 왔지만 `index`·점수가 없거나 범위를 벗어남 | 서버 응답을 ①로 확인 |
+| `rerank response contained no usable results` | `results`는 왔지만 항목이 객체가 아니거나, `index`·점수가 없거나, `index`가 범위를 벗어남 | 서버 응답을 ①로 확인 |
 
 ## 설정
 
