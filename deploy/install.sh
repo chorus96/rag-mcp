@@ -108,8 +108,6 @@ install -d -m 700 "$DATA_DIR" "$DATA_DIR/qdrant" "$CONF_DIR"
 log "애플리케이션 복사 → $PREFIX/app"
 install -m 644 "$SRC_DIR"/tools/{server,ingest,embeddings,reranker,vectorstore,kiwi_bm25}.py \
     "$SRC_DIR/requirements.txt" "$PREFIX/app/"
-# 이전 버전에서 업그레이드할 때: 없어진 MCP 쓰기 도구·초안 승격 기능의 파일을 지웁니다.
-rm -f "$PREFIX/app/documents.py" "$PREFIX/app/promote.py" "$BIN_DIR/rag-promote"
 
 if [ ! -x "$PREFIX/venv/bin/python" ]; then
     log "Python 가상환경 생성 → $PREFIX/venv"

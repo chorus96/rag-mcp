@@ -54,7 +54,7 @@ SYSTEMCTL=(systemctl --user)
 "${SYSTEMCTL[@]}" disable --now rag-mcp.service qdrant.service 2>/dev/null || true
 rm -f "$UNIT_DIR/rag-mcp.service" "$UNIT_DIR/qdrant.service"
 "${SYSTEMCTL[@]}" daemon-reload 2>/dev/null || true
-rm -f "$BIN_DIR/rag-ingest" "$BIN_DIR/rag-promote"   # rag-promote: 이전 버전이 설치한 명령
+rm -f "$BIN_DIR/rag-ingest"
 
 # --- 2. 프로그램 (애플리케이션, 가상환경, Qdrant 바이너리) -----------------------------------
 # 데이터가 $PREFIX/data 안에 있으므로 프로그램 부분만 골라 지웁니다.
