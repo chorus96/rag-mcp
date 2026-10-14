@@ -68,6 +68,8 @@ logging.basicConfig(
     stream=sys.stderr,
 )
 log = logging.getLogger("rag-ingest")
+# httpx는 요청마다 INFO 로그를 남겨 로그가 묻히므로 경고 이상만 남깁니다.
+logging.getLogger("httpx").setLevel(logging.WARNING)
 
 QDRANT_URL = os.environ.get("QDRANT_URL", "http://localhost:6333")
 QDRANT_API_KEY = os.environ.get("QDRANT_API_KEY") or None

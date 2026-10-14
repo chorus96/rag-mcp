@@ -696,6 +696,101 @@ journalctl --user -u rag-mcp | grep -E 'sparse model|hybrid'
 - **이전 버전에서 업그레이드했다면** 설정을 바꾸지 않았더라도 한 번 `rag-ingest --recreate`를 실행하세요. 키워드
   벡터를 만드는 방식이 Kiwi 형태소 분석으로 바뀌어, 기존 색인의 키워드가 새 질의와 맞지 않습니다.
 
+#### Kiwi BM25 동작 확인
+
+Kiwi는 외부 서버가 아니라 rag-mcp 가상환경에 함께 설치되는 라이브러리라서, "연결" 대신 **설치 → 단어 나누기 →
+서버·수집에 적용 → 컬렉션 구조** 순서로 확인합니다.
+
+**① 설치 확인**
+
+```bash
+~/.local/share/rag-mcp/venv/bin/python -c 'import kiwipiepy; print(kiwipiepy.__version__)'
+```
+
+버전(예: `0.24.0`)이 나오면 됩니다. `ModuleNotFoundError: No module named 'kiwipiepy'`이면 설치가 빠진 것이므로
+`./deploy/install.sh`를 다시 실행하세요(의존성을 다시 설치합니다).
+
+**② 단어 나누기 확인**
+
+설치된 앱 코드로 실제 질의를 나눠 봅니다. 조사·어미가 떨어지고 영문은 소문자로 남아야 합니다.
+
+```bash
+cd ~/.local/share/rag-mcp/app && ../venv/bin/python -c '
+import kiwi_bm25
+print(kiwi_bm25.KiwiBM25().tokenize("노드 재부팅 후 Longhorn 볼륨이 attaching 상태에서 멈췄어요"))'
+```
+
+```text
+['longhorn', 'attaching', '노드', '부팅', '후', '볼륨', '상태', '멈추']
+```
+
+"볼륨이"가 `볼륨`으로, "멈췄어요"가 `멈추`로 바뀌어, 문서의 "볼륨을 … 멈춘다"와 같은 단어로 맞춰집니다.
+처음 실행할 때는 Kiwi 모델을 읽느라 몇 초 걸립니다.
+
+**③ 서버 시작 로그와 `rag_health()`**
+
+```bash
+systemctl --user restart rag-mcp
+journalctl --user -u rag-mcp --since "5 min ago" | grep -E 'hybrid|sparse model'
+```
+
+```text
+INFO rag-vectorstore hybrid search enabled (sparse model=kiwi-bm25)
+INFO rag-mcp starting rag-mcp on 0.0.0.0:8084 (... hybrid=True, rerank=...)
+```
+
+MCP 클라이언트에서 `rag_health()`를 호출하면 `retrieval` 항목에 같은 내용이 나옵니다.
+
+```json
+{"retrieval": {"hybrid": true, "sparse_model": "kiwi-bm25"}}
+```
+
+| 로그 / `retrieval` | 의미 |
+|------|------|
+| `hybrid search enabled (sparse model=kiwi-bm25)` / `{"hybrid": true, "sparse_model": "kiwi-bm25"}` | 정상 — 하이브리드 검색 |
+| `hybrid search disabled (RAG_HYBRID=false); using dense-only` / `{"hybrid": false, "sparse_model": null}` | 설정으로 끈 상태 — 의미 검색만 |
+| `sparse model kiwi-bm25 unavailable (No module named 'kiwipiepy'); falling back to dense-only` / `{"hybrid": false, "sparse_model": "kiwi-bm25"}` | 켰지만 Kiwi를 불러오지 못함 — 의미 검색만. ①부터 확인 |
+
+**④ 수집 로그**
+
+`rag-ingest`도 같은 방식으로 Kiwi를 불러오므로, 수집할 때 키워드 벡터가 만들어졌는지 로그로 알 수 있습니다.
+
+```text
+INFO rag-ingest ingesting from /home/<사용자>/.local/share/rag-mcp/data/knowledge -> qdrant=http://localhost:6333 collection=rag_kb embed=bge-m3@http://embedding.internal.example:8080
+INFO rag-vectorstore hybrid search enabled (sparse model=kiwi-bm25)
+INFO rag-ingest ingested official/longhorn-volume-attach.md (5 chunk(s))
+INFO rag-ingest done: 1 file(s), 5 chunk(s) into 'rag_kb'
+```
+
+`--recreate`로 컬렉션을 새로 만들 때는 `created collection rag_kb (dim=1024, cosine, hybrid=True)`도 나옵니다.
+
+**⑤ 컬렉션에 키워드 벡터가 있는지**
+
+[Qdrant 연결 확인](#qdrant-연결-확인) ③의 명령으로 `sparse_vectors`를 봅니다. 하이브리드 검색을 쓰려면 `bm25`가
+있어야 합니다.
+
+```bash
+curl -s -H "api-key: $QDRANT_API_KEY" http://localhost:6333/collections/rag_kb \
+  | python3 -c 'import json,sys; print(json.load(sys.stdin)["result"]["config"]["params"].get("sparse_vectors"))'
+```
+
+```text
+{'bm25': {'modifier': 'idf'}}
+```
+
+`None`이면 키워드 벡터 없이 만들어진 컬렉션입니다. 이 상태에서 서버만 하이브리드로 켜져 있으면 검색이 오류를
+돌려주므로(아래 표), `rag-ingest --recreate`로 다시 만드세요.
+
+**자주 나오는 문제**
+
+| 증상 / 메시지 | 원인 | 조치 |
+|------|------|------|
+| 로그에 `sparse model kiwi-bm25 unavailable (No module named 'kiwipiepy') ...` | 가상환경에 Kiwi가 설치되지 않음 | `./deploy/install.sh` 다시 실행 후 ①로 확인 |
+| 로그에 `sparse model kiwi-bm25 unavailable (...)` (그 밖의 원인) | Kiwi 모델을 읽지 못함(메모리 부족 등) | 괄호 안 원인 확인. Kiwi는 약 0.5GB 메모리를 씁니다 |
+| ``qdrant error: ... Vector with name `bm25` is not configured in this collection, available names: dense`` | 키워드 벡터 없이 만든 컬렉션(`RAG_HYBRID=false`로 수집했거나 수집할 때 Kiwi가 없었음)을 하이브리드로 검색함 | `rag-ingest --recreate` |
+| 에러 문자열·리소스 이름으로 검색해도 잘 안 찾힘 | 하이브리드가 꺼져 있음(③의 `hybrid: false`) | ③의 표로 원인 확인 후 `RAG_HYBRID=true`, `rag-ingest --recreate` |
+| 키워드 벡터 방식을 바꾼 뒤 검색 순위가 이상함 | 기존 색인의 단어와 새 질의의 단어가 다름 | `rag-ingest --recreate` |
+
 ### 개념 정리
 
 | 용어 | 쉬운 의미 | 이 프로젝트에서 |
@@ -907,6 +1002,7 @@ rag-ingest
 
 ```text
 INFO rag-ingest ingesting from /home/<사용자>/.local/share/rag-mcp/data/knowledge -> qdrant=http://localhost:6333 collection=rag_kb embed=bge-m3@http://embedding.internal.example:8080
+INFO rag-vectorstore hybrid search enabled (sparse model=kiwi-bm25)
 INFO rag-ingest ingested official/longhorn-volume-attach.md (5 chunk(s))
 INFO rag-ingest done: 1 file(s), 5 chunk(s) into 'rag_kb'
 ```
