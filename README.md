@@ -878,18 +878,124 @@ NO_PROXY=localhost,127.0.0.1,.internal.example
 
 ### 리랭커 연결 확인
 
+설정을 바꾼 뒤에는 아래 순서로 확인합니다. ①은 사내 리랭커 자체를, ②~④는 rag-mcp가 리랭커를 제대로 쓰는지를
+확인합니다.
+
+**① 사내 리랭커에 직접 요청 (rag-mcp 서버에서 실행)**
+
+rag-mcp와 같은 서버에서 실행해야 방화벽·프록시·인증서 문제까지 함께 확인됩니다. 주소는 설정 파일의
+`RERANK_BASE_URL`에 `/v1/rerank`를 붙인 값입니다([사내 리랭커가 갖춰야 할 조건](#사내-리랭커가-갖춰야-할-조건)의
+주소 규칙).
+
 ```bash
 curl -s http://rerank.internal.example:8080/v1/rerank \
   -H "Authorization: Bearer <사내-서버-토큰>" -H "Content-Type: application/json" \
-  -d '{"model": "bge-reranker-v2-m3", "query": "볼륨 멈춤", "documents": ["볼륨이 멈췄다", "인증서 갱신"]}'
+  -d '{"model": "bge-reranker-v2-m3", "query": "볼륨이 attaching 에서 멈춤",
+       "documents": ["Longhorn 볼륨이 attaching 상태에서 멈춤", "인증서 갱신 절차"]}'
 ```
 
-응답에 `"results": [{"index": 0, "relevance_score": ...}, ...]`이 보이면 됩니다. rag-mcp를 재시작한 뒤 확인합니다.
+정상 응답 예 (질의와 관련 있는 0번 문서의 점수가 더 높아야 합니다):
 
-- 시작 로그에 `rerank=<모델>@<주소>`가 나옵니다(설정이 비어 있으면 `rerank=NOT SET`과 경고).
-- MCP 도구 `rag_health()`의 `reranker.reachable`이 `true`인지 봅니다. 실패하거나 설정이 비어 있으면
-  `status: degraded`와 함께 오류가 나옵니다.
-- 검색 응답에 `reranked: true`가 있고 결과마다 `rerank_score`가 붙습니다.
+```json
+{"results": [{"index": 0, "relevance_score": 0.97}, {"index": 1, "relevance_score": 0.01}]}
+```
+
+- 사설 인증서(HTTPS)를 쓰면 `--cacert /etc/pki/tls/certs/internal-ca-bundle.pem`처럼 설정 파일의
+  `SSL_CERT_FILE`과 같은 파일을 지정해 확인하세요.
+- 프록시를 거쳐야 하면 설정 파일과 같은 `HTTPS_PROXY`·`NO_PROXY`를 셸에 지정한 뒤 실행하세요.
+- 응답이 `{"results": ...}` 없이 `[{"index": 0, "score": ...}]` 같은 목록이면 형식이 다른 서버(예: TEI)라서
+  연결할 수 없습니다.
+
+**② 시작 로그**
+
+```bash
+systemctl --user restart rag-mcp
+journalctl --user -u rag-mcp --since "5 min ago" | grep "starting rag-mcp"
+```
+
+```text
+starting rag-mcp on 0.0.0.0:8084 (qdrant=http://localhost:6333, collection=rag_kb, embed=bge-m3@http://embedding.internal.example:8080, hybrid=True, rerank=bge-reranker-v2-m3@http://rerank.internal.example:8080)
+```
+
+`rerank=NOT SET`이 보이고 그 아래에 `RERANK_BASE_URL is not set ...` 경고가 있으면 설정 파일에 주소가 없거나
+비어 있는 것입니다.
+
+**③ `rag_health()`**
+
+MCP 클라이언트에서 `rag_health()`를 호출합니다. 리랭커에 실제로 짧은 요청을 한 번 보내 확인합니다. 아래는
+응답 중 리랭커 부분입니다(`qdrant`, `embeddings`, `retrieval` 항목도 함께 나옵니다).
+
+```json
+{
+  "status": "ok",
+  "reranker": {
+    "reachable": true,
+    "model": "bge-reranker-v2-m3",
+    "base_url": "http://rerank.internal.example:8080",
+    "candidates": 30
+  }
+}
+```
+
+실패하면 `status`가 `degraded`가 되고 `reranker`에 `reachable: false`와 `error`가 붙습니다.
+
+```json
+{
+  "status": "degraded",
+  "reranker": {
+    "reachable": false,
+    "model": "bge-reranker-v2-m3",
+    "base_url": "http://rerank.internal.example:8080",
+    "candidates": 30,
+    "error": "in-house reranker returned HTTP 404: {\"detail\":\"Not Found\"}"
+  }
+}
+```
+
+**④ 검색 결과**
+
+`rag_search(query="Longhorn 볼륨이 attaching 상태에서 멈춤", limit=2)`의 응답에 `reranked: true`가 있고 결과마다
+`rerank_score`가 붙으면 리랭킹이 적용된 것입니다.
+
+```json
+{
+  "status": "ok",
+  "reranked": true,
+  "count": 2,
+  "results": [
+    {"score": 0.0328, "title": "longhorn-volume-attach", "source": "official/longhorn-volume-attach.md",
+     "text": "# Longhorn 볼륨이 ...\n## 증상 ...", "truncated": false, "rerank_score": 0.9712},
+    {"score": 0.0161, "title": "longhorn-volume-attach", "source": "official/longhorn-volume-attach.md",
+     "text": "# Longhorn 볼륨이 ...\n## 조치 ...", "truncated": false, "rerank_score": 0.4127}
+  ]
+}
+```
+
+결과가 있는데 `reranked: false`이고 `rerank_score`가 없다면, 리랭커 호출이 실패해 하이브리드 검색 순서로 돌려준
+것입니다. 서버 로그에 원인이 남습니다.
+
+```bash
+journalctl --user -u rag-mcp --since "10 min ago" | grep "rerank failed"
+```
+
+```text
+WARNING rag-mcp rerank failed (could not reach the in-house reranker at http://rerank.internal.example:8080/v1/rerank ([Errno 111] Connection refused)); falling back to dense order
+```
+
+**자주 나오는 오류**
+
+`rag_health()`의 `reranker.error`나 로그의 `rerank failed (...)` 괄호 안에 나오는 메시지입니다.
+
+| 오류 메시지 | 원인 | 조치 |
+|------|------|------|
+| `RERANK_BASE_URL is not set: ...` | 설정 파일에 리랭커 주소가 없음. 이때는 `rag_search`도 오류를 돌려줌 | `RERANK_BASE_URL`을 지정하고 재시작 |
+| `could not reach the in-house reranker at ... (Connection refused)` | 주소·포트가 틀렸거나 리랭커가 꺼져 있음 | ①의 curl로 주소와 서버 상태 확인 |
+| `could not reach ... (timed out)` | 리랭커 응답이 `RERANK_TIMEOUT`(기본 30초)보다 느림 | 리랭커 부하 확인, 필요하면 `RERANK_CANDIDATES`를 줄이거나 `RERANK_TIMEOUT` 조정([설정 예시](#리랭커-설정-예시) ⑤) |
+| `could not reach ... (CERTIFICATE_VERIFY_FAILED ...)` | 사설 인증서를 신뢰하지 못함 | `SSL_CERT_FILE`에 사내 CA 지정 |
+| `in-house reranker returned HTTP 404: ...` | 경로(`/v1/rerank`)나 모델 이름이 서버와 다름 | ①의 curl로 실제 경로를 확인해 `RERANK_BASE_URL`에 전체 경로를 적거나 `RERANK_MODEL` 수정 |
+| `in-house reranker returned HTTP 401: ...` / `403` | 토큰이 없거나 틀림 | `RERANK_API_KEY` 확인 |
+| `rerank response could not be parsed (...)` | 응답 형식이 다름(예: TEI처럼 `results` 없는 목록) | Cohere 호환 `/rerank`를 제공하는 서버로 연결 |
+| `rerank response contained no usable results` | `results`는 왔지만 `index`·점수가 없거나 범위를 벗어남 | 서버 응답을 ①로 확인 |
 
 ## 설정
 
