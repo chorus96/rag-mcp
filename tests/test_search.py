@@ -1,7 +1,7 @@
 """tools/server.py 테스트 — 검색 경로(rag_search).
 
 확인하는 것
-  - 필터 없이 검색: vectorstore.query 에 query_filter=None 을 넘김
+  - 검색 호출: vectorstore.query 를 한 번, 가져올 개수(limit)와 함께 호출
   - limit: 1~RAG_MAX_LIMIT 로 제한, 리랭커가 꺼져 있으면 정확히 limit 개만 가져옴
   - 응답 형식: 결과마다 score / title / source / text / truncated (메타데이터 필드 없음),
     긴 텍스트는 RAG_SNIPPET_CHARS 에서 잘라 truncated: true
@@ -36,8 +36,8 @@ class _QueryRecorder:
         self.points = points
         self.calls = []
 
-    def __call__(self, client, collection, vector, query_text, *, query_filter, limit, **kw):
-        self.calls.append((query_filter, limit))
+    def __call__(self, client, collection, vector, query_text, *, limit, **kw):
+        self.calls.append(limit)
         return self.points
 
 
@@ -51,10 +51,10 @@ def _patch_search(monkeypatch, points):
 
 # --- server._search -----------------------------------------------------------
 
-def test_search_without_filters(monkeypatch):
+def test_search_returns_plain_results(monkeypatch):
     rec = _patch_search(monkeypatch, [_point({"text": "body", "title": "a", "source": "official/a.md"})])
     out = server._search("crashloop", 5)
-    assert rec.calls == [(None, 5)]
+    assert rec.calls == [5]
     assert out["status"] == "ok" and out["count"] == 1 and out["reranked"] is False
     assert set(out) == {"status", "collection", "query", "reranked", "count", "results"}
     assert out["results"][0] == {"score": 0.9, "title": "a", "source": "official/a.md",
@@ -65,7 +65,7 @@ def test_limit_is_clamped(monkeypatch):
     rec = _patch_search(monkeypatch, [])
     server._search("q", 0)
     server._search("q", 999)
-    assert [limit for _, limit in rec.calls] == [1, server.MAX_LIMIT]
+    assert rec.calls == [1, server.MAX_LIMIT]
 
 
 def test_long_text_is_truncated(monkeypatch):

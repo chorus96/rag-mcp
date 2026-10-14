@@ -93,7 +93,7 @@ def _search(query: str, limit: int) -> dict[str, Any]:
         # 하이브리드가 켜져 있으면 하이브리드(밀집 + BM25 희소, RRF 결합), 아니면 밀집 전용.
         points = list(vectorstore.query(
             _qdrant, COLLECTION, vector, query,
-            query_filter=None, limit=fetch,
+            limit=fetch,
         ))
     except UnexpectedResponse as exc:
         if exc.status_code == 404:

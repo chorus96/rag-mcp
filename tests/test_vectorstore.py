@@ -55,7 +55,7 @@ def test_named_vectors_includes_sparse():
 def test_query_dense_fallback_when_no_sparse(monkeypatch):
     monkeypatch.setattr(vectorstore, "embed_query_sparse", lambda _t: None)
     client = _FakeClient()
-    points = vectorstore.query(client, "kb", [0.1, 0.2], "q", query_filter=None, limit=5)
+    points = vectorstore.query(client, "kb", [0.1, 0.2], "q", limit=5)
     assert points == ["point"]
     call = client.calls[0]
     assert call["using"] == vectorstore.DENSE
@@ -69,7 +69,7 @@ def test_query_hybrid_uses_prefetch_and_fusion(monkeypatch):
         lambda _t: SparseVector(indices=[1], values=[0.9]),
     )
     client = _FakeClient()
-    vectorstore.query(client, "kb", [0.1], "CrashLoopBackOff", query_filter=None, limit=7)
+    vectorstore.query(client, "kb", [0.1], "CrashLoopBackOff", limit=7)
     call = client.calls[0]
     assert len(call["prefetch"]) == 2                      # 밀집 + 희소
     assert isinstance(call["query"], FusionQuery)          # RRF 결합
@@ -83,7 +83,7 @@ def test_query_hybrid_false_forces_dense(monkeypatch):
 
     monkeypatch.setattr(vectorstore, "embed_query_sparse", _boom)
     client = _FakeClient()
-    vectorstore.query(client, "kb", [0.1], "q", query_filter=None, limit=3, hybrid=False)
+    vectorstore.query(client, "kb", [0.1], "q", limit=3, hybrid=False)
     assert client.calls[0]["using"] == vectorstore.DENSE
 
 

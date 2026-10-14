@@ -158,7 +158,6 @@ def query(
     dense_vector: list[float],
     query_text: str,
     *,
-    query_filter: Any | None,
     limit: int,
     hybrid: bool = True,
 ):
@@ -176,8 +175,8 @@ def query(
         result = client.query_points(
             collection_name=collection,
             prefetch=[
-                Prefetch(query=dense_vector, using=DENSE, limit=limit, filter=query_filter),
-                Prefetch(query=sparse, using=SPARSE, limit=limit, filter=query_filter),
+                Prefetch(query=dense_vector, using=DENSE, limit=limit),
+                Prefetch(query=sparse, using=SPARSE, limit=limit),
             ],
             query=FusionQuery(fusion=Fusion.RRF),
             limit=limit,
@@ -188,7 +187,6 @@ def query(
             collection_name=collection,
             query=dense_vector,
             using=DENSE,
-            query_filter=query_filter,
             limit=limit,
             with_payload=True,
         )
