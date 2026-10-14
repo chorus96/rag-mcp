@@ -30,9 +30,9 @@
   청크 ID가 (source, chunk index)에서 정해지므로 다시 실행해도 중복이 생기지 않습니다. 문서를
   삭제하거나 이름을 바꾸면 이전 청크가 남으므로 --recreate 로 재구축하세요.
 
-임베딩 서버 장애
-  임베딩에 실패한 파일에서 멈추고 종료 코드 1로 끝납니다(어느 파일에서 몇 개를 처리한 뒤 멈췄는지 로그로
-  알림). 앞서 저장한 파일은 남고, 실패한 파일은 저장하지 않습니다. 서버가 복구되면 다시 실행하면 됩니다.
+임베딩 서버·Qdrant 장애
+  실패한 파일에서 멈추고 종료 코드 1로 끝납니다(어느 파일에서 몇 개를 처리한 뒤 멈췄는지 로그로 알림).
+  앞서 저장한 파일은 남습니다. 원인을 고친 뒤 다시 실행하면 됩니다.
 """
 
 from __future__ import annotations
@@ -302,12 +302,14 @@ def ingest(path: Path, recreate: bool) -> None:
         try:
             n = ingest_file(client, file, path, ensure=not collection_ready,
                             recreate=recreate and not collection_ready)
-        except embeddings.EmbeddingError as exc:
-            # 임베딩 서버 장애: 이 파일은 저장하지 않고 멈춥니다. 앞선 파일은 이미 저장됐으므로,
-            # 서버가 복구되면 rag-ingest 를 다시 실행하면 됩니다(멱등).
-            log.error("embedding failed for %s: %s", file.relative_to(path), exc)
-            log.error("stopped after %d of %d file(s); fix the embeddings server and run rag-ingest again%s",
-                      done, len(files), " (with --recreate)" if recreate else "")
+        except Exception as exc:  # noqa: BLE001 - 어느 파일에서 멈췄는지 알리고 종료 코드 1로 끝냄
+            # 임베딩 서버나 Qdrant 장애: 이 파일에서 멈춥니다. 앞선 파일은 이미 저장됐으므로,
+            # 원인을 고친 뒤 rag-ingest 를 다시 실행하면 됩니다(멱등).
+            what, fix = (("embedding", "the embeddings server") if isinstance(exc, embeddings.EmbeddingError)
+                         else ("qdrant", "Qdrant"))
+            log.error("%s failed for %s: %s", what, file.relative_to(path), exc)
+            log.error("stopped after %d of %d file(s); fix %s and run rag-ingest again%s",
+                      done, len(files), fix, " (with --recreate)" if recreate else "")
             raise SystemExit(1) from None
         if n:
             collection_ready = True

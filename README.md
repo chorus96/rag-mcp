@@ -323,7 +323,57 @@ Qdrant에 문제가 있으면 `rag_search`는 결과 없이 오류를 돌려줍�
 
 - `QDRANT_API_KEY`를 지정하면 rag-mcp 로그에 `UserWarning: Api key is used with an insecure connection.` 경고가
   나옵니다. Qdrant가 같은 서버의 `127.0.0.1`에만 열려 있어 키가 외부로 나가지 않으므로 무시해도 됩니다.
-- 수집 중(`rag-ingest`) Qdrant 오류는 위와 같은 원인으로 수집이 중단되며 오류 메시지가 그대로 출력됩니다.
+- 수집 중(`rag-ingest`) Qdrant 오류가 나면 수집이 그 파일에서 멈춥니다([Qdrant 장애 시 동작](#qdrant-장애-시-동작)).
+
+### Qdrant 장애 시 동작
+
+Qdrant는 색인을 저장하고 검색하는 곳이므로, 임베딩 서버와 마찬가지로 **대체 동작 없이 오류로 알립니다.**
+지식 베이스의 원본은 문서 디렉터리이고 Qdrant에는 그 사본(색인)만 있으므로, 색인을 잃어도 다시 만들 수 있습니다.
+
+| 상황 | `rag_search` | `rag_collections()` / `rag_health()` | `rag-ingest` |
+|------|------|------|------|
+| 정상 | `status: ok` | 컬렉션·청크 수 / `qdrant.reachable: true` | `done: ...` |
+| Qdrant가 꺼짐·응답 없음 | `status: error`, `qdrant search failed: ...` | `status: error`, `could not reach Qdrant at ...` / `degraded` | 첫 파일에서 멈춤(종료 코드 1) |
+| 컬렉션이 없음(처음 설치, 컬렉션 삭제) | `status: error`, `collection 'rag_kb' not found ...` | `active_collection_exists: false` / `ok` | 컬렉션을 새로 만들며 정상 수집 |
+| API 키 불일치 | `status: error`, `qdrant error: ... 401 (Unauthorized) ...` | `status: error` / `degraded` | 첫 파일에서 멈춤(종료 코드 1) |
+
+**검색 중 장애**
+
+```json
+{"status": "error", "error": "qdrant search failed: [Errno 111] Connection refused"}
+```
+
+- 질의 임베딩은 끝났더라도 Qdrant 검색이 실패하면 리랭킹 없이 바로 오류를 돌려줍니다.
+- **rag-mcp를 재시작할 필요가 없습니다.** rag-mcp는 시작할 때 Qdrant에 접속하지 않고 요청마다 접속하므로,
+  Qdrant가 늦게 뜨거나 재시작돼도 다음 검색부터 바로 정상으로 돌아옵니다(실제로 Qdrant를 끄고 다시 켜 확인).
+- **Qdrant가 멈추면 systemd가 5초 뒤 다시 시작합니다**(`Restart=on-failure`). rag-mcp 서비스는 Qdrant를
+  `Wants=`로만 참조하므로, Qdrant가 멈추거나 재시작돼도 rag-mcp는 함께 멈추지 않습니다.
+- 응답이 없이 멈춰 있으면 검색마다 최대 약 `RAG_TIMEOUT_SECONDS`초(서버의 Qdrant 연결 기본 30초)를 기다립니다.
+
+**수집 중 장애**
+
+```text
+ERROR rag-ingest qdrant failed for official/a.md: [Errno 111] Connection refused
+ERROR rag-ingest stopped after 0 of 3 file(s); fix Qdrant and run rag-ingest again (with --recreate)
+```
+
+- **실패한 파일에서 멈추고 종료 코드 1을 돌려줍니다.** 앞서 저장한 파일은 남으므로, Qdrant가 복구되면
+  `rag-ingest`를 다시 실행하면 됩니다(중복 없음).
+- **`--recreate` 중에 실패하면 컬렉션이 비었거나 일부만 채워진 상태로 남을 수 있습니다.** 기존 컬렉션을 지운
+  뒤에 Qdrant가 멈추면 그 사이의 문서는 검색되지 않습니다. 복구 후 `rag-ingest --recreate`를 다시 실행하세요.
+- 오래된 청크 정리(문서가 줄었을 때 남은 뒷부분 청크 삭제)가 실패하면 경고만 남기고 수집은 계속합니다.
+
+**데이터를 잃었을 때**
+
+Qdrant 데이터(`~/.local/share/rag-mcp/data/qdrant`)는 Qdrant를 재시작해도 남습니다. 디스크 장애 등으로 데이터를
+잃거나 손상됐다면, Qdrant를 다시 시작한 뒤 문서 디렉터리에서 색인을 새로 만들면 됩니다.
+
+```bash
+systemctl --user restart qdrant
+rag-ingest --recreate
+```
+
+장애가 의심되면 [Qdrant 연결 확인](#qdrant-연결-확인)의 ①(서비스 상태와 로그)과 ②(직접 요청)로 원인을 확인하세요.
 
 ### 설치 구조의 설계
 

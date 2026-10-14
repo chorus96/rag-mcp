@@ -216,3 +216,19 @@ def test_ingest_stops_cleanly_on_embedding_error(monkeypatch, tmp_path, caplog):
     assert saved == ["a.md"]                       # 실패한 파일 이후는 처리하지 않음
     assert "embedding failed for official/b.md" in caplog.text
     assert "stopped after 1 of 3 file(s)" in caplog.text
+
+
+def test_ingest_stops_cleanly_on_qdrant_error(monkeypatch, tmp_path, caplog):
+    (tmp_path / "official").mkdir()
+    (tmp_path / "official" / "a.md").write_text("# a", encoding="utf-8")
+
+    def fake_ingest_file(client, file, root, **kw):
+        raise ConnectionRefusedError("[Errno 111] Connection refused")
+
+    monkeypatch.setattr(ingest, "ingest_file", fake_ingest_file)
+    monkeypatch.setattr(ingest, "QdrantClient", lambda **kw: object())
+    import pytest
+    with pytest.raises(SystemExit):
+        ingest.ingest(tmp_path, recreate=True)
+    assert "qdrant failed for official/a.md" in caplog.text
+    assert "stopped after 0 of 1 file(s); fix Qdrant and run rag-ingest again (with --recreate)" in caplog.text
