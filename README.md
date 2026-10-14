@@ -209,6 +209,121 @@ Claude Code라면 [플러그인](#claude-code-플러그인-권장)으로 연결�
 - **같은 서버에서는 한 명만 실행할 수 있습니다.** 포트(8084, 6333, 6334)가 겹치기 때문입니다.
 - `XDG_CONFIG_HOME`을 기본값이 아닌 곳으로 바꾼 환경은 지원하지 않습니다.
 
+### Qdrant 연결 확인
+
+Qdrant는 설치 스크립트가 같은 서버의 `127.0.0.1:6333`에 사용자 서비스로 띄웁니다. 검색 결과가 없거나 오류가
+나면 아래 순서로 확인합니다. ①~③은 Qdrant 자체를, ④~⑤는 rag-mcp가 Qdrant를 제대로 쓰는지를 확인합니다.
+
+**① 서비스 상태와 로그**
+
+```bash
+systemctl --user status qdrant
+journalctl --user -u qdrant -n 50
+```
+
+`Active: active (running)`이어야 합니다. 멈춰 있으면 로그에서 원인(디스크 공간, 저장소 권한, 포트 충돌 등)을
+확인한 뒤 `systemctl --user restart qdrant`로 다시 시작하세요.
+
+**② Qdrant에 직접 요청**
+
+상태 확인 주소는 키 없이 요청할 수 있습니다.
+
+```bash
+curl -s http://localhost:6333/healthz       # healthz check passed
+curl -s http://localhost:6333/readyz        # all shards are ready
+```
+
+그 밖의 요청에는 설정 파일에 `QDRANT_API_KEY`를 지정했다면 키를 헤더로 붙여야 합니다. 키를 지정하지 않았다면
+빈 헤더가 붙어도 상관없습니다.
+
+```bash
+# 설정 파일의 키를 읽음 (rag-mcp와 Qdrant가 같은 값을 씀)
+QDRANT_API_KEY=$(sed -n 's/^QDRANT_API_KEY=//p' ~/.config/rag-mcp/rag-mcp.env | tail -n 1)
+curl -s -H "api-key: $QDRANT_API_KEY" http://localhost:6333/              # 버전
+curl -s -H "api-key: $QDRANT_API_KEY" http://localhost:6333/collections   # 컬렉션 목록
+```
+
+```json
+{"title":"qdrant - vector search engine","version":"1.12.4","commit":"..."}
+{"result":{"collections":[{"name":"rag_kb"}]},"status":"ok","time":0.0000066}
+```
+
+키가 필요한데 없이 요청하면 `Must provide an API key or an Authorization bearer token`(HTTP 401)이 나옵니다.
+
+**③ 컬렉션 상태**
+
+```bash
+curl -s -H "api-key: $QDRANT_API_KEY" http://localhost:6333/collections/rag_kb \
+  | python3 -c 'import json,sys; r=json.load(sys.stdin)["result"]; p=r["config"]["params"];
+print(r["status"], r["points_count"], p["vectors"], list(p.get("sparse_vectors") or {}), sorted(r["payload_schema"]))'
+```
+
+```text
+green 5 {'dense': {'size': 1024, 'distance': 'Cosine'}} ['bm25'] ['source']
+```
+
+| 값 | 확인할 것 |
+|------|------|
+| `green` | 컬렉션 상태. `yellow`는 색인을 정리하는 중(잠시 뒤 `green`), `red`는 오류이므로 Qdrant 로그 확인 |
+| `5` | 저장된 청크 수. 0이면 아직 수집하지 않은 것이므로 `rag-ingest` 실행 |
+| `'size': 1024` | 벡터 차원. 사내 임베딩 모델의 차원과 같아야 합니다([임베딩 서버 연결 확인](#임베딩-서버-연결-확인) ①) |
+| `['bm25']` | 키워드(BM25) 벡터. 비어 있으면 하이브리드 검색 없이 만들어진 컬렉션입니다(`RAG_HYBRID=false`였거나 Kiwi를 불러오지 못함). 하이브리드를 쓰려면 `rag-ingest --recreate` |
+| `['source']` | 오래된 청크 정리에 쓰는 인덱스 |
+
+컬렉션이 없으면 ``Not found: Collection `rag_kb` doesn't exist!``(HTTP 404)가 나옵니다. `rag-ingest`로 만드세요.
+
+**④ `rag_collections()` / `rag_health()`**
+
+MCP 클라이언트에서 `rag_collections()`를 호출하면 rag-mcp가 보는 컬렉션과 청크 수를 확인할 수 있습니다.
+
+```json
+{
+  "status": "ok",
+  "qdrant_url": "http://localhost:6333",
+  "active_collection": "rag_kb",
+  "active_collection_exists": true,
+  "active_collection_points": 5,
+  "collections": ["rag_kb"]
+}
+```
+
+`rag_health()`의 `qdrant` 항목에서는 연결 여부를 봅니다.
+
+```json
+{"status": "ok", "qdrant": {"reachable": true, "url": "http://localhost:6333"}}
+```
+
+실패하면 `status: degraded`와 `qdrant.reachable: false`, `error`가 나옵니다.
+
+```json
+{"status": "degraded", "qdrant": {"reachable": false, "url": "http://localhost:6333", "error": "[Errno 111] Connection refused"}}
+```
+
+**⑤ 검색**
+
+Qdrant에 문제가 있으면 `rag_search`는 결과 없이 오류를 돌려줍니다(대체 동작이 없습니다).
+
+```json
+{"status": "error", "error": "qdrant search failed: [Errno 111] Connection refused"}
+```
+
+**자주 나오는 오류**
+
+`rag_search`·`rag_collections()`·`rag_health()`의 `error`, 또는 `rag-ingest` 실행 중 나오는 메시지입니다.
+
+| 오류 메시지 | 원인 | 조치 |
+|------|------|------|
+| `qdrant search failed: [Errno 111] Connection refused` / `could not reach Qdrant at ...: [Errno 111] Connection refused` | Qdrant가 꺼져 있거나 `QDRANT_URL`이 틀림 | ①로 서비스 상태 확인, `QDRANT_URL`(기본 `http://localhost:6333`) 확인 |
+| `collection 'rag_kb' not found in Qdrant. Populate it first with ...` | 컬렉션이 아직 없음(처음 설치, `QDRANT_COLLECTION`을 바꿈) | `rag-ingest` 실행 |
+| `... 401 (Unauthorized) ... Must provide an API key or an Authorization bearer token` | Qdrant에는 키가 있는데 rag-mcp가 키를 보내지 않음 | 설정 파일의 `QDRANT_API_KEY`를 확인하고 rag-mcp와 qdrant를 함께 재시작 |
+| `... 401 (Unauthorized) ... Invalid API key or JWT` | rag-mcp와 Qdrant의 키가 다름 | 두 서비스가 같은 설정 파일을 읽으므로, 키를 바꿨다면 `systemctl --user restart qdrant rag-mcp`로 둘 다 재시작 |
+| `qdrant error: ... Vector dimension error: expected dim: 1024, got 768` | 임베딩 모델(차원)이 바뀌었는데 컬렉션을 다시 만들지 않음 | `rag-ingest --recreate`([일관성 규칙](#일관성-규칙)) |
+| 검색 결과가 항상 비어 있음 (`count: 0`) | 컬렉션은 있지만 청크가 0개 | ③의 청크 수 확인 후 `rag-ingest` 실행 |
+
+- `QDRANT_API_KEY`를 지정하면 rag-mcp 로그에 `UserWarning: Api key is used with an insecure connection.` 경고가
+  나옵니다. Qdrant가 같은 서버의 `127.0.0.1`에만 열려 있어 키가 외부로 나가지 않으므로 무시해도 됩니다.
+- 수집 중(`rag-ingest`) Qdrant 오류는 위와 같은 원인으로 수집이 중단되며 오류 메시지가 그대로 출력됩니다.
+
 ### 설치 구조의 설계
 
 - **사용자 권한으로만 설치합니다.** 전용 시스템 사용자나 `/opt`, `/etc` 같은 시스템 경로를 쓰지 않으므로
