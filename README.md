@@ -8,38 +8,34 @@ agentic retrieval).
 
 ## 특징
 
-- **읽기 전용** — 모델은 *검색*만 할 수 있습니다. 지식 베이스 기록은 사람이 수집 명령(`rag-ingest`)으로
-  합니다.
-- **하이브리드 검색** — 의미 기반 밀집(dense) 벡터와 BM25 키워드 희소(sparse) 벡터를 Reciprocal Rank
-  Fusion(RRF)으로 결합합니다. `CrashLoopBackOff` 같은 에러 문자열이나 리소스 이름도 정확히 찾습니다.
+- **읽기 전용** — 모델은 *검색*만 할 수 있습니다. 지식 베이스 기록은 사람이 수집 명령(`rag-ingest`)으로 합니다.
+- **하이브리드 검색** — 의미 기반 밀집(dense) 벡터와 BM25 키워드 희소(sparse) 벡터를 Reciprocal Rank Fusion(RRF)으로 결합합니다. `CrashLoopBackOff` 같은 에러 문자열이나 리소스 이름도 정확히 찾습니다.
 - **리랭킹** — 사내 리랭커(크로스 인코더, Cohere 호환 `/rerank`)로 결과 순서를 다시 매겨 정밀도를 높입니다.
-- **사내 임베딩 서버 연결** — 사내에서 운영 중인 OpenAI 호환 `/v1/embeddings` 서버에 연결합니다. 임베딩 모델을
-  rag-mcp가 직접 실행하지 않으므로 모델 파일을 준비할 필요가 없습니다.
-- **한국어 지원** — 기본 임베딩 모델은 다국어 모델 `bge-m3`, 키워드 검색(BM25)은 한국어 형태소 분석기 Kiwi로
-  조사·어미를 떼어 단어를 맞추고, 리랭커 기본 모델 이름도 다국어 모델(`bge-reranker-v2-m3`)입니다.
+- **사내 임베딩 서버 연결** — 사내에서 운영 중인 OpenAI 호환 `/v1/embeddings` 서버에 연결합니다. 임베딩 모델을 rag-mcp가 직접 실행하지 않으므로 모델 파일을 준비할 필요가 없습니다.
+- **한국어 지원** — 기본 임베딩 모델은 다국어 모델 `bge-m3`, 키워드 검색(BM25)은 한국어 형태소 분석기 Kiwi로 조사·어미를 떼어 단어를 맞추고, 리랭커 기본 모델 이름도 다국어 모델(`bge-reranker-v2-m3`)입니다.
 - **마크다운 수집** — 일반 마크다운을 헤딩 기준으로 청킹하고, 멱등(idempotent) 재실행을 지원합니다.
 - **간단한 설치** — Linux + systemd 서버에 스크립트 하나로 설치합니다. root 권한이 필요 없습니다.
 - **Claude Code 플러그인** — 이 저장소 자체가 플러그인 마켓플레이스입니다.
 
 ### 설계 원칙
 
-| 원칙 | 내용 |
-|------|------|
-| **읽기 전용** | MCP 도구는 검색만 합니다. 모델은 지식 베이스를 바꿀 수 없고, 기록은 사람이 수집 명령(`rag-ingest`)으로 합니다. 서버는 문서 디렉터리를 읽거나 쓰지 않습니다. |
-| **벤더 중립** | 채팅 LLM은 연결하는 MCP 클라이언트가 정합니다. 임베딩은 사내 서버의 OpenAI 호환 `/v1/embeddings`로 요청하므로 특정 모델이나 제품에 묶이지 않습니다. |
-| **수집과 질의의 일관성** | 수집과 질의가 같은 임베딩 코드와 설정을 공유하도록 만들어, 벡터가 어긋날 여지를 없앴습니다. |
+| 원칙                           | 내용                                                                                                                                                                                                                                                                 |
+| ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **읽기 전용**            | MCP 도구는 검색만 합니다. 모델은 지식 베이스를 바꿀 수 없고, 기록은 사람이 수집 명령(`rag-ingest`)으로 합니다. 서버는 문서 디렉터리를 읽거나 쓰지 않습니다.                                                                                                        |
+| **벤더 중립**            | 채팅 LLM은 연결하는 MCP 클라이언트가 정합니다. 임베딩은 사내 서버의 OpenAI 호환`/v1/embeddings`로 요청하므로 특정 모델이나 제품에 묶이지 않습니다.                                                                                                                 |
+| **수집과 질의의 일관성** | 수집과 질의가 같은 임베딩 코드와 설정을 공유하도록 만들어, 벡터가 어긋날 여지를 없앴습니다.                                                                                                                                                                          |
 | **실패해도 검색은 유지** | 실행 중 리랭커 호출, BM25, 오래된 청크 정리가 실패하면 경고 로그만 남기고 건너뛰며, 하이브리드·의미 검색은 계속 동작합니다(최선형, best-effort). 단, 리랭커 주소를 설정하지 않은 것은 설정 오류로 보고 검색을 막습니다([리랭커 장애 시 동작](#리랭커-장애-시-동작)). |
 
 ## 구성 요소
 
-| 구성 요소 | 역할 |
-|------|------|
-| **rag-mcp 서버** (`tools/server.py`) | MCP 도구를 `http://<서버>:8084/mcp`(streamable-http)로 제공 |
-| **Qdrant** | 문서 청크의 벡터를 저장하는 벡터 DB (`127.0.0.1:6333`) |
-| **rag-ingest** (`tools/ingest.py`) | 문서를 청크로 나누고 임베딩해 Qdrant에 기록하는 수집 명령 |
-| **사내 임베딩 서버** | 텍스트를 벡터로 바꾸는 OpenAI 호환 서버 — **rag-mcp에 포함되지 않음, 사내 서버에 연결** |
-| **사내 리랭커** | 검색 후보의 순서를 다시 매기는 크로스 인코더 서버(Cohere 호환 `/rerank`) — **rag-mcp에 포함되지 않음, 사내 서버에 연결** |
-| **Claude Code 플러그인** (`plugins/rag-mcp`) | Claude Code에서 rag-mcp 서버에 연결하고, 도구 사용법을 스킬로 안내 |
+| 구성 요소                                            | 역할                                                                                                                             |
+| ---------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| **rag-mcp 서버** (`tools/server.py`)         | MCP 도구를`http://<서버>:8084/mcp`(streamable-http)로 제공                                                                     |
+| **Qdrant**                                     | 문서 청크의 벡터를 저장하는 벡터 DB (`127.0.0.1:6333`)                                                                         |
+| **rag-ingest** (`tools/ingest.py`)           | 문서를 청크로 나누고 임베딩해 Qdrant에 기록하는 수집 명령                                                                        |
+| **사내 임베딩 서버**                           | 텍스트를 벡터로 바꾸는 OpenAI 호환 서버 —**rag-mcp에 포함되지 않음, 사내 서버에 연결**                                    |
+| **사내 리랭커**                                | 검색 후보의 순서를 다시 매기는 크로스 인코더 서버(Cohere 호환`/rerank`) — **rag-mcp에 포함되지 않음, 사내 서버에 연결** |
+| **Claude Code 플러그인** (`plugins/rag-mcp`) | Claude Code에서 rag-mcp 서버에 연결하고, 도구 사용법을 스킬로 안내                                                               |
 
 ## 아키텍처
 
@@ -175,27 +171,27 @@ Claude Code라면 [플러그인](#claude-code-플러그인-권장)으로 연결�
 실행합니다. 다시 실행하면 업그레이드로 동작합니다 — 코드와 의존성을 갱신하고 서비스를 재시작하며,
 설정 파일과 데이터는 건드리지 않습니다.
 
-| 경로 | 내용 |
-|------|------|
-| `~/.local/share/rag-mcp/app`, `~/.local/share/rag-mcp/venv` | 애플리케이션 코드와 Python 가상환경 |
-| `~/.local/share/rag-mcp/qdrant/qdrant` | Qdrant 바이너리 (기본 `v1.12.4`, `127.0.0.1`에만 바인드) |
-| `~/.config/rag-mcp/rag-mcp.env` | 설정 파일 ([.env.example](.env.example) 복사본, 권한 600) |
-| `~/.local/share/rag-mcp/data/knowledge` | [문서 디렉터리](#문서-디렉터리): `official/`(사람이 관리하는 문서, 샘플 포함) |
-| `~/.local/share/rag-mcp/data/qdrant` | Qdrant 데이터 |
-| `~/.config/systemd/user/{qdrant,rag-mcp}.service` | systemd 사용자 서비스 ([`deploy/systemd/`](deploy/systemd), 경로는 `%h`) |
-| `~/.local/bin/rag-ingest` | 문서 수집 명령 |
+| 경로                                                            | 내용                                                                           |
+| --------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| `~/.local/share/rag-mcp/app`, `~/.local/share/rag-mcp/venv` | 애플리케이션 코드와 Python 가상환경                                            |
+| `~/.local/share/rag-mcp/qdrant/qdrant`                        | Qdrant 바이너리 (기본`v1.12.4`, `127.0.0.1`에만 바인드)                    |
+| `~/.config/rag-mcp/rag-mcp.env`                               | 설정 파일 ([.env.example](.env.example) 복사본, 권한 600)                       |
+| `~/.local/share/rag-mcp/data/knowledge`                       | [문서 디렉터리](#문서-디렉터리): `official/`(사람이 관리하는 문서, 샘플 포함) |
+| `~/.local/share/rag-mcp/data/qdrant`                          | Qdrant 데이터                                                                  |
+| `~/.config/systemd/user/{qdrant,rag-mcp}.service`             | systemd 사용자 서비스 ([`deploy/systemd/`](deploy/systemd), 경로는 `%h`)    |
+| `~/.local/bin/rag-ingest`                                     | 문서 수집 명령                                                                 |
 
 ### 운영 명령
 
-| 작업 | 명령 |
-|------|------|
-| 상태 | `systemctl --user status qdrant rag-mcp` |
-| 로그 | `journalctl --user -u rag-mcp -f` |
-| 설정 적용 | `systemctl --user restart rag-mcp` |
-| 문서 수집 | `rag-ingest [--recreate]` |
-| 업그레이드 | `./deploy/install.sh` |
-| 제거 (설정·데이터 유지) | `./deploy/uninstall.sh` |
-| 제거 (모두 삭제) | `./deploy/uninstall.sh --purge` |
+| 작업                     | 명령                                       |
+| ------------------------ | ------------------------------------------ |
+| 상태                     | `systemctl --user status qdrant rag-mcp` |
+| 로그                     | `journalctl --user -u rag-mcp -f`        |
+| 설정 적용                | `systemctl --user restart rag-mcp`       |
+| 문서 수집                | `rag-ingest [--recreate]`                |
+| 업그레이드               | `./deploy/install.sh`                    |
+| 제거 (설정·데이터 유지) | `./deploy/uninstall.sh`                  |
+| 제거 (모두 삭제)         | `./deploy/uninstall.sh --purge`          |
 
 ### 주의 사항
 
@@ -263,13 +259,13 @@ print(r["status"], r["points_count"], p["vectors"], list(p.get("sparse_vectors")
 green 5 {'dense': {'size': 1024, 'distance': 'Cosine'}} ['bm25'] ['source']
 ```
 
-| 값 | 확인할 것 |
-|------|------|
-| `green` | 컬렉션 상태. `yellow`는 색인을 정리하는 중(잠시 뒤 `green`), `red`는 오류이므로 Qdrant 로그 확인 |
-| `5` | 저장된 청크 수. 0이면 아직 수집하지 않은 것이므로 `rag-ingest` 실행 |
-| `'size': 1024` | 벡터 차원. 사내 임베딩 모델의 차원과 같아야 합니다([임베딩 서버 연결 확인](#임베딩-서버-연결-확인) ①) |
-| `['bm25']` | 키워드(BM25) 벡터. 비어 있으면 하이브리드 검색 없이 만들어진 컬렉션입니다(`RAG_HYBRID=false`였거나 Kiwi를 불러오지 못함). 하이브리드를 쓰려면 `rag-ingest --recreate` |
-| `['source']` | 오래된 청크 정리에 쓰는 인덱스 |
+| 값               | 확인할 것                                                                                                                                                                 |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `green`        | 컬렉션 상태.`yellow`는 색인을 정리하는 중(잠시 뒤 `green`), `red`는 오류이므로 Qdrant 로그 확인                                                                     |
+| `5`            | 저장된 청크 수. 0이면 아직 수집하지 않은 것이므로`rag-ingest` 실행                                                                                                      |
+| `'size': 1024` | 벡터 차원. 사내 임베딩 모델의 차원과 같아야 합니다([임베딩 서버 연결 확인](#임베딩-서버-연결-확인) ①)                                                                     |
+| `['bm25']`     | 키워드(BM25) 벡터. 비어 있으면 하이브리드 검색 없이 만들어진 컬렉션입니다(`RAG_HYBRID=false`였거나 Kiwi를 불러오지 못함). 하이브리드를 쓰려면 `rag-ingest --recreate` |
+| `['source']`   | 오래된 청크 정리에 쓰는 인덱스                                                                                                                                            |
 
 컬렉션이 없으면 ``Not found: Collection `rag_kb` doesn't exist!``(HTTP 404)가 나옵니다. `rag-ingest`로 만드세요.
 
@@ -312,14 +308,14 @@ Qdrant에 문제가 있으면 `rag_search`는 결과 없이 오류를 돌려줍�
 
 `rag_search`·`rag_collections()`·`rag_health()`의 `error`, 또는 `rag-ingest` 실행 중 나오는 메시지입니다.
 
-| 오류 메시지 | 원인 | 조치 |
-|------|------|------|
-| `qdrant search failed: [Errno 111] Connection refused` / `could not reach Qdrant at ...: [Errno 111] Connection refused` | Qdrant가 꺼져 있거나 `QDRANT_URL`이 틀림 | ①로 서비스 상태 확인, `QDRANT_URL`(기본 `http://localhost:6333`) 확인 |
-| `collection 'rag_kb' not found in Qdrant. Populate it first with ...` | 컬렉션이 아직 없음(처음 설치, `QDRANT_COLLECTION`을 바꿈) | `rag-ingest` 실행 |
-| `... 401 (Unauthorized) ... Must provide an API key or an Authorization bearer token` | Qdrant에는 키가 있는데 rag-mcp가 키를 보내지 않음 | 설정 파일의 `QDRANT_API_KEY`를 확인하고 rag-mcp와 qdrant를 함께 재시작 |
-| `... 401 (Unauthorized) ... Invalid API key or JWT` | rag-mcp와 Qdrant의 키가 다름 | 두 서비스가 같은 설정 파일을 읽으므로, 키를 바꿨다면 `systemctl --user restart qdrant rag-mcp`로 둘 다 재시작 |
-| `qdrant error: ... Vector dimension error: expected dim: 1024, got 768` | 임베딩 모델(차원)이 바뀌었는데 컬렉션을 다시 만들지 않음 | `rag-ingest --recreate`([일관성 규칙](#일관성-규칙)) |
-| 검색 결과가 항상 비어 있음 (`count: 0`) | 컬렉션은 있지만 청크가 0개 | ③의 청크 수 확인 후 `rag-ingest` 실행 |
+| 오류 메시지                                                                                                                  | 원인                                                       | 조치                                                                                                           |
+| ---------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `qdrant search failed: [Errno 111] Connection refused` / `could not reach Qdrant at ...: [Errno 111] Connection refused` | Qdrant가 꺼져 있거나`QDRANT_URL`이 틀림                  | ①로 서비스 상태 확인,`QDRANT_URL`(기본 `http://localhost:6333`) 확인                                      |
+| `collection 'rag_kb' not found in Qdrant. Populate it first with ...`                                                      | 컬렉션이 아직 없음(처음 설치,`QDRANT_COLLECTION`을 바꿈) | `rag-ingest` 실행                                                                                            |
+| `... 401 (Unauthorized) ... Must provide an API key or an Authorization bearer token`                                      | Qdrant에는 키가 있는데 rag-mcp가 키를 보내지 않음          | 설정 파일의`QDRANT_API_KEY`를 확인하고 rag-mcp와 qdrant를 함께 재시작                                        |
+| `... 401 (Unauthorized) ... Invalid API key or JWT`                                                                        | rag-mcp와 Qdrant의 키가 다름                               | 두 서비스가 같은 설정 파일을 읽으므로, 키를 바꿨다면`systemctl --user restart qdrant rag-mcp`로 둘 다 재시작 |
+| `qdrant error: ... Vector dimension error: expected dim: 1024, got 768`                                                    | 임베딩 모델(차원)이 바뀌었는데 컬렉션을 다시 만들지 않음   | `rag-ingest --recreate`([일관성 규칙](#일관성-규칙))                                                          |
+| 검색 결과가 항상 비어 있음 (`count: 0`)                                                                                    | 컬렉션은 있지만 청크가 0개                                 | ③의 청크 수 확인 후`rag-ingest` 실행                                                                        |
 
 - `QDRANT_API_KEY`를 지정하면 rag-mcp 로그에 `UserWarning: Api key is used with an insecure connection.` 경고가
   나옵니다. Qdrant가 같은 서버의 `127.0.0.1`에만 열려 있어 키가 외부로 나가지 않으므로 무시해도 됩니다.
@@ -330,12 +326,12 @@ Qdrant에 문제가 있으면 `rag_search`는 결과 없이 오류를 돌려줍�
 Qdrant는 색인을 저장하고 검색하는 곳이므로, 임베딩 서버와 마찬가지로 **대체 동작 없이 오류로 알립니다.**
 지식 베이스의 원본은 문서 디렉터리이고 Qdrant에는 그 사본(색인)만 있으므로, 색인을 잃어도 다시 만들 수 있습니다.
 
-| 상황 | `rag_search` | `rag_collections()` / `rag_health()` | `rag-ingest` |
-|------|------|------|------|
-| 정상 | `status: ok` | 컬렉션·청크 수 / `qdrant.reachable: true` | `done: ...` |
-| Qdrant가 꺼짐·응답 없음 | `status: error`, `qdrant search failed: ...` | `status: error`, `could not reach Qdrant at ...` / `degraded` | 첫 파일에서 멈춤(종료 코드 1) |
-| 컬렉션이 없음(처음 설치, 컬렉션 삭제) | `status: error`, `collection 'rag_kb' not found ...` | `active_collection_exists: false` / `ok` | 컬렉션을 새로 만들며 정상 수집 |
-| API 키 불일치 | `status: error`, `qdrant error: ... 401 (Unauthorized) ...` | `status: error` / `degraded` | 첫 파일에서 멈춤(종료 코드 1) |
+| 상황                                  | `rag_search`                                                  | `rag_collections()` / `rag_health()`                            | `rag-ingest`                 |
+| ------------------------------------- | --------------------------------------------------------------- | ------------------------------------------------------------------- | ------------------------------ |
+| 정상                                  | `status: ok`                                                  | 컬렉션·청크 수 /`qdrant.reachable: true`                         | `done: ...`                  |
+| Qdrant가 꺼짐·응답 없음              | `status: error`, `qdrant search failed: ...`                | `status: error`, `could not reach Qdrant at ...` / `degraded` | 첫 파일에서 멈춤(종료 코드 1)  |
+| 컬렉션이 없음(처음 설치, 컬렉션 삭제) | `status: error`, `collection 'rag_kb' not found ...`        | `active_collection_exists: false` / `ok`                        | 컬렉션을 새로 만들며 정상 수집 |
+| API 키 불일치                         | `status: error`, `qdrant error: ... 401 (Unauthorized) ...` | `status: error` / `degraded`                                    | 첫 파일에서 멈춤(종료 코드 1)  |
 
 **검색 중 장애**
 
@@ -398,8 +394,8 @@ rag-ingest --recreate
 이 저장소는 Claude Code 플러그인 마켓플레이스입니다. `rag-mcp` 플러그인을 설치하면 MCP 서버 연결과
 함께, 다음 스킬이 추가됩니다. 플러그인에는 서버 코드가 들어 있지 않습니다.
 
-| 스킬 | 내용 |
-|------|------|
+| 스킬              | 내용                                              |
+| ----------------- | ------------------------------------------------- |
 | `rag-knowledge` | 언제 어떻게 검색할지, 결과를 어떻게 인용할지 안내 |
 
 ```text
@@ -450,10 +446,10 @@ claude plugin install rag-mcp@rag-mcp --config server_url=http://<서버>:8084/m
 RAG_MCP_URL=http://10.0.0.5:8084/mcp claude
 ```
 
-| 연결 방식 | 주소 결정 | 기본 주소 |
-|------|------|------|
-| 플러그인 (`plugins/rag-mcp/.mcp.json`) | `${RAG_MCP_URL:-${user_config.server_url}}` | 플러그인 설정 `server_url` (`/plugin configure`) |
-| 프로젝트 `.mcp.json` | `${RAG_MCP_URL:-http://localhost:8084/mcp}` | `http://localhost:8084/mcp` |
+| 연결 방식                                | 주소 결정                                     | 기본 주소                                           |
+| ---------------------------------------- | --------------------------------------------- | --------------------------------------------------- |
+| 플러그인 (`plugins/rag-mcp/.mcp.json`) | `${RAG_MCP_URL:-${user_config.server_url}}` | 플러그인 설정`server_url` (`/plugin configure`) |
+| 프로젝트`.mcp.json`                    | `${RAG_MCP_URL:-http://localhost:8084/mcp}` | `http://localhost:8084/mcp`                       |
 
 - **왜 환경 변수인가:** 설정 파일이나 플러그인 설정을 고치지 않고도 셸·서버·CI마다 다른 rag-mcp 서버에
   접속할 수 있습니다.
@@ -464,11 +460,11 @@ RAG_MCP_URL=http://10.0.0.5:8084/mcp claude
 
 ## MCP 도구
 
-| 도구 | 용도 |
-|------|---------|
-| `rag_search(query, limit?)` | 지식 베이스에 대한 시맨틱 검색 (하이브리드 검색 + 리랭킹) |
-| `rag_collections()` | 컬렉션 목록과 포인트 수 (지식 베이스가 채워졌는지 확인) |
-| `rag_health()` | Qdrant, 사내 임베딩 서버, 사내 리랭커 접근 가능 여부와 하이브리드 설정 |
+| 도구                          | 용도                                                                   |
+| ----------------------------- | ---------------------------------------------------------------------- |
+| `rag_search(query, limit?)` | 지식 베이스에 대한 시맨틱 검색 (하이브리드 검색 + 리랭킹)              |
+| `rag_collections()`         | 컬렉션 목록과 포인트 수 (지식 베이스가 채워졌는지 확인)                |
+| `rag_health()`              | Qdrant, 사내 임베딩 서버, 사내 리랭커 접근 가능 여부와 하이브리드 설정 |
 
 도구는 모두 **읽기 전용**입니다. 지식 베이스를 바꾸는 도구는 없습니다.
 
@@ -479,11 +475,11 @@ RAG_MCP_URL=http://10.0.0.5:8084/mcp claude
 
 Claude Code에서는 자연어로 물으면 플러그인의 `rag-knowledge` 스킬이 알맞은 호출을 고릅니다.
 
-| 요청 예 | 도구 호출 |
-|------|------|
+| 요청 예                                              | 도구 호출                                                       |
+| ---------------------------------------------------- | --------------------------------------------------------------- |
 | "Longhorn 볼륨이 attaching에서 멈췄을 때 어떻게 해?" | `rag_search(query="Longhorn 볼륨이 attaching 상태에서 멈춤")` |
-| "longhorn 볼륨 복구 문서 10개까지 찾아 줘" | `rag_search(query="Longhorn 볼륨 복구 절차", limit=10)` |
-| "prod-01에서 노드 재부팅 뒤 생긴 문제 사례 있어?" | `rag_search(query="prod-01 노드 재부팅 후 볼륨 attach 실패")` |
+| "longhorn 볼륨 복구 문서 10개까지 찾아 줘"           | `rag_search(query="Longhorn 볼륨 복구 절차", limit=10)`       |
+| "prod-01에서 노드 재부팅 뒤 생긴 문제 사례 있어?"    | `rag_search(query="prod-01 노드 재부팅 후 볼륨 attach 실패")` |
 
 검색 범위를 좁히는 필터는 없습니다. 컴포넌트·환경 이름처럼 좁히고 싶은 단어를 질의에 함께 쓰면, 키워드
 검색(BM25)이 그 단어가 들어 있는 문서를 위로 올립니다.
@@ -584,10 +580,10 @@ rag-ingest --recreate           # 컬렉션을 지우고 전체 재구축
 
 Qdrant 컬렉션 하나(기본 이름 `rag_kb`)에 모든 문서를 저장합니다.
 
-| 벡터 | 종류 | 내용 |
-|------|------|------|
-| `dense` | 밀집 벡터, 코사인 거리, HNSW 인덱스 | 임베딩 모델이 만든 의미 벡터 (bge-m3는 1024차원) |
-| `bm25` | 희소 벡터, IDF 적용 | Kiwi 형태소 분석으로 만든 BM25 키워드 벡터 (하이브리드가 켜져 있을 때만, [키워드 검색과 한국어](#키워드-검색bm25과-한국어)) |
+| 벡터      | 종류                                | 내용                                                                                                                      |
+| --------- | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `dense` | 밀집 벡터, 코사인 거리, HNSW 인덱스 | 임베딩 모델이 만든 의미 벡터 (bge-m3는 1024차원)                                                                          |
+| `bm25`  | 희소 벡터, IDF 적용                 | Kiwi 형태소 분석으로 만든 BM25 키워드 벡터 (하이브리드가 켜져 있을 때만,[키워드 검색과 한국어](#키워드-검색bm25과-한국어)) |
 
 - 벡터 차원은 수집할 때 실제 임베딩 길이로 정해지므로, 모델을 바꿔도 코드를 고칠 필요가 없습니다.
 - IDF는 컬렉션의 `Modifier.IDF`로 서버 측에서 계산하므로, 질의 쪽은 단어 존재 여부만 보내면 됩니다.
@@ -618,9 +614,9 @@ Qdrant 컬렉션 하나(기본 이름 `rag_kb`)에 모든 문서를 저장합니
 큰 문서(예: 아주 긴 마크다운)는 청크 수백 개가 되고, 각 청크가 밀집 벡터·희소 벡터·텍스트를 담고 있어
 한 번에 보내면 수 메가바이트가 됩니다. 그래서 요청을 나눕니다.
 
-| 단계 | 요청당 크기 | 설정 |
-|------|------|------|
-| 임베딩 | 청크 32개 | `EMBED_BATCH_SIZE` |
+| 단계          | 요청당 크기 | 설정                    |
+| ------------- | ----------- | ----------------------- |
+| 임베딩        | 청크 32개   | `EMBED_BATCH_SIZE`    |
 | Qdrant 업서트 | 포인트 64개 | `QDRANT_UPSERT_BATCH` |
 
 나눠 보내면 큰 파일을 처리하다 실패해도 앞선 배치는 이미 반영되어 있습니다. 사내 임베딩 서버가 413/400
@@ -665,10 +661,10 @@ BM25는 질의의 단어가 문서에 얼마나 들어 있는지로 점수를 �
 붙은 채로 한 단어가 되므로, rag-mcp는 한국어 형태소 분석기 [Kiwi](https://github.com/bab2min/kiwipiepy)로 단어를
 나눕니다(`tools/kiwi_bm25.py`).
 
-| 단어 나누기 | "볼륨이 멈췄어요" | 문서의 "…볼륨을 … 멈추면…" |
-|------|------|------|
+| 단어 나누기           | "볼륨이 멈췄어요"        | 문서의 "…볼륨을 … 멈추면…"            |
+| --------------------- | ------------------------ | ---------------------------------------- |
 | 공백 기준 (흔한 BM25) | `볼륨이`, `멈췄어요` | `볼륨을`, `멈추면` — 맞는 단어 없음 |
-| Kiwi 형태소 (rag-mcp) | `볼륨`, `멈추` | `볼륨`, `멈추` — 둘 다 맞음 |
+| Kiwi 형태소 (rag-mcp) | `볼륨`, `멈추`       | `볼륨`, `멈추` — 둘 다 맞음         |
 
 - **남기는 형태소:** 일반·고유 명사, 수사, 동사·형용사 어간, 어근, 한자. 조사·어미·접두사는 버립니다
   ("재부팅한" → `부팅`).
@@ -687,17 +683,17 @@ BM25는 질의의 단어가 문서에 얼마나 들어 있는지로 점수를 �
 질의는 문서와 조사·어미가 다르게 붙은 자연스러운 문장입니다. 표의 숫자는 정답 문서의 BM25 순위이고, `—`는 정답 문서와
 맞는 단어가 하나도 없어 점수가 0인 경우입니다.
 
-| 질의 | 공백 기준 토큰 | 순위 | Kiwi 형태소 토큰 | 순위 |
-|------|------|:--:|------|:--:|
-| 볼륨을 분리하는 방법 | `볼륨을` `분리하는` `방법` | 1 | `볼륨` `분리` `방법` | 1 |
-| 볼륨이 멈췄어요 | `볼륨이` `멈췄어요` | 1 | `볼륨` `멈추` | 1 |
-| 인증서 갱신은 어떻게 하나요 | `인증서` `갱신은` `어떻게` `하나요` | — | `인증서` `갱신` `하` | 1 |
-| 디스크가 가득 찼을 때 스냅샷 정리 | `디스크가` `가득` `찼을` `때` `스냅샷` `정리` | — | `디스크` `차` `때` `스냅샷` `정리` | 1 |
-| 롤백하는 절차 | `롤백하는` `절차` | — | `롤` `백` `절차` | 1 |
-| 데이터베이스에 연결되지 않아요 | `데이터베이스에` `연결되지` `않아요` | — | `데이터베이스` `연결` | 1 |
-| CrashLoopBackOff 해결 | `crashloopbackoff` `해결` | 1 | `crashloopbackoff` `해결` | 1 |
-| 로그를 정리하고 싶어요 | `로그를` `정리하고` `싶어요` | 2 | `로그` `정리` | 1 |
-| **합계** | | **1위 3/8, 점수 0 4/8** | | **1위 8/8, 점수 0 0/8** |
+| 질의                              | 공백 기준 토큰                                            |             순위             | Kiwi 형태소 토큰                             |             순위             |
+| --------------------------------- | --------------------------------------------------------- | :---------------------------: | -------------------------------------------- | :---------------------------: |
+| 볼륨을 분리하는 방법              | `볼륨을` `분리하는` `방법`                          |               1               | `볼륨` `분리` `방법`                   |               1               |
+| 볼륨이 멈췄어요                   | `볼륨이` `멈췄어요`                                   |               1               | `볼륨` `멈추`                            |               1               |
+| 인증서 갱신은 어떻게 하나요       | `인증서` `갱신은` `어떻게` `하나요`               |              —              | `인증서` `갱신` `하`                   |               1               |
+| 디스크가 가득 찼을 때 스냅샷 정리 | `디스크가` `가득` `찼을` `때` `스냅샷` `정리` |              —              | `디스크` `차` `때` `스냅샷` `정리` |               1               |
+| 롤백하는 절차                     | `롤백하는` `절차`                                     |              —              | `롤` `백` `절차`                       |               1               |
+| 데이터베이스에 연결되지 않아요    | `데이터베이스에` `연결되지` `않아요`                |              —              | `데이터베이스` `연결`                    |               1               |
+| CrashLoopBackOff 해결             | `crashloopbackoff` `해결`                             |               1               | `crashloopbackoff` `해결`                |               1               |
+| 로그를 정리하고 싶어요            | `로그를` `정리하고` `싶어요`                        |               2               | `로그` `정리`                            |               1               |
+| **합계**                    |                                                           | **1위 3/8, 점수 0 4/8** |                                              | **1위 8/8, 점수 0 0/8** |
 
 - 공백 기준으로 나누면 "인증서**가**"(문서)와 "인증서"(질의)처럼 조사만 달라도 다른 단어가 되어, 질의의 절반에서 정답
   문서와 맞는 단어가 하나도 없었습니다. Kiwi 형태소로 나누면 모든 질의에서 정답 문서가 1위였습니다.
@@ -713,14 +709,14 @@ BM25는 질의의 단어가 문서에 얼마나 들어 있는지로 점수를 �
 <details>
 <summary>비교에 쓴 문서 6개</summary>
 
-| 문서 | 내용 |
-|------|------|
-| A | 노드를 재부팅한 뒤 Longhorn 볼륨이 attaching 상태에서 멈추면 볼륨을 강제로 분리하고 다시 연결합니다. |
-| B | 파드가 CrashLoopBackOff 상태라면 컨테이너 로그를 확인하고 설정 파일의 오류를 고칩니다. |
-| C | 인증서가 만료되었을 때는 cert-manager로 인증서를 갱신하고 인그레스를 다시 시작합니다. |
-| D | 디스크 사용량이 90%를 넘으면 오래된 스냅샷과 로그를 정리해 공간을 확보합니다. |
-| E | 배포가 실패하면 이전 버전으로 롤백하고 원인을 분석해 재배포합니다. |
-| F | 데이터베이스 연결이 끊기면 커넥션 풀 설정과 네트워크 정책을 점검합니다. |
+| 문서 | 내용                                                                                                 |
+| ---- | ---------------------------------------------------------------------------------------------------- |
+| A    | 노드를 재부팅한 뒤 Longhorn 볼륨이 attaching 상태에서 멈추면 볼륨을 강제로 분리하고 다시 연결합니다. |
+| B    | 파드가 CrashLoopBackOff 상태라면 컨테이너 로그를 확인하고 설정 파일의 오류를 고칩니다.               |
+| C    | 인증서가 만료되었을 때는 cert-manager로 인증서를 갱신하고 인그레스를 다시 시작합니다.                |
+| D    | 디스크 사용량이 90%를 넘으면 오래된 스냅샷과 로그를 정리해 공간을 확보합니다.                        |
+| E    | 배포가 실패하면 이전 버전으로 롤백하고 원인을 분석해 재배포합니다.                                   |
+| F    | 데이터베이스 연결이 끊기면 커넥션 풀 설정과 네트워크 정책을 점검합니다.                              |
 
 정답 문서: 질의 순서대로 A, A, C, D, E, F, B, D. 점수는 BM25(`k=1.2`, `b=0.75`)와 IDF `ln(1 + (N − df + 0.5)/(df + 0.5))`로
 계산했습니다.
@@ -792,10 +788,10 @@ MCP 클라이언트에서 `rag_health()`를 호출하면 `retrieval` 항목에 �
 {"retrieval": {"hybrid": true, "sparse_model": "kiwi-bm25"}}
 ```
 
-| 로그 / `retrieval` | 의미 |
-|------|------|
-| `hybrid search enabled (sparse model=kiwi-bm25)` / `{"hybrid": true, "sparse_model": "kiwi-bm25"}` | 정상 — 하이브리드 검색 |
-| `hybrid search disabled (RAG_HYBRID=false); using dense-only` / `{"hybrid": false, "sparse_model": null}` | 설정으로 끈 상태 — 의미 검색만 |
+| 로그 /`retrieval`                                                                                                                                   | 의미                                                    |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
+| `hybrid search enabled (sparse model=kiwi-bm25)` / `{"hybrid": true, "sparse_model": "kiwi-bm25"}`                                                | 정상 — 하이브리드 검색                                 |
+| `hybrid search disabled (RAG_HYBRID=false); using dense-only` / `{"hybrid": false, "sparse_model": null}`                                         | 설정으로 끈 상태 — 의미 검색만                         |
 | `sparse model kiwi-bm25 unavailable (No module named 'kiwipiepy'); falling back to dense-only` / `{"hybrid": false, "sparse_model": "kiwi-bm25"}` | 켰지만 Kiwi를 불러오지 못함 — 의미 검색만. ①부터 확인 |
 
 **④ 수집 로그**
@@ -830,26 +826,26 @@ curl -s -H "api-key: $QDRANT_API_KEY" http://localhost:6333/collections/rag_kb \
 
 **자주 나오는 문제**
 
-| 증상 / 메시지 | 원인 | 조치 |
-|------|------|------|
-| 로그에 `sparse model kiwi-bm25 unavailable (No module named 'kiwipiepy') ...` | 가상환경에 Kiwi가 설치되지 않음 | `./deploy/install.sh` 다시 실행 후 ①로 확인 |
-| 로그에 `sparse model kiwi-bm25 unavailable (...)` (그 밖의 원인) | Kiwi 모델을 읽지 못함(메모리 부족 등) | 괄호 안 원인 확인. Kiwi는 약 0.5GB 메모리를 씁니다 |
-| ``qdrant error: ... Vector with name `bm25` is not configured in this collection, available names: dense`` | 키워드 벡터 없이 만든 컬렉션(`RAG_HYBRID=false`로 수집했거나 수집할 때 Kiwi가 없었음)을 하이브리드로 검색함 | `rag-ingest --recreate` |
-| `rag-ingest`가 `not ingesting: ...`으로 멈춤 | 컬렉션의 키워드 벡터 유무와 지금 수집 방식이 다름 | [Kiwi BM25 장애 시 동작](#kiwi-bm25-장애-시-동작)의 수집 중 안내대로 처리 |
-| 에러 문자열·리소스 이름으로 검색해도 잘 안 찾힘 | 하이브리드가 꺼져 있음(③의 `hybrid: false`) | ③의 표로 원인 확인 후 `RAG_HYBRID=true`, `rag-ingest --recreate` |
-| 키워드 벡터 방식을 바꾼 뒤 검색 순위가 이상함 | 기존 색인의 단어와 새 질의의 단어가 다름 | `rag-ingest --recreate` |
+| 증상 / 메시지                                                                                              | 원인                                                                                                          | 조치                                                                     |
+| ---------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| 로그에`sparse model kiwi-bm25 unavailable (No module named 'kiwipiepy') ...`                             | 가상환경에 Kiwi가 설치되지 않음                                                                               | `./deploy/install.sh` 다시 실행 후 ①로 확인                           |
+| 로그에`sparse model kiwi-bm25 unavailable (...)` (그 밖의 원인)                                          | Kiwi 모델을 읽지 못함(메모리 부족 등)                                                                         | 괄호 안 원인 확인. Kiwi는 약 0.5GB 메모리를 씁니다                       |
+| ``qdrant error: ... Vector with name `bm25` is not configured in this collection, available names: dense`` | 키워드 벡터 없이 만든 컬렉션(`RAG_HYBRID=false`로 수집했거나 수집할 때 Kiwi가 없었음)을 하이브리드로 검색함 | `rag-ingest --recreate`                                                |
+| `rag-ingest`가 `not ingesting: ...`으로 멈춤                                                           | 컬렉션의 키워드 벡터 유무와 지금 수집 방식이 다름                                                             | [Kiwi BM25 장애 시 동작](#kiwi-bm25-장애-시-동작)의 수집 중 안내대로 처리 |
+| 에러 문자열·리소스 이름으로 검색해도 잘 안 찾힘                                                           | 하이브리드가 꺼져 있음(③의`hybrid: false`)                                                                 | ③의 표로 원인 확인 후`RAG_HYBRID=true`, `rag-ingest --recreate`     |
+| 키워드 벡터 방식을 바꾼 뒤 검색 순위가 이상함                                                              | 기존 색인의 단어와 새 질의의 단어가 다름                                                                      | `rag-ingest --recreate`                                                |
 
 #### Kiwi BM25 장애 시 동작
 
 Kiwi는 키워드 검색(BM25)을 위한 부가 기능이라, 문제가 생기면 **의미(밀집) 검색만으로 계속 동작합니다.** 다만
 수집할 때는 색인이 망가지지 않도록 멈춥니다.
 
-| 상황 | `rag_search` | `rag-ingest` | 로그 / `rag_health()` |
-|------|------|------|------|
-| 정상 | 하이브리드 검색 | 키워드 벡터와 함께 저장 | `hybrid search enabled` / `hybrid: true` |
-| Kiwi를 불러오지 못함(미설치, 메모리 부족 등) | `status: ok`, **의미 검색만** | 키워드 벡터가 있는 컬렉션이면 **수집하지 않고 멈춤**(종료 코드 1) | `sparse model kiwi-bm25 unavailable (...)` / `hybrid: false`, `sparse_model: "kiwi-bm25"` |
-| 질의 하나를 나누다 실패 | `status: ok`, 그 질의만 의미 검색 | — | `sparse query embedding failed (...); using dense-only for this query` |
-| 키워드 벡터 없는 컬렉션 + 하이브리드 켜짐 | `status: error`, ``Vector with name `bm25` is not configured ...`` | 수집하지 않고 멈춤(종료 코드 1) | `hybrid: true` |
+| 상황                                         | `rag_search`                                                       | `rag-ingest`                                                         | 로그 /`rag_health()`                                                                          |
+| -------------------------------------------- | -------------------------------------------------------------------- | ---------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| 정상                                         | 하이브리드 검색                                                      | 키워드 벡터와 함께 저장                                                | `hybrid search enabled` / `hybrid: true`                                                    |
+| Kiwi를 불러오지 못함(미설치, 메모리 부족 등) | `status: ok`, **의미 검색만**                                | 키워드 벡터가 있는 컬렉션이면**수집하지 않고 멈춤**(종료 코드 1) | `sparse model kiwi-bm25 unavailable (...)` / `hybrid: false`, `sparse_model: "kiwi-bm25"` |
+| 질의 하나를 나누다 실패                      | `status: ok`, 그 질의만 의미 검색                                  | —                                                                     | `sparse query embedding failed (...); using dense-only for this query`                        |
+| 키워드 벡터 없는 컬렉션 + 하이브리드 켜짐    | `status: error`, ``Vector with name `bm25` is not configured ...`` | 수집하지 않고 멈춤(종료 코드 1)                                        | `hybrid: true`                                                                                |
 
 **검색 중**
 
@@ -884,14 +880,14 @@ ERROR rag-ingest not ingesting: re-saving chunks without keyword vectors would d
 
 ### 개념 정리
 
-| 용어 | 쉬운 의미 | 이 프로젝트에서 |
-|------|------|------|
-| 밀집 벡터 (dense vector) | 의미 / 시맨틱 | 임베딩 모델(bge-m3) → 1024개의 float |
-| 희소 벡터 (sparse vector) | 정확한 단어 / 키워드 | Kiwi 형태소 + BM25 → `{term_id: weight}` |
-| HNSW | 근사 최근접 이웃 그래프 인덱스 | 빠른 코사인 검색, 거의 정확한 top-k |
-| RRF | 두 순위 목록을 위치 기준으로 합치는 방법 | 밀집 + 희소 결과를 결합 |
-| 리랭커 (reranker) | `(질의, 청크)` 쌍의 순서를 다시 매기는 크로스 인코더 | 사내 리랭커 (`bge-reranker-v2-m3` 등) |
-| 비대칭 접두사 | 질의와 문서에 서로 다른 작업 태그를 붙이는 방식 | e5·nomic 계열은 필요, bge-m3는 불필요 |
+| 용어                      | 쉬운 의미                                              | 이 프로젝트에서                            |
+| ------------------------- | ------------------------------------------------------ | ------------------------------------------ |
+| 밀집 벡터 (dense vector)  | 의미 / 시맨틱                                          | 임베딩 모델(bge-m3) → 1024개의 float      |
+| 희소 벡터 (sparse vector) | 정확한 단어 / 키워드                                   | Kiwi 형태소 + BM25 →`{term_id: weight}` |
+| HNSW                      | 근사 최근접 이웃 그래프 인덱스                         | 빠른 코사인 검색, 거의 정확한 top-k        |
+| RRF                       | 두 순위 목록을 위치 기준으로 합치는 방법               | 밀집 + 희소 결과를 결합                    |
+| 리랭커 (reranker)         | `(질의, 청크)` 쌍의 순서를 다시 매기는 크로스 인코더 | 사내 리랭커 (`bge-reranker-v2-m3` 등)    |
+| 비대칭 접두사             | 질의와 문서에 서로 다른 작업 태그를 붙이는 방식        | e5·nomic 계열은 필요, bge-m3는 불필요     |
 
 > ℹ️ **임베딩 모델과 리랭커는 여러분의 데이터로 학습되지 않습니다.** 사전 학습된 모델이 일반적인 의미
 > 지식으로 텍스트를 숫자로 바꾸거나 순서를 매길 뿐입니다. 조직이나 업계 고유의 맥락은 Qdrant에 수집한
@@ -918,14 +914,14 @@ rag-ingest
 
 ### 사내 서버가 갖춰야 할 조건
 
-| 항목 | 내용 |
-|------|------|
-| API 형식 | **OpenAI 호환 `/v1/embeddings`** — `{"model": ..., "input": [...]}`로 요청하고 `data[].embedding`으로 받는 형식. 다른 형식은 연결할 수 없습니다 |
-| 주소 | `EMBEDDINGS_BASE_URL` 뒤에 `/v1/embeddings`가 자동으로 붙습니다. 주소가 `/v1`로 끝나면 `/embeddings`만 붙습니다 |
-| 인증 | `EMBEDDINGS_API_KEY`가 있으면 `Authorization: Bearer <키>` 헤더로 보내고, 비어 있으면 보내지 않습니다 |
-| 모델 | 한국어 문서라면 다국어 모델(예: `bge-m3`, 1024차원)을 권장합니다. 벡터 차원은 첫 수집 때 자동으로 정해집니다 |
-| 요청 크기 | 한 번에 청크 32개씩(`EMBED_BATCH_SIZE`) 보냅니다. 서버의 요청당 입력 개수·토큰 제한에 걸려 413/400 오류가 나면 줄이세요 |
-| 응답 시간 | 요청당 기본 60초(`RAG_TIMEOUT_SECONDS`)까지 기다립니다 |
+| 항목      | 내용                                                                                                                                                         |
+| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| API 형식  | **OpenAI 호환 `/v1/embeddings`** — `{"model": ..., "input": [...]}`로 요청하고 `data[].embedding`으로 받는 형식. 다른 형식은 연결할 수 없습니다 |
+| 주소      | `EMBEDDINGS_BASE_URL` 뒤에 `/v1/embeddings`가 자동으로 붙습니다. 주소가 `/v1`로 끝나면 `/embeddings`만 붙습니다                                      |
+| 인증      | `EMBEDDINGS_API_KEY`가 있으면 `Authorization: Bearer <키>` 헤더로 보내고, 비어 있으면 보내지 않습니다                                                    |
+| 모델      | 한국어 문서라면 다국어 모델(예:`bge-m3`, 1024차원)을 권장합니다. 벡터 차원은 첫 수집 때 자동으로 정해집니다                                                |
+| 요청 크기 | 한 번에 청크 32개씩(`EMBED_BATCH_SIZE`) 보냅니다. 서버의 요청당 입력 개수·토큰 제한에 걸려 413/400 오류가 나면 줄이세요                                   |
+| 응답 시간 | 요청당 기본 60초(`RAG_TIMEOUT_SECONDS`)까지 기다립니다                                                                                                     |
 
 - **`EMBEDDINGS_BASE_URL`에는 기본값이 없습니다.** 설정을 빠뜨렸을 때 문서가 의도하지 않은 곳으로 전송되지 않도록,
   운영자가 사내 서버 주소를 명시해야 합니다. 비어 있으면 검색과 수집이 오류로 알려 줍니다.
@@ -937,11 +933,11 @@ rag-ingest
 임베딩은 검색과 수집 모두에 꼭 필요하므로, 리랭커와 달리 **대체 동작 없이 오류로 알립니다**(키워드 검색만으로
 대신 검색하지 않습니다). 실패해도 이미 저장된 색인은 바뀌지 않습니다.
 
-| 상황 | `rag_search` | `rag-ingest` | `rag_health()` / 서버 로그 |
-|------|------|------|------|
-| 정상 | `status: ok` | `done: N file(s), M chunk(s)` | `embeddings.reachable: true` |
-| `EMBEDDINGS_BASE_URL`이 비어 있음 | `status: error`, `EMBEDDINGS_BASE_URL is not set ...` | 첫 파일에서 멈춤(종료 코드 1) | `degraded`. 시작 로그에 `embed=bge-m3@NOT SET`과 경고 |
-| 연결 실패·시간 초과·HTTP 오류·형식이 다른 응답 | `status: error`, 원인 메시지 (결과 없음) | 실패한 파일에서 멈춤(종료 코드 1) | `degraded`, `embeddings.error`에 원인 |
+| 상황                                              | `rag_search`                                            | `rag-ingest`                    | `rag_health()` / 서버 로그                              |
+| ------------------------------------------------- | --------------------------------------------------------- | --------------------------------- | --------------------------------------------------------- |
+| 정상                                              | `status: ok`                                            | `done: N file(s), M chunk(s)`   | `embeddings.reachable: true`                            |
+| `EMBEDDINGS_BASE_URL`이 비어 있음               | `status: error`, `EMBEDDINGS_BASE_URL is not set ...` | 첫 파일에서 멈춤(종료 코드 1)     | `degraded`. 시작 로그에 `embed=bge-m3@NOT SET`과 경고 |
+| 연결 실패·시간 초과·HTTP 오류·형식이 다른 응답 | `status: error`, 원인 메시지 (결과 없음)                | 실패한 파일에서 멈춤(종료 코드 1) | `degraded`, `embeddings.error`에 원인                 |
 
 **검색 중 장애**
 
@@ -1165,30 +1161,30 @@ curl -s http://localhost:6333/collections/rag_kb | grep -o '"size":[0-9]*'
 
 `rag_search`·`rag_health()`의 `error`, 또는 `rag-ingest` 실행 중 나오는 메시지입니다.
 
-| 오류 메시지 | 원인 | 조치 |
-|------|------|------|
-| `EMBEDDINGS_BASE_URL is not set: ...` | 설정 파일에 임베딩 서버 주소가 없음 | `EMBEDDINGS_BASE_URL`을 지정하고 재시작 |
-| `embeddings server connection failed: [Errno 111] Connection refused` | 주소·포트가 틀렸거나 임베딩 서버가 꺼져 있음 | ①의 curl로 주소와 서버 상태 확인 |
-| `embeddings server connection failed: timed out` | 응답이 `RAG_TIMEOUT_SECONDS`(임베딩 기본 60초)보다 느림 | 서버 부하 확인, 수집 중이면 `EMBED_BATCH_SIZE`를 줄이거나 `RAG_TIMEOUT_SECONDS` 조정([설정 예시](#설정-예시) ⑤) |
-| `embeddings server connection failed: [SSL: CERTIFICATE_VERIFY_FAILED] ...` | 사설 인증서를 신뢰하지 못함 | `SSL_CERT_FILE`에 사내 CA 지정([설정 예시](#설정-예시) ③) |
-| `embeddings server HTTP 404 — ...` | 경로(`/v1/embeddings`)가 서버와 다름 | ①의 curl로 실제 경로 확인, `/v1` 포함 여부에 맞게 `EMBEDDINGS_BASE_URL` 수정 |
-| `embeddings server HTTP 400 — ... model ... does not exist` (서버마다 문구 다름) | 모델 이름이 서버와 다름 | 사내 서버의 모델 이름으로 `EMBEDDINGS_MODEL` 수정 |
-| `embeddings server HTTP 401 — ...` / `403` | 토큰이 없거나 틀림 | `EMBEDDINGS_API_KEY` 확인 |
-| `embeddings server HTTP 413 — ...` / `400` (수집 중) | 한 요청에 보낸 청크가 너무 많거나 큼 | `EMBED_BATCH_SIZE`를 줄이고, 모델 입력이 짧으면 `CHUNK_SIZE`도 줄임 |
-| `embeddings server response is not in the OpenAI format (data[].embedding): ...` | 응답이 OpenAI 호환 형식이 아님(JSON이 아니거나 `data[].embedding`이 없음) | OpenAI 호환 `/v1/embeddings`를 제공하는 주소인지 ①로 확인 |
-| `embeddings server returned 0 embeddings for 1 input(s)` | 요청한 개수만큼 벡터가 오지 않음 | 서버 응답을 ①로 확인 |
-| `qdrant error: ... Vector dimension error: expected dim: 1024, got 768` | 모델(차원)이 바뀌었는데 컬렉션을 다시 만들지 않음 | `rag-ingest --recreate`로 재구축([일관성 규칙](#일관성-규칙)) |
+| 오류 메시지                                                                         | 원인                                                                       | 조치                                                                                                               |
+| ----------------------------------------------------------------------------------- | -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `EMBEDDINGS_BASE_URL is not set: ...`                                             | 설정 파일에 임베딩 서버 주소가 없음                                        | `EMBEDDINGS_BASE_URL`을 지정하고 재시작                                                                          |
+| `embeddings server connection failed: [Errno 111] Connection refused`             | 주소·포트가 틀렸거나 임베딩 서버가 꺼져 있음                              | ①의 curl로 주소와 서버 상태 확인                                                                                  |
+| `embeddings server connection failed: timed out`                                  | 응답이`RAG_TIMEOUT_SECONDS`(임베딩 기본 60초)보다 느림                   | 서버 부하 확인, 수집 중이면`EMBED_BATCH_SIZE`를 줄이거나 `RAG_TIMEOUT_SECONDS` 조정([설정 예시](#설정-예시) ⑤) |
+| `embeddings server connection failed: [SSL: CERTIFICATE_VERIFY_FAILED] ...`       | 사설 인증서를 신뢰하지 못함                                                | `SSL_CERT_FILE`에 사내 CA 지정([설정 예시](#설정-예시) ③)                                                        |
+| `embeddings server HTTP 404 — ...`                                               | 경로(`/v1/embeddings`)가 서버와 다름                                     | ①의 curl로 실제 경로 확인,`/v1` 포함 여부에 맞게 `EMBEDDINGS_BASE_URL` 수정                                   |
+| `embeddings server HTTP 400 — ... model ... does not exist` (서버마다 문구 다름) | 모델 이름이 서버와 다름                                                    | 사내 서버의 모델 이름으로`EMBEDDINGS_MODEL` 수정                                                                 |
+| `embeddings server HTTP 401 — ...` / `403`                                     | 토큰이 없거나 틀림                                                         | `EMBEDDINGS_API_KEY` 확인                                                                                        |
+| `embeddings server HTTP 413 — ...` / `400` (수집 중)                           | 한 요청에 보낸 청크가 너무 많거나 큼                                       | `EMBED_BATCH_SIZE`를 줄이고, 모델 입력이 짧으면 `CHUNK_SIZE`도 줄임                                            |
+| `embeddings server response is not in the OpenAI format (data[].embedding): ...`  | 응답이 OpenAI 호환 형식이 아님(JSON이 아니거나`data[].embedding`이 없음) | OpenAI 호환`/v1/embeddings`를 제공하는 주소인지 ①로 확인                                                        |
+| `embeddings server returned 0 embeddings for 1 input(s)`                          | 요청한 개수만큼 벡터가 오지 않음                                           | 서버 응답을 ①로 확인                                                                                              |
+| `qdrant error: ... Vector dimension error: expected dim: 1024, got 768`           | 모델(차원)이 바뀌었는데 컬렉션을 다시 만들지 않음                          | `rag-ingest --recreate`로 재구축([일관성 규칙](#일관성-규칙))                                                     |
 
 ### 비대칭 모델 접두사
 
 일부 모델은 질의와 문서에 서로 다른 작업 태그를 붙여야 성능이 납니다. 사내 서버의 모델이 여기에 해당하는지
 확인하세요.
 
-| 모델 | 질의 접두사 | 문서 접두사 | 설정 |
-|------|------|------|------|
-| nomic 계열 | `search_query: ` | `search_document: ` | 이름에 `nomic`이 있으면 자동 |
-| bge-m3 등 대칭 모델 | 없음 | 없음 | 자동 (기본값) |
-| e5, 구형 bge 등 | `query: ` | `passage: ` | `EMBED_QUERY_PREFIX` / `EMBED_DOC_PREFIX`로 직접 지정 |
+| 모델                | 질의 접두사        | 문서 접두사           | 설정                                                      |
+| ------------------- | ------------------ | --------------------- | --------------------------------------------------------- |
+| nomic 계열          | `search_query: ` | `search_document: ` | 이름에`nomic`이 있으면 자동                             |
+| bge-m3 등 대칭 모델 | 없음               | 없음                  | 자동 (기본값)                                             |
+| e5, 구형 bge 등     | `query: `        | `passage: `         | `EMBED_QUERY_PREFIX` / `EMBED_DOC_PREFIX`로 직접 지정 |
 
 ### 일관성 규칙
 
@@ -1240,14 +1236,14 @@ systemctl --user restart rag-mcp
 
 ### 사내 리랭커가 갖춰야 할 조건
 
-| 항목 | 내용 |
-|------|------|
-| API 형식 | **Cohere 호환 rerank** — `{"model", "query", "documents": [...]}`로 요청하고 `{"results": [{"index", "relevance_score"}]}`로 받는 형식. vLLM, Infinity, Xinference 등이 이 형식을 제공합니다. Hugging Face TEI의 `/rerank`(`texts` 필드, `results` 없는 목록 응답)처럼 형식이 다르면 연결할 수 없습니다 |
-| 주소 | `RERANK_BASE_URL` 뒤에 `/v1/rerank`가 자동으로 붙습니다. `/v1`·`/v2`로 끝나면 `/rerank`만 붙고, `/rerank`로 끝나면 그대로 씁니다 |
-| 인증 | `RERANK_API_KEY`가 있으면 `Authorization: Bearer <키>` 헤더로 보내고, 비어 있으면 보내지 않습니다 |
-| 모델 | 한국어 문서라면 다국어 리랭커(예: `bge-reranker-v2-m3`)를 권장합니다 |
-| 요청 크기 | 질의마다 후보 `RERANK_CANDIDATES`개(기본 30)의 청크 전체 텍스트를 한 번에 보냅니다 |
-| 응답 시간 | 기본 30초(`RERANK_TIMEOUT`)까지 기다립니다. 리랭킹 시간만큼 검색 응답이 늦어집니다 |
+| 항목      | 내용                                                                                                                                                                                                                                                                                                                     |
+| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| API 형식  | **Cohere 호환 rerank** — `{"model", "query", "documents": [...]}`로 요청하고 `{"results": [{"index", "relevance_score"}]}`로 받는 형식. vLLM, Infinity, Xinference 등이 이 형식을 제공합니다. Hugging Face TEI의 `/rerank`(`texts` 필드, `results` 없는 목록 응답)처럼 형식이 다르면 연결할 수 없습니다 |
+| 주소      | `RERANK_BASE_URL` 뒤에 `/v1/rerank`가 자동으로 붙습니다. `/v1`·`/v2`로 끝나면 `/rerank`만 붙고, `/rerank`로 끝나면 그대로 씁니다                                                                                                                                                                            |
+| 인증      | `RERANK_API_KEY`가 있으면 `Authorization: Bearer <키>` 헤더로 보내고, 비어 있으면 보내지 않습니다                                                                                                                                                                                                                    |
+| 모델      | 한국어 문서라면 다국어 리랭커(예:`bge-reranker-v2-m3`)를 권장합니다                                                                                                                                                                                                                                                    |
+| 요청 크기 | 질의마다 후보`RERANK_CANDIDATES`개(기본 30)의 청크 전체 텍스트를 한 번에 보냅니다                                                                                                                                                                                                                                      |
+| 응답 시간 | 기본 30초(`RERANK_TIMEOUT`)까지 기다립니다. 리랭킹 시간만큼 검색 응답이 늦어집니다                                                                                                                                                                                                                                     |
 
 - **`RERANK_BASE_URL`에는 기본값이 없습니다.** 설정을 빠뜨렸을 때 검색 후보가 의도하지 않은 곳으로 전송되지
   않도록, 운영자가 사내 리랭커 주소를 명시해야 합니다. 비어 있으면 `rag_search`가
@@ -1262,12 +1258,12 @@ systemctl --user restart rag-mcp
 사내 리랭커는 필수 설정이지만, 실행 중 장애가 검색 전체를 멈추지 않도록 **설정 누락만 오류로 막고, 호출 실패는
 리랭킹 없이 결과를 돌려줍니다.** 임베딩 서버나 Qdrant에 장애가 나면 검색 자체가 오류인 것과 다릅니다.
 
-| 상황 | `rag_search` 응답 | 서버 로그 | `rag_health()` |
-|------|------|------|------|
-| 정상 | `status: ok`, `reranked: true`, 결과마다 `rerank_score` | — | `ok`, `reranker.reachable: true` |
-| `RERANK_BASE_URL`이 비어 있음 | `status: error`, `RERANK_BASE_URL is not set ...` (결과 없음) | 시작할 때 `rerank=NOT SET`과 경고 | `degraded` |
-| 연결 실패·시간 초과·HTTP 오류(401/404/5xx 등)·형식이 다른 응답 | `status: ok`, `reranked: false`, `rerank_score` 없음, **하이브리드 검색 순서** | 요청마다 `WARNING ... rerank failed (<원인>); returning search order` | `degraded`, `reranker.error`에 원인 |
-| 검색 결과가 0개 | `status: ok`, `count: 0`, `reranked: false` (리랭커를 부르지 않음) | — | 리랭커 상태와 무관 |
+| 상황                                                              | `rag_search` 응답                                                                        | 서버 로그                                                              | `rag_health()`                        |
+| ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------- | --------------------------------------- |
+| 정상                                                              | `status: ok`, `reranked: true`, 결과마다 `rerank_score`                              | —                                                                     | `ok`, `reranker.reachable: true`    |
+| `RERANK_BASE_URL`이 비어 있음                                   | `status: error`, `RERANK_BASE_URL is not set ...` (결과 없음)                          | 시작할 때`rerank=NOT SET`과 경고                                     | `degraded`                            |
+| 연결 실패·시간 초과·HTTP 오류(401/404/5xx 등)·형식이 다른 응답 | `status: ok`, `reranked: false`, `rerank_score` 없음, **하이브리드 검색 순서** | 요청마다`WARNING ... rerank failed (<원인>); returning search order` | `degraded`, `reranker.error`에 원인 |
+| 검색 결과가 0개                                                   | `status: ok`, `count: 0`, `reranked: false` (리랭커를 부르지 않음)                   | —                                                                     | 리랭커 상태와 무관                      |
 
 장애 중에 알아 둘 점:
 
@@ -1479,16 +1475,16 @@ WARNING rag-mcp rerank failed (could not reach the in-house reranker at http://r
 
 `rag_health()`의 `reranker.error`나 로그의 `rerank failed (...)` 괄호 안에 나오는 메시지입니다.
 
-| 오류 메시지 | 원인 | 조치 |
-|------|------|------|
-| `RERANK_BASE_URL is not set: ...` | 설정 파일에 리랭커 주소가 없음. 이때는 `rag_search`도 오류를 돌려줌 | `RERANK_BASE_URL`을 지정하고 재시작 |
-| `could not reach the in-house reranker at ... (Connection refused)` | 주소·포트가 틀렸거나 리랭커가 꺼져 있음 | ①의 curl로 주소와 서버 상태 확인 |
-| `could not reach ... (timed out)` | 리랭커 응답이 `RERANK_TIMEOUT`(기본 30초)보다 느림 | 리랭커 부하 확인, 필요하면 `RERANK_CANDIDATES`를 줄이거나 `RERANK_TIMEOUT` 조정([설정 예시](#리랭커-설정-예시) ⑤) |
-| `could not reach ... (CERTIFICATE_VERIFY_FAILED ...)` | 사설 인증서를 신뢰하지 못함 | `SSL_CERT_FILE`에 사내 CA 지정 |
-| `in-house reranker returned HTTP 404: ...` | 경로(`/v1/rerank`)나 모델 이름이 서버와 다름 | ①의 curl로 실제 경로를 확인해 `RERANK_BASE_URL`에 전체 경로를 적거나 `RERANK_MODEL` 수정 |
-| `in-house reranker returned HTTP 401: ...` / `403` | 토큰이 없거나 틀림 | `RERANK_API_KEY` 확인 |
-| `rerank response could not be parsed (...)` | 응답 형식이 다름(예: TEI처럼 `results` 없는 목록) | Cohere 호환 `/rerank`를 제공하는 서버로 연결 |
-| `rerank response contained no usable results` | `results`는 왔지만 항목이 객체가 아니거나, `index`·점수가 없거나, `index`가 범위를 벗어남 | 서버 응답을 ①로 확인 |
+| 오류 메시지                                                           | 원인                                                                                             | 조치                                                                                                                 |
+| --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------- |
+| `RERANK_BASE_URL is not set: ...`                                   | 설정 파일에 리랭커 주소가 없음. 이때는`rag_search`도 오류를 돌려줌                             | `RERANK_BASE_URL`을 지정하고 재시작                                                                                |
+| `could not reach the in-house reranker at ... (Connection refused)` | 주소·포트가 틀렸거나 리랭커가 꺼져 있음                                                         | ①의 curl로 주소와 서버 상태 확인                                                                                    |
+| `could not reach ... (timed out)`                                   | 리랭커 응답이`RERANK_TIMEOUT`(기본 30초)보다 느림                                              | 리랭커 부하 확인, 필요하면`RERANK_CANDIDATES`를 줄이거나 `RERANK_TIMEOUT` 조정([설정 예시](#리랭커-설정-예시) ⑤) |
+| `could not reach ... (CERTIFICATE_VERIFY_FAILED ...)`               | 사설 인증서를 신뢰하지 못함                                                                      | `SSL_CERT_FILE`에 사내 CA 지정                                                                                     |
+| `in-house reranker returned HTTP 404: ...`                          | 경로(`/v1/rerank`)나 모델 이름이 서버와 다름                                                   | ①의 curl로 실제 경로를 확인해`RERANK_BASE_URL`에 전체 경로를 적거나 `RERANK_MODEL` 수정                         |
+| `in-house reranker returned HTTP 401: ...` / `403`                | 토큰이 없거나 틀림                                                                               | `RERANK_API_KEY` 확인                                                                                              |
+| `rerank response could not be parsed (...)`                         | 응답 형식이 다름(예: TEI처럼`results` 없는 목록)                                               | Cohere 호환`/rerank`를 제공하는 서버로 연결                                                                        |
+| `rerank response contained no usable results`                       | `results`는 왔지만 항목이 객체가 아니거나, `index`·점수가 없거나, `index`가 범위를 벗어남 | 서버 응답을 ①로 확인                                                                                                |
 
 ## 설정
 
@@ -1496,35 +1492,35 @@ WARNING rag-mcp rerank failed (could not reach the in-house reranker at http://r
 [.env.example](.env.example)에 있습니다. 아래 표는 모두 **서버**가 읽는 변수입니다. 클라이언트(Claude Code)가
 읽는 `RAG_MCP_URL`은 [클라이언트 쪽 서버 주소](#클라이언트-쪽-서버-주소-rag_mcp_url)를 참고하세요.
 
-| 변수 | 기본값 | 설명 |
-|-----|---------|-------|
-| **연결** | | |
-| `MCP_HOST` | `0.0.0.0` | 서버 바인드 주소 |
-| `MCP_PORT` | `8084` | 서버 포트 |
-| `QDRANT_URL` | `http://localhost:6333` | Qdrant REST 엔드포인트 |
-| `QDRANT_COLLECTION` | `rag_kb` | 컬렉션 이름 |
-| `QDRANT_API_KEY` | _(미설정)_ | Qdrant 인증 키 (설정하면 Qdrant와 rag-mcp가 함께 사용) |
-| `RAG_TIMEOUT_SECONDS` | `30` (서버의 Qdrant 연결) / `60` (임베딩 요청, 수집) | HTTP 타임아웃 (초). 설정하면 모두 이 값을 사용 |
-| **임베딩** | | |
-| `EMBEDDINGS_BASE_URL` | _(없음, 필수)_ | 사내 임베딩 서버 주소 — OpenAI 호환 `/v1/embeddings` (`/v1`은 자동으로 붙음). 예: `http://embedding.internal.example:8080` |
-| `EMBEDDINGS_API_KEY` | _(미설정)_ | 사내 임베딩 서버 인증 토큰 (`Authorization: Bearer`로 보냄, 비워 두면 보내지 않음) |
-| `EMBEDDINGS_MODEL` | `bge-m3` | 임베딩 모델 이름 (사내 서버가 쓰는 이름에 맞춤) |
-| `EMBED_QUERY_PREFIX` / `EMBED_DOC_PREFIX` | 자동 (nomic → `search_query: `/`search_document: `, 그 외 → 빈 값) | 자동 감지가 놓치는 비대칭 모델에만 지정 (e5 등 → `query: `/`passage: `) |
-| **리랭킹** | | |
-| `RERANK_BASE_URL` | _(없음, 필수)_ | 사내 리랭커 주소. 뒤에 `/v1/rerank`가 자동으로 붙음 (`/v1`·`/v2`로 끝나면 `/rerank`만, `/rerank`로 끝나면 그대로) |
-| `RERANK_MODEL` | `bge-reranker-v2-m3` | 사내 리랭커의 모델 이름 |
-| `RERANK_API_KEY` | _(미설정)_ | 사내 리랭커 인증 토큰 (`Authorization: Bearer`로 보냄, 비워 두면 보내지 않음) |
-| `RERANK_CANDIDATES` | `30` | 리랭킹 전에 가져오는 후보 수 |
-| `RERANK_TIMEOUT` | `30` | 리랭커 HTTP 타임아웃 (초) |
-| **수집** | | |
-| `RAG_KNOWLEDGE_DIR` | `~/.local/share/rag-mcp/data/knowledge` | 문서 디렉터리 (`official/`). `rag-ingest`가 수집 (설치 스크립트가 실제 경로로 바꿔 넣음) |
-| `CHUNK_SIZE` / `CHUNK_OVERLAP` | `1500` / `100` | 청크 크기와 겹침 (글자 수) |
-| `EMBED_BATCH_SIZE` | `32` | 임베딩 요청당 청크 수 |
-| `QDRANT_UPSERT_BATCH` | `64` | Qdrant 업서트 요청당 포인트 수 |
-| **검색** | | |
-| `RAG_HYBRID` | `true` | 하이브리드 검색(밀집 + BM25). 바꾸면 `--recreate` 필요 |
-| `RAG_DEFAULT_LIMIT` / `RAG_MAX_LIMIT` | `5` / `20` | 검색 결과 기본 개수 / 최대 개수 |
-| `RAG_SNIPPET_CHARS` | `1200` | 결과마다 반환하는 텍스트의 최대 글자 수 (넘으면 `truncated: true`) |
+| 변수                                          | 기본값                                                                  | 설명                                                                                                                             |
+| --------------------------------------------- | ----------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| **연결**                                |                                                                         |                                                                                                                                  |
+| `MCP_HOST`                                  | `0.0.0.0`                                                             | 서버 바인드 주소                                                                                                                 |
+| `MCP_PORT`                                  | `8084`                                                                | 서버 포트                                                                                                                        |
+| `QDRANT_URL`                                | `http://localhost:6333`                                               | Qdrant REST 엔드포인트                                                                                                           |
+| `QDRANT_COLLECTION`                         | `rag_kb`                                                              | 컬렉션 이름                                                                                                                      |
+| `QDRANT_API_KEY`                            | _(미설정)_                                                            | Qdrant 인증 키 (설정하면 Qdrant와 rag-mcp가 함께 사용)                                                                           |
+| `RAG_TIMEOUT_SECONDS`                       | `30` (서버의 Qdrant 연결) / `60` (임베딩 요청, 수집)                | HTTP 타임아웃 (초). 설정하면 모두 이 값을 사용                                                                                   |
+| **임베딩**                              |                                                                         |                                                                                                                                  |
+| `EMBEDDINGS_BASE_URL`                       | _(없음, 필수)_                                                        | 사내 임베딩 서버 주소 — OpenAI 호환`/v1/embeddings` (`/v1`은 자동으로 붙음). 예: `http://embedding.internal.example:8080` |
+| `EMBEDDINGS_API_KEY`                        | _(미설정)_                                                            | 사내 임베딩 서버 인증 토큰 (`Authorization: Bearer`로 보냄, 비워 두면 보내지 않음)                                             |
+| `EMBEDDINGS_MODEL`                          | `bge-m3`                                                              | 임베딩 모델 이름 (사내 서버가 쓰는 이름에 맞춤)                                                                                  |
+| `EMBED_QUERY_PREFIX` / `EMBED_DOC_PREFIX` | 자동 (nomic →`search_query: `/`search_document: `, 그 외 → 빈 값) | 자동 감지가 놓치는 비대칭 모델에만 지정 (e5 등 →`query: `/`passage: `)                                                      |
+| **리랭킹**                              |                                                                         |                                                                                                                                  |
+| `RERANK_BASE_URL`                           | _(없음, 필수)_                                                        | 사내 리랭커 주소. 뒤에`/v1/rerank`가 자동으로 붙음 (`/v1`·`/v2`로 끝나면 `/rerank`만, `/rerank`로 끝나면 그대로)      |
+| `RERANK_MODEL`                              | `bge-reranker-v2-m3`                                                  | 사내 리랭커의 모델 이름                                                                                                          |
+| `RERANK_API_KEY`                            | _(미설정)_                                                            | 사내 리랭커 인증 토큰 (`Authorization: Bearer`로 보냄, 비워 두면 보내지 않음)                                                  |
+| `RERANK_CANDIDATES`                         | `30`                                                                  | 리랭킹 전에 가져오는 후보 수                                                                                                     |
+| `RERANK_TIMEOUT`                            | `30`                                                                  | 리랭커 HTTP 타임아웃 (초)                                                                                                        |
+| **수집**                                |                                                                         |                                                                                                                                  |
+| `RAG_KNOWLEDGE_DIR`                         | `~/.local/share/rag-mcp/data/knowledge`                               | 문서 디렉터리 (`official/`). `rag-ingest`가 수집 (설치 스크립트가 실제 경로로 바꿔 넣음)                                     |
+| `CHUNK_SIZE` / `CHUNK_OVERLAP`            | `1500` / `100`                                                      | 청크 크기와 겹침 (글자 수)                                                                                                       |
+| `EMBED_BATCH_SIZE`                          | `32`                                                                  | 임베딩 요청당 청크 수                                                                                                            |
+| `QDRANT_UPSERT_BATCH`                       | `64`                                                                  | Qdrant 업서트 요청당 포인트 수                                                                                                   |
+| **검색**                                |                                                                         |                                                                                                                                  |
+| `RAG_HYBRID`                                | `true`                                                                | 하이브리드 검색(밀집 + BM25). 바꾸면`--recreate` 필요                                                                          |
+| `RAG_DEFAULT_LIMIT` / `RAG_MAX_LIMIT`     | `5` / `20`                                                          | 검색 결과 기본 개수 / 최대 개수                                                                                                  |
+| `RAG_SNIPPET_CHARS`                         | `1200`                                                                | 결과마다 반환하는 텍스트의 최대 글자 수 (넘으면`truncated: true`)                                                              |
 
 > 설정 파일에서는 `KEY=value  # 주석`처럼 같은 줄 끝에 주석을 달지 마세요. systemd의 `EnvironmentFile`은
 > 주석까지 값으로 읽습니다. 주석은 항상 별도 줄에 쓰세요.
@@ -1540,21 +1536,21 @@ WARNING rag-mcp rerank failed (could not reach the in-house reranker at http://r
 
 ## 저장소 구조
 
-| 경로 | 내용 |
-|------|------|
-| [`tools/server.py`](tools/server.py) | FastMCP 서버. 읽기 전용 도구 3개(검색 `rag_search`, 상태 확인 `rag_collections`·`rag_health`)를 제공 |
-| [`tools/ingest.py`](tools/ingest.py) | 마크다운 문서를 읽어 청크로 나누고 임베딩해 Qdrant에 업서트 (`rag-ingest`) |
-| [`tools/embeddings.py`](tools/embeddings.py) | OpenAI 호환 임베딩 호출, 비대칭 모델 접두사 처리 |
-| [`tools/vectorstore.py`](tools/vectorstore.py) | Qdrant 컬렉션 스키마, BM25 희소 벡터, 하이브리드 질의 |
-| [`tools/kiwi_bm25.py`](tools/kiwi_bm25.py) | 한국어 형태소 분석(Kiwi) 기반 BM25 희소 벡터 |
-| [`tools/reranker.py`](tools/reranker.py) | 사내 리랭커(Cohere 호환 `/rerank`) 호출 |
-| `requirements.txt` | Python 의존성 |
-| `deploy/` | 설치·제거 스크립트, systemd 유닛, `rag-ingest` 명령 템플릿 |
-| `knowledge/official/` | 샘플 문서 |
-| `.claude-plugin/marketplace.json` | Claude Code 플러그인 마켓플레이스 정의 |
-| `plugins/rag-mcp/` | Claude Code 플러그인 (MCP 서버 연결 설정, `rag-knowledge` 스킬) |
-| `.claude/skills/repo-check/` | 저장소 점검 스킬 (Claude Code에서 `/repo-check`, 직접 실행: `bash .claude/skills/repo-check/scripts/check.sh`) |
-| `tests/` | 테스트 |
+| 경로                                            | 내용                                                                                                              |
+| ----------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| [`tools/server.py`](tools/server.py)           | FastMCP 서버. 읽기 전용 도구 3개(검색`rag_search`, 상태 확인 `rag_collections`·`rag_health`)를 제공        |
+| [`tools/ingest.py`](tools/ingest.py)           | 마크다운 문서를 읽어 청크로 나누고 임베딩해 Qdrant에 업서트 (`rag-ingest`)                                      |
+| [`tools/embeddings.py`](tools/embeddings.py)   | OpenAI 호환 임베딩 호출, 비대칭 모델 접두사 처리                                                                  |
+| [`tools/vectorstore.py`](tools/vectorstore.py) | Qdrant 컬렉션 스키마, BM25 희소 벡터, 하이브리드 질의                                                             |
+| [`tools/kiwi_bm25.py`](tools/kiwi_bm25.py)     | 한국어 형태소 분석(Kiwi) 기반 BM25 희소 벡터                                                                      |
+| [`tools/reranker.py`](tools/reranker.py)       | 사내 리랭커(Cohere 호환`/rerank`) 호출                                                                          |
+| `requirements.txt`                            | Python 의존성                                                                                                     |
+| `deploy/`                                     | 설치·제거 스크립트, systemd 유닛,`rag-ingest` 명령 템플릿                                                      |
+| `knowledge/official/`                         | 샘플 문서                                                                                                         |
+| `.claude-plugin/marketplace.json`             | Claude Code 플러그인 마켓플레이스 정의                                                                            |
+| `plugins/rag-mcp/`                            | Claude Code 플러그인 (MCP 서버 연결 설정,`rag-knowledge` 스킬)                                                  |
+| `.claude/skills/repo-check/`                  | 저장소 점검 스킬 (Claude Code에서`/repo-check`, 직접 실행: `bash .claude/skills/repo-check/scripts/check.sh`) |
+| `tests/`                                      | 테스트                                                                                                            |
 
 `ingest.py`와 `server.py`는 모두 `vectorstore.py`와 `embeddings.py`를 거칩니다. 그래서
 쓰기 경로와 읽기 경로 사이에서 컬렉션 스키마, 벡터 이름, 임베딩 설정이 어긋나지 않습니다.
