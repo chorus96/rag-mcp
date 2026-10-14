@@ -293,10 +293,18 @@ def ingest(path: Path, recreate: bool) -> None:
     collection_ready = False
     total_chunks = 0
 
-    for file in files:
+    for done, file in enumerate(files):
         # 컬렉션 준비(필요하면 재생성)는 실제로 저장할 첫 파일에서 한 번만 합니다.
-        n = ingest_file(client, file, path, ensure=not collection_ready,
-                        recreate=recreate and not collection_ready)
+        try:
+            n = ingest_file(client, file, path, ensure=not collection_ready,
+                            recreate=recreate and not collection_ready)
+        except embeddings.EmbeddingError as exc:
+            # 임베딩 서버 장애: 이 파일은 저장하지 않고 멈춥니다. 앞선 파일은 이미 저장됐으므로,
+            # 서버가 복구되면 rag-ingest 를 다시 실행하면 됩니다(멱등).
+            log.error("embedding failed for %s: %s", file.relative_to(path), exc)
+            log.error("stopped after %d of %d file(s); fix the embeddings server and run rag-ingest again%s",
+                      done, len(files), " (with --recreate)" if recreate else "")
+            raise SystemExit(1) from None
         if n:
             collection_ready = True
             total_chunks += n

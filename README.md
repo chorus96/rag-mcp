@@ -838,6 +838,53 @@ rag-ingest
 - 응답은 `index`로 다시 정렬하므로, 서버가 순서를 바꿔 돌려줘도 청크와 벡터가 어긋나지 않습니다.
 - HTTP 오류는 상태 코드와 응답 본문을 그대로 보여 줘, 잘못된 주소(404)나 인증 문제(401)를 바로 알 수 있습니다.
 
+### 임베딩 서버 장애 시 동작
+
+임베딩은 검색과 수집 모두에 꼭 필요하므로, 리랭커와 달리 **대체 동작 없이 오류로 알립니다**(키워드 검색만으로
+대신 검색하지 않습니다). 실패해도 이미 저장된 색인은 바뀌지 않습니다.
+
+| 상황 | `rag_search` | `rag-ingest` | `rag_health()` / 서버 로그 |
+|------|------|------|------|
+| 정상 | `status: ok` | `done: N file(s), M chunk(s)` | `embeddings.reachable: true` |
+| `EMBEDDINGS_BASE_URL`이 비어 있음 | `status: error`, `EMBEDDINGS_BASE_URL is not set ...` | 첫 파일에서 멈춤(종료 코드 1) | `degraded`. 시작 로그에 `embed=bge-m3@NOT SET`과 경고 |
+| 연결 실패·시간 초과·HTTP 오류·형식이 다른 응답 | `status: error`, 원인 메시지 (결과 없음) | 실패한 파일에서 멈춤(종료 코드 1) | `degraded`, `embeddings.error`에 원인 |
+
+**검색 중 장애**
+
+```json
+{"status": "error", "error": "embeddings server connection failed: [Errno 111] Connection refused"}
+```
+
+- 질의를 벡터로 바꾸지 못하면 Qdrant 검색도, 리랭킹도 하지 않고 바로 오류를 돌려줍니다.
+- **검색이 느려질 수 있습니다.** 임베딩 서버가 응답하지 않고 멈춰 있으면 검색마다 최대 약
+  `RAG_TIMEOUT_SECONDS`초(임베딩 기본 60초)를 기다린 뒤 오류를 돌려줍니다. 연결이 바로 거부되면 지연이 거의
+  없습니다.
+- **다시 시도하지 않고, 자동으로 회복됩니다.** 서버가 복구되면 다음 검색부터 바로 정상으로 돌아오며, rag-mcp를
+  재시작할 필요가 없습니다.
+- `rag_collections()`는 임베딩을 쓰지 않으므로 장애 중에도 동작합니다. 색인이 남아 있는지 확인할 때 쓸 수 있습니다.
+
+**수집 중 장애**
+
+```text
+INFO rag-ingest ingested official/a.md (1 chunk(s))
+ERROR rag-ingest embedding failed for official/b.md: embeddings server HTTP 503 — {"error":"overloaded"}
+ERROR rag-ingest stopped after 1 of 3 file(s); fix the embeddings server and run rag-ingest again (with --recreate)
+```
+
+- **실패한 파일에서 멈추고 종료 코드 1을 돌려줍니다.** cron 등으로 실행한다면 종료 코드로 실패를 알 수 있습니다.
+- **앞서 저장한 파일은 그대로 남고, 실패한 파일은 저장하지 않습니다.** 파일 하나의 청크를 모두 임베딩한 뒤에
+  저장하므로, 파일이 반쯤 저장되는 일은 없습니다. 이전 수집에서 저장한 그 파일의 청크도 그대로 남습니다.
+- **복구 후 `rag-ingest`를 다시 실행하면 됩니다.** 다시 실행해도 중복이 생기지 않습니다([멱등성과 오래된
+  청크](#멱등성과-오래된-청크)).
+- **`--recreate` 중에 실패하면 컬렉션이 일부만 채워진 상태로 남습니다.** 컬렉션은 첫 파일을 임베딩한 뒤에
+  지우고 다시 만들므로, 처음부터 임베딩 서버에 닿지 않으면 기존 컬렉션은 그대로입니다. 하지만 중간 파일에서
+  실패하면 그 앞의 파일만 들어 있어 검색 결과가 줄어듭니다. 서버가 복구되면 `rag-ingest --recreate`를 다시
+  실행하세요. 모델을 바꾸는 등 재구축이 필요할 때는 먼저 [임베딩 서버 연결 확인](#임베딩-서버-연결-확인)으로
+  서버 상태를 확인한 뒤 실행하는 것이 안전합니다.
+
+장애가 의심되면 [임베딩 서버 연결 확인](#임베딩-서버-연결-확인)의 ①(직접 요청)과 ③(`rag_health()`)으로 원인을
+확인하세요.
+
 ### 설정 예시
 
 모두 설정 파일 `~/.config/rag-mcp/rag-mcp.env`에 적고, 바꾼 뒤에는 `systemctl --user restart rag-mcp`로 재시작합니다.

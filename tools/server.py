@@ -248,10 +248,12 @@ def main() -> None:
         "starting rag-mcp on %s:%s (qdrant=%s, collection=%s, embed=%s@%s, "
         "hybrid=%s, rerank=%s)",
         MCP_HOST, MCP_PORT, QDRANT_URL, COLLECTION,
-        emb["model"], emb["base_url"],
+        emb["model"], emb["base_url"] or "NOT SET",
         vectorstore.sparse_available(),  # 시작 시 BM25를 로드 (빠른 실패)
         f"{rr['model']}@{rr['base_url']}" if rr["base_url"] else "NOT SET",
     )
+    if not emb["base_url"]:
+        log.warning("%s; rag_search will return an error until it is set", embeddings.NOT_CONFIGURED)
     if not rr["base_url"]:
         log.warning("%s; rag_search will return an error until it is set", reranker.NOT_CONFIGURED)
     mcp.run(transport="streamable-http")

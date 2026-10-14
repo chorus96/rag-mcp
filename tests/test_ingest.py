@@ -191,3 +191,28 @@ def test_ingest_file_payload_has_no_metadata(monkeypatch, tmp_path):
     assert payload["title"] == "longhorn-volume-attach"
     assert payload["source"] == "official/longhorn-volume-attach.md"
     assert "component: longhorn" in "\n".join(p.payload["text"] for p in saved)
+
+
+# --- 임베딩 서버 장애 ----------------------------------------------------------
+
+def test_ingest_stops_cleanly_on_embedding_error(monkeypatch, tmp_path, caplog):
+    for name in ("a", "b", "c"):
+        (tmp_path / "official").mkdir(exist_ok=True)
+        (tmp_path / "official" / f"{name}.md").write_text(f"# {name}\n본문", encoding="utf-8")
+    saved = []
+
+    def fake_ingest_file(client, file, root, **kw):
+        if file.name == "b.md":
+            raise ingest.embeddings.EmbeddingError("embeddings server HTTP 503")
+        saved.append(file.name)
+        return 1
+
+    monkeypatch.setattr(ingest, "ingest_file", fake_ingest_file)
+    monkeypatch.setattr(ingest, "QdrantClient", lambda **kw: object())
+    import pytest
+    with pytest.raises(SystemExit) as exc:
+        ingest.ingest(tmp_path, recreate=False)
+    assert exc.value.code == 1
+    assert saved == ["a.md"]                       # 실패한 파일 이후는 처리하지 않음
+    assert "embedding failed for official/b.md" in caplog.text
+    assert "stopped after 1 of 3 file(s)" in caplog.text

@@ -83,6 +83,12 @@ class EmbeddingError(RuntimeError):
     pass
 
 
+NOT_CONFIGURED = (
+    "EMBEDDINGS_BASE_URL is not set: configure your in-house OpenAI-compatible "
+    "embeddings server (e.g. http://embedding.internal.example:8080)"
+)
+
+
 def _http_error(exc: httpx.HTTPStatusError) -> EmbeddingError:
     """상태 코드 + 응답 본문을 보존해 잘못된 모델/엔드포인트를 진단할 수 있게
     합니다 (예: 404 = 잘못된 URL 또는 모델 이름, 401 = API 키 문제)."""
@@ -152,10 +158,7 @@ def _embed_openai(texts: list[str]) -> list[list[float]]:
 
 def _embed_batch(texts: list[str]) -> list[list[float]]:
     if not CONFIG.base_url:
-        raise EmbeddingError(
-            "EMBEDDINGS_BASE_URL is not set: configure your in-house OpenAI-compatible "
-            "embeddings server (e.g. http://embedding.internal.example:8080)"
-        )
+        raise EmbeddingError(NOT_CONFIGURED)
     return _embed_openai(texts)
 
 
