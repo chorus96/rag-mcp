@@ -1003,8 +1003,8 @@ journalctl --user -u rag-mcp --since "5 min ago" | grep "starting rag-mcp"
 starting rag-mcp on 0.0.0.0:8084 (qdrant=http://localhost:6333, collection=rag_kb, embed=bge-m3@http://embedding.internal.example:8080, hybrid=True, rerank=bge-reranker-v2-m3@http://rerank.internal.example:8080)
 ```
 
-`embed=` 뒤의 모델 이름과 주소가 설정한 값과 같은지 봅니다. 시작 로그는 설정만 보여 주므로, 실제 연결은 ③에서
-확인합니다.
+`embed=` 뒤의 모델 이름과 주소가 설정한 값과 같은지 봅니다. 주소가 비어 있으면 `embed=bge-m3@NOT SET`과 함께
+`EMBEDDINGS_BASE_URL is not set ...` 경고가 나옵니다. 시작 로그는 설정만 보여 주므로, 실제 연결은 ③에서 확인합니다.
 
 **③ `rag_health()`**
 
