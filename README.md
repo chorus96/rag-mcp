@@ -835,8 +835,51 @@ curl -s -H "api-key: $QDRANT_API_KEY" http://localhost:6333/collections/rag_kb \
 | 로그에 `sparse model kiwi-bm25 unavailable (No module named 'kiwipiepy') ...` | 가상환경에 Kiwi가 설치되지 않음 | `./deploy/install.sh` 다시 실행 후 ①로 확인 |
 | 로그에 `sparse model kiwi-bm25 unavailable (...)` (그 밖의 원인) | Kiwi 모델을 읽지 못함(메모리 부족 등) | 괄호 안 원인 확인. Kiwi는 약 0.5GB 메모리를 씁니다 |
 | ``qdrant error: ... Vector with name `bm25` is not configured in this collection, available names: dense`` | 키워드 벡터 없이 만든 컬렉션(`RAG_HYBRID=false`로 수집했거나 수집할 때 Kiwi가 없었음)을 하이브리드로 검색함 | `rag-ingest --recreate` |
+| `rag-ingest`가 `not ingesting: ...`으로 멈춤 | 컬렉션의 키워드 벡터 유무와 지금 수집 방식이 다름 | [Kiwi BM25 장애 시 동작](#kiwi-bm25-장애-시-동작)의 수집 중 안내대로 처리 |
 | 에러 문자열·리소스 이름으로 검색해도 잘 안 찾힘 | 하이브리드가 꺼져 있음(③의 `hybrid: false`) | ③의 표로 원인 확인 후 `RAG_HYBRID=true`, `rag-ingest --recreate` |
 | 키워드 벡터 방식을 바꾼 뒤 검색 순위가 이상함 | 기존 색인의 단어와 새 질의의 단어가 다름 | `rag-ingest --recreate` |
+
+#### Kiwi BM25 장애 시 동작
+
+Kiwi는 키워드 검색(BM25)을 위한 부가 기능이라, 문제가 생기면 **의미(밀집) 검색만으로 계속 동작합니다.** 다만
+수집할 때는 색인이 망가지지 않도록 멈춥니다.
+
+| 상황 | `rag_search` | `rag-ingest` | 로그 / `rag_health()` |
+|------|------|------|------|
+| 정상 | 하이브리드 검색 | 키워드 벡터와 함께 저장 | `hybrid search enabled` / `hybrid: true` |
+| Kiwi를 불러오지 못함(미설치, 메모리 부족 등) | `status: ok`, **의미 검색만** | 키워드 벡터가 있는 컬렉션이면 **수집하지 않고 멈춤**(종료 코드 1) | `sparse model kiwi-bm25 unavailable (...)` / `hybrid: false`, `sparse_model: "kiwi-bm25"` |
+| 질의 하나를 나누다 실패 | `status: ok`, 그 질의만 의미 검색 | — | `sparse query embedding failed (...); using dense-only for this query` |
+| 키워드 벡터 없는 컬렉션 + 하이브리드 켜짐 | `status: error`, ``Vector with name `bm25` is not configured ...`` | 수집하지 않고 멈춤(종료 코드 1) | `hybrid: true` |
+
+**검색 중**
+
+- **Kiwi를 불러오지 못하면 의미 검색만 합니다.** 결과는 정상적으로 나오지만, 에러 문자열·리소스 이름처럼
+  정확한 단어로 찾는 능력이 떨어집니다. 응답만으로는 알 수 없으므로 `rag_health()`의 `retrieval.hybrid`로
+  확인하세요.
+- **Kiwi는 프로세스가 시작될 때 한 번만 불러옵니다.** 실패하면 다시 시도하지 않으므로, 원인(설치·메모리)을 고친 뒤
+  `systemctl --user restart rag-mcp`로 **재시작해야** 하이브리드 검색으로 돌아옵니다. 리랭커·임베딩 서버·Qdrant와
+  달리 저절로 회복되지 않습니다.
+- 질의 하나를 나누다 실패하는 드문 경우에는 그 질의만 의미 검색으로 처리하고 경고를 남깁니다.
+
+**수집 중**
+
+Kiwi를 불러오지 못한 채 수집하면, 다시 저장하는 청크마다 키워드 벡터가 빠져 그 문서가 키워드 검색에서 사라집니다.
+그래서 `rag-ingest`는 컬렉션 구조와 지금 수집하는 방식이 다르면 **아무것도 저장하지 않고 멈춥니다.**
+
+```text
+WARNING rag-vectorstore sparse model kiwi-bm25 unavailable (No module named 'kiwipiepy'); falling back to dense-only
+ERROR rag-ingest collection 'rag_kb' has BM25 keyword vectors, but this run cannot make them (RAG_HYBRID=false or Kiwi unavailable — see the log above)
+ERROR rag-ingest not ingesting: re-saving chunks without keyword vectors would drop them from keyword search. Fix Kiwi, or set RAG_HYBRID=false and run rag-ingest --recreate
+```
+
+- **Kiwi를 고칠 수 있으면** ([Kiwi BM25 동작 확인](#kiwi-bm25-동작-확인) ①) 고친 뒤 `rag-ingest`를 다시 실행하세요.
+- **당분간 의미 검색만 쓰려면** 설정 파일에 `RAG_HYBRID=false`를 넣고 `rag-ingest --recreate`로 키워드 벡터 없이
+  다시 만든 뒤 rag-mcp를 재시작하세요.
+- 반대로 키워드 벡터 없이 만든 컬렉션에 하이브리드로 수집하려 해도 멈춥니다. 이때는 `rag-ingest --recreate`로
+  키워드 벡터와 함께 다시 만드세요.
+- `--recreate`는 컬렉션을 새로 만들므로 이 검사를 하지 않습니다. Kiwi를 불러오지 못한 채 `--recreate`하면
+  키워드 벡터 없는 컬렉션이 만들어지고, Kiwi가 정상인 서버로 검색하면 위 표의 `bm25` 오류가 납니다.
+  `--recreate` 전에는 수집 로그의 첫 줄 근처에 `hybrid search enabled`가 나오는지 확인하세요.
 
 ### 개념 정리
 

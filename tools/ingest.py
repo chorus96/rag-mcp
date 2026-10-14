@@ -33,6 +33,11 @@
 임베딩 서버·Qdrant 장애
   실패한 파일에서 멈추고 종료 코드 1로 끝납니다(어느 파일에서 몇 개를 처리한 뒤 멈췄는지 로그로 알림).
   앞서 저장한 파일은 남습니다. 원인을 고친 뒤 다시 실행하면 됩니다.
+
+키워드(BM25) 벡터 구성
+  --recreate 없이 실행할 때, 기존 컬렉션의 키워드 벡터 유무와 이번 실행(RAG_HYBRID, Kiwi 사용 가능 여부)이
+  다르면 아무것도 저장하지 않고 멈춥니다(_check_sparse_layout). 키워드 벡터가 지워지거나 Qdrant가 거부하는
+  것을 막기 위해서입니다.
 """
 
 from __future__ import annotations
@@ -293,6 +298,35 @@ def ingest_file(client: QdrantClient, file: Path, root: Path, *, ensure: bool = 
     return len(points)
 
 
+def _check_sparse_layout(client: QdrantClient) -> None:
+    """기존 컬렉션의 키워드(BM25) 벡터 유무와 지금 수집하는 방식이 다르면 수집 전에 멈춥니다.
+
+    예: 키워드 벡터가 있는 컬렉션에 Kiwi를 불러오지 못한 채 수집하면, 다시 저장하는 청크마다 키워드 벡터가
+    빠져 그 문서가 키워드 검색에서 사라집니다. 반대로 키워드 벡터가 없는 컬렉션에 키워드 벡터를 넣으면
+    Qdrant가 거부합니다. 둘 다 --recreate 로 컬렉션을 다시 만들어야 맞춰집니다.
+    Qdrant에 닿지 않으면 여기서는 넘어가고, 첫 파일을 저장할 때 오류로 알립니다.
+    """
+    try:
+        has_sparse = vectorstore.collection_has_sparse(client, COLLECTION)
+    except Exception:  # noqa: BLE001 - 연결 문제는 파일 처리에서 알림
+        return
+    if has_sparse is None:
+        return
+    making_sparse = vectorstore.sparse_available()
+    if has_sparse and not making_sparse:
+        log.error("collection '%s' has BM25 keyword vectors, but this run cannot make them "
+                  "(RAG_HYBRID=false or Kiwi unavailable — see the log above)", COLLECTION)
+        log.error("not ingesting: re-saving chunks without keyword vectors would drop them from keyword "
+                  "search. Fix Kiwi, or set RAG_HYBRID=false and run rag-ingest --recreate")
+        raise SystemExit(1)
+    if making_sparse and not has_sparse:
+        log.error("collection '%s' has no BM25 keyword vectors, but this run makes them (RAG_HYBRID=true)",
+                  COLLECTION)
+        log.error("not ingesting: run rag-ingest --recreate to rebuild the collection with keyword vectors "
+                  "(or set RAG_HYBRID=false)")
+        raise SystemExit(1)
+
+
 def ingest(path: Path, recreate: bool) -> None:
     files = _discover_files(path)
     if not files:
@@ -300,6 +334,8 @@ def ingest(path: Path, recreate: bool) -> None:
         return
 
     client = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY, timeout=HTTP_TIMEOUT)
+    if not recreate:
+        _check_sparse_layout(client)
     collection_ready = False
     total_chunks = 0
 

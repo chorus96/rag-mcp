@@ -258,3 +258,26 @@ def test_other_errors_are_not_labelled_qdrant(monkeypatch, tmp_path, caplog):
         ingest.ingest(tmp_path, recreate=False)
     assert "ingest failed for official/a.md: unexpected" in caplog.text
     assert "fix the problem and run rag-ingest again" in caplog.text
+
+
+# --- 키워드 벡터 구성 확인 -------------------------------------------------------
+
+import pytest  # noqa: E402
+
+
+@pytest.mark.parametrize("has_sparse,making,stops", [
+    (True, False, True),     # 키워드 벡터 있는 컬렉션 + Kiwi 없음 → 키워드 벡터가 지워지므로 멈춤
+    (False, True, True),     # 키워드 벡터 없는 컬렉션 + 하이브리드 → Qdrant가 거부하므로 멈춤
+    (True, True, False),
+    (False, False, False),
+    (None, False, False),    # 컬렉션 없음 → 새로 만듦
+])
+def test_check_sparse_layout(monkeypatch, caplog, has_sparse, making, stops):
+    monkeypatch.setattr(ingest.vectorstore, "collection_has_sparse", lambda c, n: has_sparse)
+    monkeypatch.setattr(ingest.vectorstore, "sparse_available", lambda: making)
+    if stops:
+        with pytest.raises(SystemExit):
+            ingest._check_sparse_layout(object())
+        assert "rag-ingest --recreate" in caplog.text
+    else:
+        ingest._check_sparse_layout(object())

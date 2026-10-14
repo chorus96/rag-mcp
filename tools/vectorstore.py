@@ -106,11 +106,26 @@ def embed_documents_sparse(texts: list[str]) -> list[SparseVector | None]:
 
 
 def embed_query_sparse(text: str) -> SparseVector | None:
-    """질의의 희소 벡터 (IDF는 Modifier.IDF로 서버 측에서 적용됩니다)."""
+    """질의의 희소 벡터 (IDF는 Modifier.IDF로 서버 측에서 적용됩니다).
+
+    질의 하나를 나누다 실패하면(Kiwi 내부 오류 등) 경고를 남기고 None을 돌려줘, 이 질의는 의미 검색만
+    합니다. 키워드 쪽 실패로 검색 전체가 실패하지 않게 합니다."""
     model = _load_bm25()
     if model is None:
         return None
-    return model.embed_query(text)
+    try:
+        return model.embed_query(text)
+    except Exception as exc:  # noqa: BLE001 - 최선형: 이 질의만 밀집 전용
+        log.warning("sparse query embedding failed (%s); using dense-only for this query", exc)
+        return None
+
+
+def collection_has_sparse(client: QdrantClient, collection: str) -> bool | None:
+    """컬렉션에 BM25 희소 벡터가 설정돼 있는지. 컬렉션이 없으면 None."""
+    if not client.collection_exists(collection):
+        return None
+    params = client.get_collection(collection).config.params
+    return bool(params.sparse_vectors and SPARSE in params.sparse_vectors)
 
 
 # --- 컬렉션과 포인트 ----------------------------------------------------------

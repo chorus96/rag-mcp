@@ -83,3 +83,12 @@ def test_sparse_helpers_degrade_without_model(monkeypatch):
     assert vectorstore.embed_documents_sparse(["a", "b"]) == [None, None]
     assert vectorstore.embed_query_sparse("q") is None
 
+
+def test_query_sparse_failure_falls_back_to_dense(monkeypatch, caplog):
+    class _Broken:
+        def embed_query(self, text):
+            raise RuntimeError("kiwi exploded")
+
+    monkeypatch.setattr(vectorstore, "_load_bm25", lambda: _Broken())
+    assert vectorstore.embed_query_sparse("볼륨") is None
+    assert "using dense-only for this query" in caplog.text
