@@ -230,10 +230,7 @@ Claude Code라면 [플러그인](#claude-code-플러그인-권장)으로 연결�
 
 | 스킬 | 내용 |
 |------|------|
-| `rag-knowledge` | 언제 어떤 검색 도구를 쓸지 안내 |
-| `rag-list-documents` | 정식 문서·초안 목록 보기 (`rag_list_documents`) |
-| `rag-add-document` | 초안 문서 추가 (`rag_add_document`, 쓰기 도구를 켰을 때) |
-| `rag-delete-document` | 초안 문서 삭제 (`rag_delete_document`, 쓰기 도구를 켰을 때) |
+| `rag-knowledge` | 언제 어떤 도구를 쓸지 안내 (검색, 문서 목록, 쓰기 도구를 켰을 때의 초안 추가·삭제) |
 
 ```text
 /plugin marketplace add chorus96/rag-mcp
@@ -379,8 +376,8 @@ RAG_MCP_URL=http://10.0.0.5:8084/mcp claude
 ### 문서 목록 보기 (`rag_list_documents`)
 
 검색이 "어떤 내용이 있나"에 답한다면, 이 도구는 문서 디렉터리에 "어떤 파일이 있나"에 답합니다. 읽기 전용이라
-항상 켜져 있습니다. Claude Code에서는 자연어로 물으면 플러그인의 `rag-list-documents` 스킬이 알맞은 호출을
-고릅니다.
+항상 켜져 있습니다. Claude Code에서는 "어떤 문서가 있어?", "검토할 초안은?"처럼 자연어로 물으면 모델이 알맞은
+호출을 고릅니다.
 
 | 요청 예 | 도구 호출 | 결과 |
 |------|------|------|
@@ -535,7 +532,7 @@ systemctl --user restart rag-mcp
 
 그다음 "방금 정리한 내용을 지식 베이스에 추가해 줘"처럼 요청하면 모델이 `rag_add_document`로
 문서를 저장하고, "그 초안 지워 줘"처럼 요청하면 `rag_delete_document`로 지웁니다. 플러그인의
-`rag-add-document`·`rag-delete-document` 스킬이 저장·삭제 전에 사용자의 확인을 받도록 안내합니다.
+`rag-knowledge` 스킬이 저장·삭제 전에 사용자의 확인을 받도록 안내합니다.
 
 > ⚠️ **기본으로 꺼져 있습니다.** 켜면 모델이 대화 중에 지식 베이스에 기록하거나 문서를 지울 수 있어, 잘못된
 > 내용이 쌓이거나 필요한 문서가 사라질 수 있습니다. 신뢰하는 사용자와 클라이언트만 접속하는 서버에서만 켜세요.
@@ -543,7 +540,7 @@ systemctl --user restart rag-mcp
 
 #### `rag_add_document` 사용 예
 
-대화 흐름 (플러그인의 `rag-add-document` 스킬 기준):
+대화 흐름 예:
 
 1. 사용자: "방금 정리한 Longhorn 볼륨 복구 절차를 지식 베이스에 추가해 줘"
 2. 모델: `search_official`·`search_draft`로 같은 내용의 문서가 있는지 확인합니다.
@@ -597,7 +594,7 @@ component: longhorn
 
 #### `rag_delete_document` 사용 예
 
-대화 흐름 (플러그인의 `rag-delete-document` 스킬 기준):
+대화 흐름 예:
 
 1. 사용자: "아까 저장한 Longhorn 볼륨 복구 초안 지워 줘"
 2. 모델: `rag_list_documents(folder="draft")`나 `search_draft`로 대상의 `source`를 찾습니다.
@@ -1091,7 +1088,7 @@ curl -s http://localhost:6333/collections/rag_kb | grep -o '"size":[0-9]*'
 | `deploy/` | 설치·제거 스크립트, systemd 유닛, `rag-ingest`·`rag-promote` 명령 템플릿 |
 | `knowledge/official/` | 샘플 문서 |
 | `.claude-plugin/marketplace.json` | Claude Code 플러그인 마켓플레이스 정의 |
-| `plugins/rag-mcp/` | Claude Code 플러그인 (MCP 서버 연결 설정, `rag-knowledge`·`rag-list-documents`·`rag-add-document`·`rag-delete-document` 스킬) |
+| `plugins/rag-mcp/` | Claude Code 플러그인 (MCP 서버 연결 설정, `rag-knowledge` 스킬) |
 | `.claude/skills/repo-check/` | 저장소 점검 스킬 (Claude Code에서 `/repo-check`, 직접 실행: `bash .claude/skills/repo-check/scripts/check.sh`) |
 | `tests/` | 테스트 |
 

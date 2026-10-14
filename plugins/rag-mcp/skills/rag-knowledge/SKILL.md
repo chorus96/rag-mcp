@@ -26,9 +26,9 @@ description: 조직의 지식 베이스(마크다운 문서)를 rag MCP 서버�
 | `search_draft(query, cluster?, component?, limit?)` | 초안(`draft/`)만 볼 때 — 정식 문서에 없는 내용을 찾거나, 쌓인 초안을 확인할 때 |
 | `rag_collections()` | 결과가 계속 비어 있을 때 — 지식 베이스가 채워졌는지 확인 |
 | `rag_health()` | 도구 호출이 실패할 때 — Qdrant와 사내 임베딩 서버 상태 확인 |
-| `rag_list_documents(folder?, subdir?, limit?)` | "어떤 문서가 있지?", "검토할 초안은?" — 정식 문서(`official/`) 또는 초안(`draft/`) 파일 목록. 자세한 사용법은 `rag-list-documents` 스킬 |
-| `rag_add_document(title, content, ...)` | (켜져 있을 때만) 사용자가 문서 추가를 요청했을 때 — 자세한 사용법은 `rag-add-document` 스킬 |
-| `rag_delete_document(source)` | (켜져 있을 때만) 사용자가 초안(`draft/`) 문서 삭제를 요청했을 때 — 자세한 사용법은 `rag-delete-document` 스킬 |
+| `rag_list_documents(folder?, subdir?, limit?)` | "어떤 문서가 있지?", "검토할 초안은?" — 정식 문서(`official/`) 또는 초안(`draft/`) 파일 목록 |
+| `rag_add_document(title, content, ...)` | (켜져 있을 때만) 사용자가 문서 추가를 요청했을 때 (아래 "문서 추가·삭제") |
+| `rag_delete_document(source)` | (켜져 있을 때만) 사용자가 초안(`draft/`) 문서 삭제를 요청했을 때 (아래 "문서 추가·삭제") |
 
 `limit`의 기본값은 5, 최대 20입니다.
 
@@ -109,11 +109,10 @@ description: 조직의 지식 베이스(마크다운 문서)를 rag MCP 서버�
   수정·삭제를 요청하면 서버 관리자가 직접 해야 한다고 안내하세요. 고친 내용을 초안으로 추가해 두고 관리자가
   검토하게 할 수는 있습니다(사용자가 원할 때만).
 - 초안을 정식 문서로 올리는 것(승격)은 서버 관리자가 `rag-promote <source>` 명령으로 합니다.
-
-### 자세한 사용법
-
-- 추가: `rag-add-document` 스킬 — 요청 확인, 중복 확인, 본문 작성 요령, 저장 전 사용자 확인, 오류 대응
-- 삭제: `rag-delete-document` 스킬 — 대상 찾기(`rag_list_documents(folder="draft")`), 삭제 전 확인, 결과 해석
+- 추가하기 전에 `search_official`·`search_draft`로 같은 내용의 문서가 있는지 확인하세요. 비밀번호·토큰 같은 비밀
+  값은 넣지 마세요.
+- 삭제할 초안의 `source`는 `rag_list_documents(folder="draft")`나 `search_draft`로 찾은 값만 쓰세요. 삭제는
+  되돌릴 수 없습니다.
 
 두 도구 모두 **사용자가 명시적으로 요청했을 때만**, **저장·삭제 전에 사용자의 확인을 받은 뒤에** 쓰세요.
 
