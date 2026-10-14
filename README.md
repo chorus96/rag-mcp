@@ -150,10 +150,14 @@ rag-ingest                      # 샘플 문서 색인
 
 ```bash
 systemctl --user status qdrant rag-mcp
-curl -s http://localhost:8084/mcp            # 핸드셰이크 없이 400 응답 = 정상 동작
+curl -s http://localhost:8084/mcp            # "Not Acceptable"(HTTP 406) 응답 = 서버가 떠 있음
 curl -s http://localhost:6333/collections    # rag_kb 컬렉션 확인
 journalctl --user -u rag-mcp -f              # 서버 로그
 ```
+
+사내 임베딩 서버와 리랭커 연결은 [임베딩 서버 연결 확인](#임베딩-서버-연결-확인)과
+[리랭커 연결 확인](#리랭커-연결-확인)의 순서대로 확인하세요. MCP 클라이언트를 연결한 뒤에는 `rag_health()`
+하나로 Qdrant·임베딩 서버·리랭커 상태를 한 번에 볼 수 있습니다.
 
 > 키워드(BM25) 검색에 쓰는 한국어 형태소 분석기 Kiwi는 설치 때 `pip`로 함께 설치되며(약 100MB), 실행 중에
 > 따로 내려받는 것이 없습니다. 시작 로그의 `hybrid=True`로 하이브리드 검색이 켜졌는지 확인할 수 있습니다.
