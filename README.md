@@ -75,8 +75,8 @@ agentic retrieval).
   │            rag-mcp     :8084/mcp            │         │
   │   FastMCP server — read-only tools          │         │
   │                                             │  2. em- │
-  │   rag_search          search_official       │  beds   │
-  │   rag_collections     rag_health            │◄────────┘
+  │   rag_search          rag_collections       │  beds   │
+  │   rag_health                                │◄────────┘
   │                                             │  the
   │   (+ optional step 3: cross-encoder rerank  │  query
   │     via a Cohere/Jina-compatible /rerank)   │
@@ -290,8 +290,7 @@ RAG_MCP_URL=http://10.0.0.5:8084/mcp claude
 
 | 도구 | 용도 |
 |------|---------|
-| `rag_search(query, doc_type?, cluster?, component?, limit?)` | 지식 베이스 전체에 대한 시맨틱 검색 |
-| `search_official(query, cluster?, component?, limit?)` | `official/` 문서만 검색 — `doc_type=official`로 고정 |
+| `rag_search(query, cluster?, component?, limit?)` | 지식 베이스에 대한 시맨틱 검색 (하이브리드, 선택적 리랭킹) |
 | `rag_collections()` | 컬렉션 목록과 포인트 수 (지식 베이스가 채워졌는지 확인) |
 | `rag_health()` | Qdrant와 사내 임베딩 서버 접근 가능 여부, 리랭커·하이브리드 설정 |
 
@@ -302,14 +301,13 @@ RAG_MCP_URL=http://10.0.0.5:8084/mcp claude
 
 ### 검색 사용 예
 
-Claude Code에서는 자연어로 물으면 플러그인의 `rag-knowledge` 스킬이 알맞은 도구를 고릅니다.
+Claude Code에서는 자연어로 물으면 플러그인의 `rag-knowledge` 스킬이 알맞은 호출을 고릅니다.
 
 | 요청 예 | 도구 호출 | 검색 대상 |
 |------|------|------|
 | "Longhorn 볼륨이 attaching에서 멈췄을 때 어떻게 해?" | `rag_search(query="Longhorn 볼륨이 attaching 상태에서 멈춤")` | 전체 |
 | "longhorn 관련 문서만 찾아 줘" | `rag_search(query="볼륨 복구", component="longhorn")` | `component: longhorn`인 문서 |
 | "prod-01 클러스터 기준으로 찾아 줘" | `rag_search(query="볼륨 복구", cluster="prod-01")` | `cluster`는 소프트 필터 |
-| — | `search_official(query="볼륨 복구")` | `rag_search(..., doc_type="official")`과 같음 |
 
 응답 예 (`rag_search(query="볼륨이 attaching 에서 멈춤", limit=1)`):
 
@@ -318,7 +316,6 @@ Claude Code에서는 자연어로 물으면 플러그인의 `rag-knowledge` 스�
   "status": "ok",
   "collection": "rag_kb",
   "query": "볼륨이 attaching 에서 멈춤",
-  "doc_type": null,
   "cluster": null,
   "cluster_narrowed": null,
   "component": null,
@@ -327,7 +324,6 @@ Claude Code에서는 자연어로 물으면 플러그인의 `rag-knowledge` 스�
   "results": [
     {
       "score": 0.0328,
-      "doc_type": "official",
       "title": "Longhorn 볼륨이 attaching 상태에서 멈춤",
       "source": "official/longhorn-volume-attach.md",
       "tags": ["longhorn", "storage"],
@@ -338,7 +334,6 @@ Claude Code에서는 자연어로 물으면 플러그인의 `rag-knowledge` 스�
 }
 ```
 
-- `doc_type`은 `source`의 맨 앞 폴더 이름(`official`)입니다.
 - `score`는 하이브리드 검색에서 RRF 결합 점수라 작은 값으로 나옵니다([쉬운 설명](#쉬운-설명-질의-하나가-처리되는-과정)).
   리랭킹이 켜져 있으면 `reranked: true`와 함께 결과마다 `rerank_score`가 붙습니다.
 - `text`는 `RAG_SNIPPET_CHARS`(기본 1200자)까지만 돌려주고, 잘렸으면 `truncated: true`입니다.
@@ -348,7 +343,6 @@ Claude Code에서는 자연어로 물으면 플러그인의 `rag-knowledge` 스�
 
 | 필터 | 종류 | 결과가 비었을 때 |
 |------|------|------|
-| `doc_type` | 하드 | 그대로 빈 결과 |
 | `component` | 하드 | 그대로 빈 결과 |
 | `cluster` | **소프트** | 클러스터 조건만 빼고 전체 범위로 다시 검색 |
 
@@ -379,8 +373,6 @@ knowledge/
 - **문서는 `official/` 안에만 두세요.** 문서 디렉터리 바로 아래나 다른 폴더에 둔 문서는 `rag-ingest`가 수집하지
   않고, 건너뛴 개수를 경고로 알려 줍니다(`ingest._discover_files`). 설치 스크립트가 `official/`을 만들고 샘플
   문서를 넣어 둡니다.
-- **폴더가 곧 문서 유형입니다.** `official/` 아래 문서는 `doc_type=official`로 색인되고, `search_official`과
-  `rag_search`의 `doc_type` 필터가 이 값을 씁니다.
 - **`source`는 문서 디렉터리 기준 상대 경로입니다.** 포인트 ID(`uuid5(source#chunk)`)와 오래된 청크 정리의 기준이
   되고, 검색 결과에도 그대로 나옵니다.
 - **문서를 바꾸는 것은 사람뿐입니다.** 파일을 넣거나 고치거나 지운 뒤 `rag-ingest`(지우거나 이름을 바꿨다면
@@ -422,9 +414,6 @@ cluster: prod-eu      # 선택: 필터용
 ```
 
 - **`title`:** 생략하면 파일 이름을 씁니다.
-- **문서 유형(`doc_type`):** front matter로 정하지 않습니다. 맨 앞 폴더 이름이 유형이 됩니다
-  (`official/…` → `official`, `ingest._doc_type`). 하위 폴더 이름이나 front matter의
-  `type`은 유형에 영향을 주지 않습니다.
 - **`component`, `cluster`, `severity`:** 검색 필터가 되지만 형식이 정해지지 않은 레이블입니다. 환경, 고객, 제품,
   팀 등 도메인에 맞게 쓰거나 생략해도 됩니다.
 
@@ -439,10 +428,10 @@ Qdrant 컬렉션 하나(기본 이름 `rag_kb`)에 모든 문서를 저장합니
 
 - 벡터 차원은 수집할 때 실제 임베딩 길이로 정해지므로, 모델을 바꿔도 코드를 고칠 필요가 없습니다.
 - IDF는 컬렉션의 `Modifier.IDF`로 서버 측에서 계산하므로, 질의 쪽은 단어 존재 여부만 보내면 됩니다.
-- **포인트(청크):** ID는 `uuid5(source#chunk)`이고, 페이로드는 `text`, `doc_type`, `title`, `source`, `tags`, `chunk`,
+- **포인트(청크):** ID는 `uuid5(source#chunk)`이고, 페이로드는 `text`, `title`, `source`, `tags`, `chunk`,
   그리고 front matter의 `component`/`severity`/`cluster`입니다. ID가 문서 경로와 청크 번호에서 결정되므로, 같은
   문서를 다시 수집하면 중복이 생기지 않고 기존 포인트를 덮어씁니다.
-- **페이로드 인덱스:** 필터링을 빠르게 하려고 `doc_type`, `component`, `cluster`, `source`에 키워드 인덱스를
+- **페이로드 인덱스:** 필터링을 빠르게 하려고 `component`, `cluster`, `source`에 키워드 인덱스를
   만듭니다(`source`는 오래된 청크 정리용).
 
 ## 수집 과정
@@ -830,7 +819,7 @@ curl -s http://localhost:6333/collections/rag_kb | grep -o '"size":[0-9]*'
 
 | 경로 | 내용 |
 |------|------|
-| [`tools/server.py`](tools/server.py) | FastMCP 서버. 읽기 전용 도구 4개(검색 2개, 상태 확인 2개)를 제공 |
+| [`tools/server.py`](tools/server.py) | FastMCP 서버. 읽기 전용 도구 3개(검색 `rag_search`, 상태 확인 `rag_collections`·`rag_health`)를 제공 |
 | [`tools/ingest.py`](tools/ingest.py) | 마크다운 문서를 읽어 청크로 나누고 임베딩해 Qdrant에 업서트 (`rag-ingest`) |
 | [`tools/embeddings.py`](tools/embeddings.py) | OpenAI 호환 임베딩 호출, 비대칭 모델 접두사 처리 |
 | [`tools/vectorstore.py`](tools/vectorstore.py) | Qdrant 컬렉션 스키마, BM25 희소 벡터, 하이브리드 질의 |

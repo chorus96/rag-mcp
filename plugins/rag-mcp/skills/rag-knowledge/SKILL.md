@@ -20,8 +20,7 @@ description: 조직의 지식 베이스(마크다운 문서)를 rag MCP 서버�
 
 | 도구 | 언제 쓰나 |
 |------|------|
-| `rag_search(query, doc_type?, cluster?, component?, limit?)` | 지식 베이스 전체 검색 |
-| `search_official(query, cluster?, component?, limit?)` | `official/` 문서만 검색 (`rag_search(..., doc_type="official")`과 같음) |
+| `rag_search(query, cluster?, component?, limit?)` | 지식 베이스 검색 — 관련 문서를 찾을 때 |
 | `rag_collections()` | 결과가 계속 비어 있을 때 — 지식 베이스가 채워졌는지 확인 |
 | `rag_health()` | 도구 호출이 실패할 때 — Qdrant와 사내 임베딩 서버 상태 확인 |
 
@@ -50,7 +49,6 @@ description: 조직의 지식 베이스(마크다운 문서)를 rag MCP 서버�
 |------|------|------|
 | `cluster` | 소프트 | 서버가 클러스터 조건을 빼고 전체 범위로 다시 검색 |
 | `component` | 하드 | 빈 결과 그대로 → 필요하면 `component` 없이 다시 검색 |
-| `doc_type` | 하드 | 빈 결과 그대로 |
 
 ## 결과 해석
 

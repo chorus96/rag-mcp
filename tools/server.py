@@ -6,7 +6,7 @@
 
 구성
   - 공통 검색 경로 `_search`: 질의 임베딩 → 하이브리드 검색 → (선택) 리랭킹 → 응답 구성
-  - MCP 도구: rag_search, search_official, rag_collections, rag_health
+  - MCP 도구: rag_search, rag_collections, rag_health
 
 문서 디렉터리 (RAG_KNOWLEDGE_DIR)
   사람이 관리하는 문서를 official/ 아래에 둡니다. 서버는 문서 디렉터리를 읽지도 쓰지도 않고 Qdrant만
@@ -72,15 +72,12 @@ def _clamp_limit(limit: int) -> int:
     return min(limit, MAX_LIMIT)
 
 
-def _build_conditions(doc_type: str | None, component: str | None,
-                      cluster: str | None) -> list[Any]:
+def _build_conditions(component: str | None, cluster: str | None) -> list[Any]:
     """하드 필터와 (선택적) 클러스터 범위 제한을 위한 Qdrant 페이로드 조건.
-    `doc_type`과 `component`는 하드 필터입니다: 빈 결과는 그대로 비어 있습니다.
+    `component`는 하드 필터입니다: 빈 결과는 그대로 비어 있습니다.
     `cluster`는 호출자가 소프트 필터로 넘기며, 대체 재시도에서는 빠집니다
     (`_search` 참고)."""
     conditions = []
-    if doc_type:
-        conditions.append(FieldCondition(key="doc_type", match=MatchValue(value=doc_type)))
     if component:
         conditions.append(FieldCondition(key="component", match=MatchValue(value=component)))
     if cluster:
@@ -88,11 +85,11 @@ def _build_conditions(doc_type: str | None, component: str | None,
     return conditions
 
 
-def _search(query: str, doc_type: str | None, cluster: str | None, component: str | None,
+def _search(query: str, cluster: str | None, component: str | None,
             limit: int) -> dict[str, Any]:
-    """모든 검색 도구가 공유하는 검색 경로.
+    """rag_search 의 검색 경로.
 
-    `doc_type`과 `component`는 하드 필터입니다. `cluster`는 소프트 필터입니다:
+    `component`는 하드 필터입니다. `cluster`는 소프트 필터입니다:
     클러스터로 한정한 검색 결과가 비어 있으면 (하드 필터는 유지한 채) 전체 범위로
     다시 검색하므로, 새 클러스터에서 증상이 처음 나타났을 때도 다른 클러스터의
     실제 선례가 가려지지 않습니다 — 에이전트 프롬프트가 Kubernetes/Prometheus에
@@ -103,7 +100,6 @@ def _search(query: str, doc_type: str | None, cluster: str | None, component: st
     query = (query or "").strip()
     if not query:
         return {"status": "error", "error": "query must be a non-empty string"}
-    doc_type = (doc_type or "").strip() or None
     cluster = (cluster or "").strip() or None
     component = (component or "").strip() or None
 
@@ -120,7 +116,7 @@ def _search(query: str, doc_type: str | None, cluster: str | None, component: st
         return {"status": "error", "error": f"embedding failed: {exc}"}
 
     def _run(narrow_cluster: str | None) -> list[Any]:
-        conditions = _build_conditions(doc_type, component, narrow_cluster)
+        conditions = _build_conditions(component, narrow_cluster)
         query_filter = Filter(must=conditions) if conditions else None
         # 하이브리드가 켜져 있으면 하이브리드(밀집 + BM25 희소, RRF 결합), 아니면 밀집 전용.
         return list(vectorstore.query(
@@ -177,7 +173,6 @@ def _search(query: str, doc_type: str | None, cluster: str | None, component: st
         text = payload.get("text", "")
         hit = {
             "score": round(point.score, 4),
-            "doc_type": payload.get("doc_type"),
             "title": payload.get("title"),
             "source": payload.get("source"),
             "tags": payload.get("tags"),
@@ -192,7 +187,6 @@ def _search(query: str, doc_type: str | None, cluster: str | None, component: st
         "status": "ok",
         "collection": COLLECTION,
         "query": query,
-        "doc_type": doc_type,
         "cluster": cluster,
         "cluster_narrowed": cluster_narrowed,
         "component": component,
@@ -212,7 +206,6 @@ def _search(query: str, doc_type: str | None, cluster: str | None, component: st
 @mcp.tool()
 def rag_search(
     query: str,
-    doc_type: str | None = None,
     cluster: str | None = None,
     component: str | None = None,
     limit: int = DEFAULT_LIMIT,
@@ -226,8 +219,6 @@ def rag_search(
     Args:
         query: 찾고 있는 내용 (자연어). 예:
             '노드 재부팅 후 Longhorn 볼륨이 attaching 상태에서 멈춤'.
-        doc_type: 선택적 필터 — 문서 유형(문서 디렉터리의 맨 앞 폴더 이름, 'official').
-            생략하면 전체를 검색합니다.
         cluster: 선택적 소프트 필터 — 이 클러스터 태그(예: 'prod-01')가 붙은 지식으로
             한정합니다. 클러스터로 한정한 검색 결과가 비어 있으면 서버가 (다른 필터는
             유지한 채) 모든 클러스터를 대상으로 다시 검색하고 `cluster_narrowed: false`를
@@ -238,29 +229,7 @@ def rag_search(
             이 태그가 붙은 지식이 없다는 뜻입니다.
         limit: 반환할 최대 결과 수 (1-20). 기본값 5.
     """
-    return _search(query, doc_type, cluster, component, limit)
-
-
-@mcp.tool()
-def search_official(
-    query: str,
-    cluster: str | None = None,
-    component: str | None = None,
-    limit: int = DEFAULT_LIMIT,
-) -> dict[str, Any]:
-    """정식 문서(official/)만 검색합니다 — 사람이 관리하고 검토한 문서.
-
-    rag_search(..., doc_type='official')의 단축 도구입니다. 검토된 문서만 근거로 답해야 할 때
-    사용하세요. `component`(예: 'longhorn')를 넘기면 해당 컴포넌트의 문서로 범위를 좁힙니다.
-
-    Args:
-        query: 찾고 있는 내용 (자연어).
-        cluster: 선택적 소프트 필터 — 해당 클러스터 태그가 붙은 문서만 검색하며, 같은
-            클러스터 결과가 비어 있으면 전체 범위로 대체 검색합니다.
-        component: 선택적 하드 필터 — 이 컴포넌트 태그가 붙은 문서만 검색합니다.
-        limit: 최대 결과 수 (1-20). 기본값 5.
-    """
-    return _search(query, "official", cluster, component, limit)
+    return _search(query, cluster, component, limit)
 
 
 @mcp.tool()

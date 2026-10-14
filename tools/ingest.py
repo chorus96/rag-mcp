@@ -15,7 +15,6 @@
   - official/ 아래의 .md 만 수집합니다. 그 밖의 문서는 건너뛰고 개수를 경고로 알립니다.
   - source 는 문서 디렉터리 기준 상대 경로(예: official/foo.md)이고, 포인트 ID와 오래된 청크 정리의
     기준입니다. 그래서 누가 색인하든 root 를 문서 디렉터리로 맞춰야 같은 ID가 나옵니다.
-  - 문서 유형(doc_type)은 맨 앞 폴더 이름입니다: official/ → "official".
 
 처리 과정
   1. 파일 탐색 (.md)
@@ -31,8 +30,7 @@
     ---
     # 본문 마크다운...
 
-  doc_type 은 front matter가 아니라 폴더로 정합니다 (_doc_type). front matter에 title 이 없으면 제목은
-  파일 이름에서 가져옵니다.
+  front matter에 title 이 없으면 제목은 파일 이름에서 가져옵니다.
 
 멱등성
   청크 ID가 (source, chunk index)에서 정해지므로 다시 실행해도 중복이 생기지 않습니다. 문서를
@@ -67,7 +65,7 @@ import vectorstore
 # 사전 필터링을 위해 키워드 인덱스를 만들 페이로드 필드. 이미 있는 인덱스를 다시 만드는 것은
 # vectorstore.ensure_collection에서 무시됩니다.
 # `source`는 질의 필터가 아니라 오래된 청크 정리 필터를 위해 색인합니다.
-_INDEXED_FIELDS = ("doc_type", "component", "cluster", "source")
+_INDEXED_FIELDS = ("component", "cluster", "source")
 
 # 수집기가 이해하는 파일 형식: 마크다운(front matter 인식, 섹션 청킹). 나머지는 모두 건너뜁니다.
 _SUPPORTED_SUFFIXES = (".md",)
@@ -173,17 +171,8 @@ def _chunk_document(body: str) -> list[str]:
     return [c for c in chunks if c] or _chunk(body, CHUNK_SIZE, CHUNK_OVERLAP)
 
 
-# 수집하는 문서 디렉터리의 폴더. 수집은 이 폴더 아래만 하고, 폴더 이름이 곧 문서 유형입니다.
+# 수집하는 문서 디렉터리의 폴더. 수집은 이 폴더 아래만 합니다.
 _STAGE_DIRS = ("official",)
-
-
-def _doc_type(file: Path, root: Path) -> str:
-    """문서 유형 = 문서 디렉터리 기준 맨 앞 폴더 이름 ("official").
-
-    front matter의 type 은 쓰지 않습니다. official/ 밖의 파일은 수집되지 않지만, 직접 호출되면 "unknown"입니다.
-    """
-    top = file.relative_to(root).parts[0]
-    return top if top in _STAGE_DIRS else "unknown"
 
 
 # --- 임베딩과 Qdrant 쓰기 -----------------------------------------------------
@@ -276,7 +265,7 @@ def ingest_file(client: QdrantClient, file: Path, root: Path, *, ensure: bool = 
                 recreate: bool = False) -> int:
     """파일 하나를 색인하고 저장한 청크 수를 반환합니다 (건너뛰면 0).
 
-    `root`는 문서 디렉터리입니다. source(문서 경로)와 doc_type을 여기서 정하므로, 같은 파일은
+    `root`는 문서 디렉터리입니다. source(문서 경로)를 여기서 정하므로, 같은 파일은
     언제 수집하든 같은 포인트 ID를 갖습니다. `ensure`가 참이면 컬렉션이
     없을 때 만들고, `recreate`가 참이면 기존 컬렉션을 지우고 새로 만듭니다.
     """
@@ -286,7 +275,6 @@ def ingest_file(client: QdrantClient, file: Path, root: Path, *, ensure: bool = 
         log.warning("skipping empty file %s", file)
         return 0
 
-    doc_type = _doc_type(file, root)
     source = str(file.relative_to(root)).replace(os.sep, "/")
     title = meta.get("title") or file.stem
     tags = meta.get("tags") or []
@@ -306,7 +294,6 @@ def ingest_file(client: QdrantClient, file: Path, root: Path, *, ensure: bool = 
             vector=vectorstore.named_vectors(d, s),
             payload={
                 "text": chunk,
-                "doc_type": doc_type,
                 "title": title,
                 "source": source,
                 "tags": tags,
@@ -318,7 +305,7 @@ def ingest_file(client: QdrantClient, file: Path, root: Path, *, ensure: bool = 
     ]
     _upsert_points(client, points)
     _delete_orphan_chunks(client, source, len(points))
-    log.info("ingested %s (%s, %d chunk(s))", source, doc_type, len(points))
+    log.info("ingested %s (%d chunk(s))", source, len(points))
     return len(points)
 
 

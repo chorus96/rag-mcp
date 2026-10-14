@@ -3,7 +3,6 @@
 확인하는 것
   - 파일 탐색: official/ 아래에서 .md 만 찾고 나머지 확장자(.pdf 등)는 무시. official/ 밖의 문서는
     수집하지 않고 건너뛴 개수를 경고로 알림
-  - 문서 유형: 맨 앞 폴더 이름(official). 하위 폴더와 front matter 의 type 은 영향을 주지 않음
   - 임베딩 배치: EMBED_BATCH_SIZE 단위로 요청하고, 벡터 순서가 청크 순서와 같음
   - 업서트 배치: 요청당 UPSERT_BATCH_SIZE 포인트를 넘지 않음
   - 오래된 청크 정리: 문서가 줄어들면 남은 뒷부분 청크만 지우고, 실패해도 수집을 멈추지 않음
@@ -46,20 +45,6 @@ def test_discover_files_only_official(tmp_path, caplog):
     # official/ 밖의 문서(draft/ 포함)는 수집하지 않고, 건너뛴 개수를 경고로 알립니다.
     assert found == ["official/a.md", "official/team-a/b.md"]
     assert "ignored 4 document(s)" in caplog.text
-
-
-# --- 문서 유형 -----------------------------------------------------------------
-
-def test_doc_type_is_top_folder(tmp_path):
-    def doc_type(rel):
-        return ingest._doc_type(tmp_path / rel, tmp_path)
-
-    # 문서 유형은 맨 앞 폴더 이름입니다. 하위 폴더나 front matter 는 영향을 주지 않습니다.
-    assert doc_type("official/a.md") == "official"
-    assert doc_type("official/team-a/a.md") == "official"
-    # official/ 밖은 수집되지 않지만, 직접 호출하면 unknown 입니다.
-    assert doc_type("draft/a.md") == "unknown"
-    assert doc_type("a.md") == "unknown"
 
 
 # --- 임베딩 배치 --------------------------------------------------------------
